@@ -2,20 +2,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Boxes,
-  Layers,
-  Factory,
-  Users,
-  Truck,
-  FileBarChart,
-  CheckSquare,
-  Settings,
-  Gem,
+  Home, LayoutDashboard, Boxes, Layers, Factory, Users, Truck,
+  FileBarChart, CheckSquare, Settings, Gem,
 } from "lucide-react";
 
 const NAV = [
-  { label: "Dashboard", href: "/", Icon: LayoutDashboard },
+  { label: "Home", href: "/", Icon: Home },
+  { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
   { label: "Inventory", href: "/inventory", Icon: Boxes },
   { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
   { label: "Production", href: "/production", Icon: Factory },
