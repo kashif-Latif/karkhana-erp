@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Pencil, X, Loader2 } from "lucide-react";
+import { Plus, Pencil, X, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export type Field = {
@@ -71,6 +71,20 @@ export default function MasterTab({
     if (res.error) {
       setError(res.error.message.toLowerCase().includes("row-level")
         ? "You don't have permission to do this." : res.error.message);
+      return;
+    }
+    setOpen(false); load();
+  }
+
+  async function remove() {
+    if (!supabase || !editing) return;
+    if (!window.confirm(`Delete this ${singular.toLowerCase()} permanently? This cannot be undone.`)) return;
+    setSaving(true); setError("");
+    const res = await supabase.from(table).delete().eq("id", editing);
+    setSaving(false);
+    if (res.error) {
+      const fk = res.error.code === "23503" || res.error.message.toLowerCase().includes("foreign key") || res.error.message.toLowerCase().includes("violat");
+      setError(fk ? `Can't delete — this ${singular.toLowerCase()} is used in other records. Set it to Inactive instead.` : res.error.message);
       return;
     }
     setOpen(false); load();
@@ -172,6 +186,12 @@ export default function MasterTab({
 
             {error && <p className="mt-3 text-[12.5px] font-medium text-danger">{error}</p>}
             <div className="mt-6 flex justify-end gap-2">
+              {editing && (
+                <button onClick={remove} disabled={saving}
+                  className="mr-auto flex items-center gap-1 rounded-xl2 border border-danger/40 px-3 py-2.5 text-[13px] font-semibold text-danger hover:bg-danger-soft disabled:opacity-50">
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
               <button onClick={() => setOpen(false)} disabled={saving}
                 className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
               <button onClick={save} disabled={saving}
