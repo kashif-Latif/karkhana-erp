@@ -3,8 +3,9 @@ import Link from "next/link";
 import {
   LayoutDashboard, Layers, Scissors, Shirt, Shrink, Flame, ShieldCheck,
   Truck, Users, Boxes, FileBarChart, CheckSquare, Settings, ArrowUpRight,
-  type LucideIcon,
+  BookOpen, type LucideIcon,
 } from "lucide-react";
+import { useProfile } from "@/lib/useProfile";
 
 const TINT: Record<string, string> = {
   salmon: "#F5D9CE", amber: "#F7EAD3", lavender: "#ECE1F6",
@@ -49,10 +50,14 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 
 export default function Home() {
+  const profile = useProfile();
+  const firstName = profile?.name ? profile.name.split(" ")[0] : "";
   return (
     <div className="px-6 py-8">
       <header className="mb-8">
-        <h1 className="text-[26px] font-extrabold tracking-tight text-ink">Welcome back 👋</h1>
+        <h1 className="text-[26px] font-extrabold tracking-tight text-ink">
+          Welcome back{firstName ? `, ${firstName}` : ""} 👋
+        </h1>
         <p className="mt-1 text-[14px] text-muted">Choose an area to work in.</p>
       </header>
 
@@ -75,8 +80,9 @@ export default function Home() {
         </Group>
 
         <Group title="Manage">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             <Tile href="/suppliers" label="Suppliers" Icon={Truck} accent="ink" />
+            <Tile href="/catalog" label="Catalog" Icon={BookOpen} accent="ink" />
             <Tile href="/employees" label="Employees" Icon={Users} accent="ink" />
             <Tile href="/inventory" label="Inventory" Icon={Boxes} accent="ink" />
             <Tile href="/reports" label="Reports" Icon={FileBarChart} accent="ink" />
