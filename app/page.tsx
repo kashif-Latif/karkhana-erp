@@ -6,6 +6,7 @@ import {
   BookOpen, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
+import Clock from "@/components/Clock";
 
 const TINT: Record<string, string> = {
   salmon: "#F5D9CE", amber: "#F7EAD3", lavender: "#ECE1F6",
@@ -54,11 +55,14 @@ export default function Home() {
   const firstName = profile?.name ? profile.name.split(" ")[0] : "";
   return (
     <div className="px-6 py-8">
-      <header className="mb-8">
-        <h1 className="text-[26px] font-extrabold tracking-tight text-ink">
-          Welcome back{firstName ? `, ${firstName}` : ""} 👋
-        </h1>
-        <p className="mt-1 text-[14px] text-muted">Choose an area to work in.</p>
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-[26px] font-extrabold tracking-tight text-ink">
+            Welcome back{firstName ? `, ${firstName}` : ""} 👋
+          </h1>
+          <p className="mt-1 text-[14px] text-muted">Choose an area to work in.</p>
+        </div>
+        <Clock />
       </header>
 
       <div className="space-y-8">

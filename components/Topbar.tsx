@@ -1,5 +1,6 @@
 "use client";
 import { Search, Bell, Plus } from "lucide-react";
+import Clock from "./Clock";
 
 export default function Topbar({
   title,
@@ -15,6 +16,7 @@ export default function Topbar({
         {subtitle && <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>}
       </div>
       <div className="flex items-center gap-2.5">
+        <Clock />
         <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-3.5 py-2">
           <Search size={15} className="text-hint" />
           <input
