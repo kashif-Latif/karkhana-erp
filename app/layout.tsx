@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AppFrame from "@/components/AppFrame";
 
 export const metadata: Metadata = {
   title: "Karkhana ERP — Head Office",
@@ -14,7 +15,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Font loaded at runtime (no build-time fetch) with graceful fallback */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
@@ -22,7 +22,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <AppFrame>{children}</AppFrame>
+      </body>
     </html>
   );
 }
