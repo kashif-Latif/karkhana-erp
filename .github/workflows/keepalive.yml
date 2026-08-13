@@ -1,0 +1,24 @@
+name: Supabase keep-alive
+
+# Pings the database so the free Supabase project registers activity and
+# never auto-pauses. Runs on a schedule, and can be run manually to test.
+on:
+  schedule:
+    - cron: "0 6 */2 * *"   # every 2 days at 06:00 UTC (~11:00 AM PKT)
+  workflow_dispatch: {}       # adds a "Run workflow" button in the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health_check
+        run: |
+          echo "Pinging Supabase health_check ..."
+          curl -fsS -X POST \
+            "https://ozkhkhlwjblzgwmjbdde.supabase.co/rest/v1/rpc/health_check" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{}"
+          echo ""
+          echo "Keep-alive ping complete."
