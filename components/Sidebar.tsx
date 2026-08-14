@@ -6,6 +6,8 @@ import {
   FileBarChart, CheckSquare, Settings, Gem,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
+import { usePermissions } from "@/lib/usePermissions";
+import { ROUTE_PERMS } from "@/lib/access";
 
 const NAV = [
   { label: "Home", href: "/", Icon: Home },
@@ -24,9 +26,12 @@ const NAV = [
 export default function Sidebar() {
   const pathname = usePathname();
   const profile = useProfile();
+  const { ready, can } = usePermissions();
   const name = profile?.name || "…";
   const role = profile ? (profile.isSuperAdmin ? "Super Admin" : "User") : "";
   const initial = (profile?.name || "?").charAt(0).toUpperCase();
+
+  const items = NAV.filter((n) => can(ROUTE_PERMS[n.href] ?? null));
 
   return (
     <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-surface md:flex">
@@ -41,28 +46,30 @@ export default function Sidebar() {
       </Link>
 
       <nav className="flex-1 space-y-1 px-3">
-        {NAV.map(({ label, href, Icon, badge }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center gap-3 rounded-xl2 px-3.5 py-2.5 text-[14px] transition ${
-                active
-                  ? "bg-salmon-soft font-semibold text-ink"
-                  : "text-muted hover:bg-panel hover:text-ink"
-              }`}
-            >
-              <Icon size={18} strokeWidth={2} />
-              <span className="flex-1">{label}</span>
-              {badge && (
-                <span className="rounded-full bg-ink px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  {badge}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+        {!ready ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="mx-1 my-1 h-9 animate-pulse rounded-xl2 bg-panel/70" />
+          ))
+        ) : (
+          items.map(({ label, href, Icon, badge }) => {
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`flex items-center gap-3 rounded-xl2 px-3.5 py-2.5 text-[14px] transition ${
+                  active ? "bg-salmon-soft font-semibold text-ink" : "text-muted hover:bg-panel hover:text-ink"
+                }`}
+              >
+                <Icon size={18} strokeWidth={2} />
+                <span className="flex-1">{label}</span>
+                {badge && (
+                  <span className="rounded-full bg-ink px-1.5 py-0.5 text-[10px] font-bold text-white">{badge}</span>
+                )}
+              </Link>
+            );
+          })
+        )}
       </nav>
 
       <div className="m-3 rounded-xl2 bg-cream p-3">
