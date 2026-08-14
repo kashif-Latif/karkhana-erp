@@ -6,14 +6,21 @@ import { supabase } from "@/lib/supabase";
 
 type Role = { id: string; name: string; code: string };
 type AppUser = Record<string, unknown>;
+type NewForm = { full_name: string; email: string; password: string; role_id: string };
+const EMPTY_NEW: NewForm = { full_name: "", email: "", password: "", role_id: "" };
 
 export default function UsersTab({ canManage }: { canManage: boolean }) {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
   const [error, setError] = useState("");
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [nf, setNf] = useState<NewForm>({ ...EMPTY_NEW });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createdMsg, setCreatedMsg] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) { setLoading(false); return; }
@@ -47,17 +54,49 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
     load();
   }
 
+  function openAdd() { setNf({ ...EMPTY_NEW }); setCreateError(""); setCreatedMsg(""); setShowAdd(true); }
+
+  async function createUser() {
+    if (!supabase) return;
+    if (!nf.email.trim() || !nf.password) { setCreateError("Email and password are required."); return; }
+    if (nf.password.length < 6) { setCreateError("Password must be at least 6 characters."); return; }
+    setCreating(true); setCreateError("");
+    const { data, error } = await supabase.functions.invoke("create-user", {
+      body: { full_name: nf.full_name, email: nf.email, password: nf.password, role_id: nf.role_id || null },
+    });
+    setCreating(false);
+
+    if (error) {
+      let msg = error.message || "Could not create the account.";
+      try {
+        const ctx = (error as unknown as { context?: Response }).context;
+        if (ctx && typeof ctx.json === "function") { const b = await ctx.json(); if (b?.error) msg = b.error; }
+      } catch { /* keep msg */ }
+      if (/fetch|not found|failed to send|404/i.test(msg)) {
+        msg = "The account-creation function isn't deployed yet. Deploy 'create-user' once (steps I gave you), then try again.";
+      }
+      setCreateError(msg);
+      return;
+    }
+    if ((data as { error?: string })?.error) { setCreateError((data as { error: string }).error); return; }
+
+    setCreatedMsg(`Account created for ${nf.email.trim()}. Share the email + password with them.`);
+    setNf({ ...EMPTY_NEW });
+    load();
+  }
+
   const roleOf = (u: AppUser): string => {
     const urs = u.user_roles as { role_id?: string }[] | undefined;
     return urs && urs.length > 0 ? (urs[0].role_id ?? "") : "";
   };
+  const nSet = (k: keyof NewForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setNf((f) => ({ ...f, [k]: e.target.value }));
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-[13px] text-muted">People who can log in to the system.</p>
         {canManage && (
-          <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
+          <button onClick={openAdd} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
             <UserPlus size={16} /> Add account
           </button>
         )}
@@ -141,7 +180,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
       <p className="mt-3 text-[12px] text-muted">{users.length} account(s)</p>
 
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => setShowAdd(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !creating && setShowAdd(false)}>
           <div className="w-full max-w-lg rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -150,26 +189,46 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
               </div>
               <button onClick={() => setShowAdd(false)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button>
             </div>
-            <p className="mb-4 text-[13px] leading-relaxed text-ink/80">
-              For security, creating a login uses a protected key that must never live in the browser — so for now you create the login in Supabase, and it appears here instantly.
-            </p>
-            <ol className="space-y-3 text-[13px] text-ink/85">
-              <li className="flex gap-2.5"><span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white">1</span>
-                <span>Open <b>Supabase → Authentication → Users → Add user → Create new user</b>. Enter their <b>email</b> and a <b>password</b>.</span></li>
-              <li className="flex gap-2.5"><span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white">2</span>
-                <span>They appear in this list <b>automatically</b>. Set their <b>role</b> and <b>status</b> right here.</span></li>
-              <li className="flex gap-2.5"><span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white">3</span>
-                <span>Share the email + password with them — they log in and see only what their role allows.</span></li>
-            </ol>
-            <div className="mt-5 rounded-xl2 bg-panel px-3.5 py-2.5 text-[12px] text-muted">
-              Coming next: one-click account creation right here, through a secure server-side function.
-            </div>
-            <div className="mt-5 flex justify-end">
-              <button onClick={() => { setShowAdd(false); load(); }} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Got it — refresh list</button>
-            </div>
+
+            {createdMsg ? (
+              <>
+                <div className="rounded-xl2 bg-success-soft px-4 py-3 text-[13px] font-medium text-[#166534]">{createdMsg}</div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button onClick={() => { setCreatedMsg(""); }} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Add another</button>
+                  <button onClick={() => setShowAdd(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2"><Lbl label="Full name"><input value={nf.full_name} onChange={nSet("full_name")} placeholder="e.g. Bilal Khan" className={inp} /></Lbl></div>
+                  <div className="sm:col-span-2"><Lbl label="Email *"><input value={nf.email} onChange={nSet("email")} placeholder="name@factory.com" className={inp} /></Lbl></div>
+                  <Lbl label="Temporary password *"><input value={nf.password} onChange={nSet("password")} placeholder="min 6 characters" className={inp} /></Lbl>
+                  <Lbl label="Role">
+                    <select value={nf.role_id} onChange={nSet("role_id")} className={inp}>
+                      <option value="">No role (set later)</option>
+                      {roles.filter((r) => r.code !== "super_admin").map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </Lbl>
+                </div>
+                <p className="mt-2 text-[11.5px] text-hint">You set a temporary password and share it with them. They see only what their role allows.</p>
+                {createError && <p className="mt-3 text-[12.5px] font-medium text-danger">{createError}</p>}
+                <div className="mt-5 flex justify-end gap-2">
+                  <button onClick={() => setShowAdd(false)} disabled={creating} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+                  <button onClick={createUser} disabled={creating} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+                    {creating && <Loader2 size={15} className="animate-spin" />}Create account
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+const inp = "w-full rounded-xl2 border border-line bg-canvas px-3.5 py-2.5 text-[14px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
+function Lbl({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">{label}</span>{children}</label>;
 }
