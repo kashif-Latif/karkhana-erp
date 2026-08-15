@@ -6,7 +6,7 @@ import Link from "next/link";
 import Sidebar from "./Sidebar";
 import SetPassword from "./SetPassword";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { usePermissions } from "@/lib/usePermissions";
+import { PermissionsProvider, usePermissions } from "@/lib/usePermissions";
 import { requiredFor } from "@/lib/access";
 
 function AccessRestricted() {
@@ -20,39 +20,49 @@ function AccessRestricted() {
   );
 }
 
+// Inside the provider: has access to the shared permissions.
+function FrameContent({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { ready, can } = usePermissions();
+  const allowed = can(requiredFor(pathname));
+  return (
+    <div className="flex min-h-screen bg-canvas">
+      <Sidebar />
+      <main className="min-w-0 flex-1">
+        {!ready ? null : allowed ? children : <AccessRestricted />}
+      </main>
+    </div>
+  );
+}
+
 export default function AppFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isLogin = pathname === "/login";
   const [authReady, setAuthReady] = useState(false);
   const [mustChange, setMustChange] = useState<boolean | null>(null);
-  const { ready: permsReady, can } = usePermissions();
 
   useEffect(() => {
     if (isLogin) { setAuthReady(true); return; }
     if (!isSupabaseConfigured || !supabase) { setAuthReady(true); setMustChange(false); return; }
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) { router.replace("/login"); return; }
-      setAuthReady(true);
       const { data: prof } = await supabase!
         .from("app_users").select("must_change_password").eq("id", data.session.user.id).maybeSingle();
       setMustChange(!!prof?.must_change_password);
+      setAuthReady(true);
     });
   }, [isLogin, router]);
 
   if (isLogin) return <>{children}</>;
   if (!authReady) return null;
-  if (mustChange === null) return null;                       // still checking
+  if (mustChange === null) return null;
   if (mustChange) return <SetPassword onDone={() => setMustChange(false)} />;
 
-  const allowed = can(requiredFor(pathname));
-
+  // Only now (fully authenticated) do we load permissions — one shared copy.
   return (
-    <div className="flex min-h-screen bg-canvas">
-      <Sidebar />
-      <main className="min-w-0 flex-1">
-        {!permsReady ? null : allowed ? children : <AccessRestricted />}
-      </main>
-    </div>
+    <PermissionsProvider>
+      <FrameContent>{children}</FrameContent>
+    </PermissionsProvider>
   );
 }
