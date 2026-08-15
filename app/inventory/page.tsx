@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { Boxes, PackagePlus, Loader2, FileText } from "lucide-react";
+import { Boxes, PackagePlus, Loader2, FileText, Ban } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -24,6 +24,8 @@ export default function InventoryPage() {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [grns, setGrns] = useState<GrnRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [canVoid, setCanVoid] = useState(false);
+  const [voiding, setVoiding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!supabase) { setLoading(false); return; }
@@ -31,7 +33,7 @@ export default function InventoryPage() {
     const [bal, items, g] = await Promise.all([
       supabase.from("stock_balances").select("item_id, balance"),
       supabase.from("material_items").select("id, code, name, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name)"),
-      supabase.from("grns").select("id, grn_number, received_at, total, suppliers(company_name)").order("created_at", { ascending: false }).limit(15),
+      supabase.from("grns").select("id, grn_number, received_at, total, status, suppliers(company_name)").order("created_at", { ascending: false }).limit(15),
     ]);
     const meta = new Map<string, { label: string; unit: string }>();
     ((items.data as unknown as Record<string, unknown>[]) ?? []).forEach((it) => {
@@ -45,9 +47,22 @@ export default function InventoryPage() {
       .sort((a, b) => a.label.localeCompare(b.label));
     setStock(rows);
     setGrns((g.data as unknown as GrnRow[]) ?? []);
+    const { data: cv } = await supabase.rpc("has_permission", { p_permission_code: "inventory.adjust" });
+    setCanVoid(!!cv);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  async function voidGrn(id: string, num: string) {
+    if (!supabase) return;
+    const reason = window.prompt(`Void ${num}?\n\nThis reverses the stock it added and the payable it created. The record is kept and marked "voided".\n\nReason (optional):`);
+    if (reason === null) return;
+    setVoiding(id);
+    const { error } = await supabase.rpc("void_grn", { p_grn_id: id, p_reason: reason });
+    setVoiding(null);
+    if (error) { window.alert(error.message); return; }
+    load();
+  }
 
   return (
     <>
@@ -111,17 +126,30 @@ export default function InventoryPage() {
                       <th className="px-5 py-2.5 font-semibold">Supplier</th>
                       <th className="px-5 py-2.5 font-semibold">Date</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Total</th>
+                      <th className="px-5 py-2.5" />
                     </tr>
                   </thead>
                   <tbody>
-                    {grns.map((g) => (
+                    {grns.map((g) => {
+                      const voided = (g.status as string) === "voided";
+                      return (
                       <tr key={g.id as string} className="border-b border-line/60 last:border-0 hover:bg-canvas/60">
                         <td className="px-5 py-2.5 font-mono text-[12px] tnum text-muted">{g.grn_number as string}</td>
                         <td className="px-5 py-2.5 text-ink/80">{(g.suppliers as { company_name?: string } | null)?.company_name || "—"}</td>
                         <td className="px-5 py-2.5 text-ink/70">{when(g.received_at as string)}</td>
-                        <td className="px-5 py-2.5 text-right tnum font-semibold text-ink">{money(g.total as number)}</td>
+                        <td className={`px-5 py-2.5 text-right tnum font-semibold ${voided ? "text-hint line-through" : "text-ink"}`}>{money(g.total as number)}</td>
+                        <td className="px-5 py-2.5 text-right">
+                          {voided ? (
+                            <span className="rounded-full bg-panel px-2.5 py-0.5 text-[11px] font-semibold text-muted">Voided</span>
+                          ) : canVoid ? (
+                            <button onClick={() => voidGrn(g.id as string, g.grn_number as string)} disabled={voiding === (g.id as string)}
+                              className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft disabled:opacity-50">
+                              {voiding === (g.id as string) ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Void
+                            </button>
+                          ) : null}
+                        </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               )}
