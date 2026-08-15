@@ -35,7 +35,7 @@ export default function Sidebar() {
     router.replace("/login");
   }
   const name = profile?.name || "…";
-  const role = profile ? (profile.isSuperAdmin ? "Super Admin" : "User") : "";
+  const role = profile?.roleName || "";
   const initial = (profile?.name || "?").charAt(0).toUpperCase();
 
   const items = NAV.filter((n) => can(ROUTE_PERMS[n.href] ?? null));
