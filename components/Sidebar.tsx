@@ -1,13 +1,14 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Home, LayoutDashboard, Boxes, Layers, BookOpen, Factory, Users, Truck,
-  FileBarChart, CheckSquare, Settings, Gem,
+  FileBarChart, CheckSquare, Settings, Gem, LogOut,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
 import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
+import { supabase } from "@/lib/supabase";
 
 const NAV = [
   { label: "Home", href: "/", Icon: Home },
@@ -25,8 +26,14 @@ const NAV = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const profile = useProfile();
   const { ready, can } = usePermissions();
+
+  async function logout() {
+    if (supabase) await supabase.auth.signOut();
+    router.replace("/login");
+  }
   const name = profile?.name || "…";
   const role = profile ? (profile.isSuperAdmin ? "Super Admin" : "User") : "";
   const initial = (profile?.name || "?").charAt(0).toUpperCase();
@@ -74,13 +81,17 @@ export default function Sidebar() {
 
       <div className="m-3 rounded-xl2 bg-cream p-3">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-salmon-strong text-[13px] font-bold text-white">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-salmon-strong text-[13px] font-bold text-white">
             {initial}
           </span>
-          <div className="leading-tight">
-            <div className="text-[13px] font-semibold">{name}</div>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-[13px] font-semibold">{name}</div>
             <div className="text-[11px] text-muted">{role}</div>
           </div>
+          <button onClick={logout} title="Log out"
+            className="shrink-0 rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-ink">
+            <LogOut size={16} />
+          </button>
         </div>
       </div>
     </aside>

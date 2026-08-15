@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, UserPlus, ShieldCheck, X, KeyRound, Users } from "lucide-react";
+import { Loader2, UserPlus, ShieldCheck, X, KeyRound, Users, Trash2 } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase } from "@/lib/supabase";
 
@@ -15,6 +15,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [meId, setMeId] = useState<string | null>(null);
 
   const [showAdd, setShowAdd] = useState(false);
   const [nf, setNf] = useState<NewForm>({ ...EMPTY_NEW });
@@ -33,6 +34,8 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
     ]);
     setUsers((u.data as unknown as AppUser[]) ?? []);
     setRoles((r.data as unknown as Role[]) ?? []);
+    const { data: au } = await supabase.auth.getUser();
+    setMeId(au?.user?.id ?? null);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -51,6 +54,21 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
     const { error } = await supabase.from("app_users").update({ status }).eq("id", userId);
     setBusy(null);
     if (error) { setError(error.message.toLowerCase().includes("row-level") ? "You don't have permission to do this." : error.message); return; }
+    load();
+  }
+
+  async function removeUser(userId: string, name: string) {
+    if (!supabase) return;
+    if (!window.confirm(`Remove ${name}'s account permanently? They will no longer be able to log in. This cannot be undone.`)) return;
+    setBusy(userId); setError("");
+    const { data, error } = await supabase.functions.invoke("create-user", { body: { action: "delete", user_id: userId } });
+    setBusy(null);
+    if (error) {
+      let msg = error.message || "Could not remove the account.";
+      try { const ctx = (error as unknown as { context?: Response }).context; if (ctx && typeof ctx.json === "function") { const b = await ctx.json(); if (b?.error) msg = b.error; } } catch { /* keep msg */ }
+      setError(msg); return;
+    }
+    if ((data as { error?: string })?.error) { setError((data as { error: string }).error); return; }
     load();
   }
 
@@ -121,6 +139,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                 <th className="px-5 py-3 font-semibold">Email</th>
                 <th className="px-5 py-3 font-semibold">Role</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -168,6 +187,14 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                         <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${u.status === "active" ? "bg-success-soft text-[#166534]" : "bg-panel text-muted"}`}>
                           {(u.status as string) || "active"}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      {canManage && !isSA && id !== meId && (
+                        <button onClick={() => removeUser(id, u.full_name as string)} disabled={busy === id}
+                          className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft disabled:opacity-50">
+                          <Trash2 size={13} /> Remove
+                        </button>
                       )}
                     </td>
                   </tr>

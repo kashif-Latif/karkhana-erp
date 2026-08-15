@@ -1,9 +1,13 @@
 // =====================================================================
 //  Edge Function: create-user
-//  Creates a login account from inside the app — SECURELY.
-//  The service-role key lives ONLY here on Supabase's servers, never
-//  in the browser. Before creating anyone, it checks that the CALLER
-//  is a signed-in admin with the 'users.manage' permission.
+//  Manages login accounts from inside the app — SECURELY.
+//  The service-role key lives ONLY here on Supabase's servers, never in
+//  the browser. Every call first checks the CALLER is a signed-in admin
+//  with the 'users.manage' permission.
+//
+//  Actions:
+//    { action: "create", email, password, full_name, role_id }
+//    { action: "delete", user_id }
 //
 //  Auto-provided env vars (you do NOT set these):
 //    SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
@@ -15,7 +19,6 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 }
@@ -32,14 +35,38 @@ Deno.serve(async (req) => {
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // 1) Act as the caller, and check they are allowed to manage users.
+    // Caller context — to check permission and identity.
     const caller = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
     const { data: allowed, error: permErr } = await caller.rpc("has_permission", { p_permission_code: "users.manage" });
     if (permErr) return json({ error: permErr.message }, 400);
-    if (!allowed) return json({ error: "You do not have permission to create users." }, 403);
+    if (!allowed) return json({ error: "You do not have permission to manage users." }, 403);
 
-    // 2) Read & validate input.
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: meData } = await caller.auth.getUser(jwt);
+    const callerId = meData?.user?.id ?? null;
+
+    // Admin (service-role) client — the only place with elevated rights.
+    const admin = createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } });
+
     const body = await req.json().catch(() => ({}));
+    const action = String(body.action ?? "create");
+
+    // ------------------------------- DELETE -------------------------------
+    if (action === "delete") {
+      const userId = String(body.user_id ?? "");
+      if (!userId) return json({ error: "user_id is required." }, 400);
+      if (userId === callerId) return json({ error: "You cannot remove your own account." }, 400);
+
+      const { data: target } = await admin.from("app_users").select("is_super_admin").eq("id", userId).maybeSingle();
+      if (target?.is_super_admin) return json({ error: "You cannot remove a Super Admin account." }, 400);
+
+      await admin.from("user_roles").delete().eq("user_id", userId);
+      const { error: delErr } = await admin.auth.admin.deleteUser(userId); // cascades app_users
+      if (delErr) return json({ error: delErr.message }, 400);
+      return json({ ok: true }, 200);
+    }
+
+    // ------------------------------- CREATE -------------------------------
     const email = String(body.email ?? "").trim().toLowerCase();
     const password = String(body.password ?? "");
     const fullName = String(body.full_name ?? "").trim() || email.split("@")[0];
@@ -47,27 +74,19 @@ Deno.serve(async (req) => {
     if (!email || !password) return json({ error: "Email and password are required." }, 400);
     if (password.length < 6) return json({ error: "Password must be at least 6 characters." }, 400);
 
-    // 3) Create the login using the service role (admin) client.
-    const admin = createClient(url, service, { auth: { autoRefreshToken: false, persistSession: false } });
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName },
+      email, password, email_confirm: true, user_metadata: { full_name: fullName },
     });
     if (createErr) return json({ error: createErr.message }, 400);
 
     const newId = created.user?.id;
     if (newId) {
-      // ensure the profile exists with the right name (trigger also does this)
       await admin.from("app_users").upsert({ id: newId, full_name: fullName, email }, { onConflict: "id" });
-      // assign the chosen role (single role)
       if (roleId) {
         await admin.from("user_roles").delete().eq("user_id", newId);
         await admin.from("user_roles").insert({ user_id: newId, role_id: roleId });
       }
     }
-
     return json({ ok: true, user_id: newId }, 200);
   } catch (e) {
     return json({ error: (e as Error)?.message ?? "Unexpected error" }, 500);
