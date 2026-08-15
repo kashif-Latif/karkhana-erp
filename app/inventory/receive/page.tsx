@@ -17,6 +17,7 @@ type Line = { group_id: string; category_id: string; color_id: string; size_id: 
 const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "" };
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
+function toDateInput(iso: string) { const d = new Date(iso); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 const fmt = (n: number) => "Rs " + (n || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 });
 
 export default function ReceiveStock() {
@@ -46,6 +47,7 @@ export default function ReceiveStock() {
   const [supError, setSupError] = useState("");
 
   const [canPay, setCanPay] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [postedTotal, setPostedTotal] = useState<number | null>(null);
   const [payMethod, setPayMethod] = useState("cash");
   const [payAmount, setPayAmount] = useState("");
@@ -67,6 +69,36 @@ export default function ReceiveStock() {
     supabase.rpc("has_permission", { p_permission_code: "grn.create" }).then(({ data }) => setCanReceive(!!data));
     supabase.rpc("has_permission", { p_permission_code: "suppliers.manage" }).then(({ data }) => setCanAddSupplier(!!data));
     supabase.rpc("has_permission", { p_permission_code: "payments.manage" }).then(({ data }) => setCanPay(!!data));
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const id = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("edit") : null;
+    if (!id) return;
+    setEditId(id);
+    (async () => {
+      const { data: h } = await supabase!.from("grns").select("supplier_id, received_at, freight, discount, note, status").eq("id", id).single();
+      if (h) {
+        const hh = h as Record<string, unknown>;
+        if ((hh.status as string) === "voided") { setError("This GRN is voided and can't be edited."); return; }
+        setSupplierId((hh.supplier_id as string) || "");
+        if (hh.received_at) setReceivedAt(toDateInput(hh.received_at as string));
+        setFreight(hh.freight ? String(Number(hh.freight)) : "");
+        setDiscount(hh.discount ? String(Number(hh.discount)) : "");
+        setNote((hh.note as string) || "");
+      }
+      const { data: ls } = await supabase!.from("grn_lines")
+        .select("quantity, rate, material_items(group_id, category_id, color_id, size_id, unit_id)").eq("grn_id", id);
+      const mapped = ((ls as unknown as Record<string, unknown>[]) ?? []).map((r) => {
+        const mi = (r.material_items as Record<string, unknown>) || {};
+        return {
+          group_id: (mi.group_id as string) || "", category_id: (mi.category_id as string) || "",
+          color_id: (mi.color_id as string) || "", size_id: (mi.size_id as string) || "",
+          unit_id: (mi.unit_id as string) || "", quantity: String(Number(r.quantity)), rate: String(Number(r.rate)),
+        } as Line;
+      });
+      if (mapped.length) setLines(mapped);
+    })();
   }, []);
 
   function openSupModal() { setSupForm({ company_name: "", contact_person: "", phone: "" }); setSupError(""); setShowSup(true); }
@@ -134,6 +166,16 @@ export default function ReceiveStock() {
       group_id: l.group_id, category_id: l.category_id || null, color_id: l.color_id || null,
       size_id: l.size_id || null, unit_id: l.unit_id, quantity: parseFloat(l.quantity), rate: parseFloat(l.rate),
     }));
+    if (editId) {
+      const { error } = await supabase.rpc("edit_grn", {
+        p_grn_id: editId, p_supplier_id: supplierId, p_received_at: dateToISO(receivedAt),
+        p_freight: parseFloat(freight) || 0, p_discount: parseFloat(discount) || 0, p_note: note, p_lines,
+      });
+      setSaving(false);
+      if (error) { setError(error.message); return; }
+      router.push("/inventory");
+      return;
+    }
     const { error } = await supabase.rpc("post_grn_smart", {
       p_supplier_id: supplierId, p_received_at: dateToISO(receivedAt),
       p_freight: parseFloat(freight) || 0, p_discount: parseFloat(discount) || 0, p_note: note, p_lines,
@@ -159,7 +201,7 @@ export default function ReceiveStock() {
 
   return (
     <>
-      <Topbar title="Receive Stock" subtitle="Goods Receipt Note (GRN)" />
+      <Topbar title={editId ? "Edit GRN" : "Receive Stock"} subtitle="Goods Receipt Note (GRN)" />
       <div className="px-6 pb-12">
         <Link href="/inventory" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-ink"><ArrowLeft size={15} /> Back to Inventory</Link>
 
@@ -287,7 +329,7 @@ export default function ReceiveStock() {
                 </div>
                 <label className="mt-4 block"><span className="mb-1 block text-[12px] font-medium text-muted">Note (optional)</span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. invoice #, vehicle…" className={inp} /></label>
                 {error && <p className="mt-3 text-[12.5px] font-medium text-danger">{error}</p>}
-                <button onClick={post} disabled={saving} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl2 bg-ink px-5 py-3 text-[14px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={16} className="animate-spin" />} Post receipt</button>
+                <button onClick={post} disabled={saving} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl2 bg-ink px-5 py-3 text-[14px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={16} className="animate-spin" />} {editId ? "Save changes" : "Post receipt"}</button>
                 <p className="mt-2 text-center text-[11px] text-hint">Adds stock to inventory and records what you owe the supplier.</p>
               </div>
             </div>
@@ -302,8 +344,8 @@ export default function ReceiveStock() {
             <p className="mb-4 text-[13px] text-muted">Stock added and the supplier payable recorded. Was this paid now, or on credit?</p>
 
             <span className="mb-1 block text-[12px] font-medium text-muted">Payment method</span>
-            <div className="grid grid-cols-4 gap-2">
-              {[["cash","Cash"],["online","Online"],["bank","Bank"],["cheque","Cheque"]].map(([v,l]) => (
+            <div className="grid grid-cols-3 gap-2">
+              {[["cash","Cash"],["bank","Online / Bank"],["cheque","Cheque"]].map(([v,l]) => (
                 <button key={v} onClick={() => setPayMethod(v)} className={`rounded-xl2 border px-2 py-2 text-[12.5px] font-semibold ${payMethod===v ? "border-ink bg-ink text-white" : "border-line text-ink/70 hover:bg-panel"}`}>{l}</button>
               ))}
             </div>

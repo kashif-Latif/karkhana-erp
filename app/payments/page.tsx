@@ -185,7 +185,7 @@ export default function Payments() {
                 <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className={inp} /></label>
               <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Method</span>
                 <select value={method} onChange={(e) => setMethod(e.target.value)} className={inp}>
-                  <option value="cash">Cash</option><option value="online">Online</option><option value="bank">Bank</option><option value="cheque">Cheque</option>
+                  <option value="cash">Cash</option><option value="bank">Online / Bank</option><option value="cheque">Cheque</option>
                 </select></label>
               <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Date</span>
                 <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className={inp} /></label>

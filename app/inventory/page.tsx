@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { Boxes, PackagePlus, Loader2, FileText, Ban, Trash2, AlertTriangle, X } from "lucide-react";
+import { Boxes, PackagePlus, Loader2, FileText, Ban, AlertTriangle, X, Pencil } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -25,7 +25,6 @@ export default function InventoryPage() {
   const [grns, setGrns] = useState<GrnRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [canVoid, setCanVoid] = useState(false);
-  const [isSuper, setIsSuper] = useState(false);
   const [confirm, setConfirm] = useState<{ mode: "void" | "delete"; id: string; num: string } | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,8 +54,6 @@ export default function InventoryPage() {
     setGrns((g.data as unknown as GrnRow[]) ?? []);
     const { data: cv } = await supabase.rpc("has_permission", { p_permission_code: "inventory.adjust" });
     setCanVoid(!!cv);
-    const { data: su } = await supabase.rpc("is_super_admin");
-    setIsSuper(!!su);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -166,19 +163,20 @@ export default function InventoryPage() {
                         <td className={`px-5 py-2.5 text-right tnum font-semibold ${voided ? "text-hint line-through" : "text-ink"}`}>{money(g.total as number)}</td>
                         <td className="px-5 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            {voided && <span className="rounded-full bg-panel px-2.5 py-0.5 text-[11px] font-semibold text-muted">Voided</span>}
-                            {!voided && canVoid && (
-                              <button onClick={() => openConfirm("void", g.id as string, g.grn_number as string)}
-                                className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[12px] font-semibold text-ink/70 hover:bg-panel">
-                                <Ban size={12} /> Void
-                              </button>
-                            )}
-                            {isSuper && (
-                              <button onClick={() => openConfirm("delete", g.id as string, g.grn_number as string)}
-                                className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft">
-                                <Trash2 size={12} /> Delete
-                              </button>
-                            )}
+                            {voided ? (
+                              <span className="rounded-full bg-panel px-2.5 py-0.5 text-[11px] font-semibold text-muted">Voided</span>
+                            ) : canVoid ? (
+                              <>
+                                <Link href={`/inventory/receive?edit=${g.id}`}
+                                  className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[12px] font-semibold text-ink/70 hover:bg-panel">
+                                  <Pencil size={12} /> Edit
+                                </Link>
+                                <button onClick={() => openConfirm("void", g.id as string, g.grn_number as string)}
+                                  className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft">
+                                  <Ban size={12} /> Void
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
