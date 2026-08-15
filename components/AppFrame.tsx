@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 import Sidebar from "./Sidebar";
+import SetPassword from "./SetPassword";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 import { requiredFor } from "@/lib/access";
@@ -24,20 +25,25 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isLogin = pathname === "/login";
   const [authReady, setAuthReady] = useState(false);
+  const [mustChange, setMustChange] = useState<boolean | null>(null);
   const { ready: permsReady, can } = usePermissions();
 
-  // Auth gate for every page except /login.
   useEffect(() => {
     if (isLogin) { setAuthReady(true); return; }
-    if (!isSupabaseConfigured || !supabase) { setAuthReady(true); return; }
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) router.replace("/login");
-      else setAuthReady(true);
+    if (!isSupabaseConfigured || !supabase) { setAuthReady(true); setMustChange(false); return; }
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) { router.replace("/login"); return; }
+      setAuthReady(true);
+      const { data: prof } = await supabase!
+        .from("app_users").select("must_change_password").eq("id", data.session.user.id).maybeSingle();
+      setMustChange(!!prof?.must_change_password);
     });
   }, [isLogin, router]);
 
   if (isLogin) return <>{children}</>;
   if (!authReady) return null;
+  if (mustChange === null) return null;                       // still checking
+  if (mustChange) return <SetPassword onDone={() => setMustChange(false)} />;
 
   const allowed = can(requiredFor(pathname));
 

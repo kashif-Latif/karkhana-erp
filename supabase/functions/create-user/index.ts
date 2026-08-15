@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
 
     const newId = created.user?.id;
     if (newId) {
-      await admin.from("app_users").upsert({ id: newId, full_name: fullName, email }, { onConflict: "id" });
+      await admin.from("app_users").upsert({ id: newId, full_name: fullName, email, must_change_password: true }, { onConflict: "id" });
       if (roleId) {
         await admin.from("user_roles").delete().eq("user_id", newId);
         await admin.from("user_roles").insert({ user_id: newId, role_id: roleId });
