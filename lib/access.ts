@@ -10,6 +10,7 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/production": ["production.view", "production.entry", "production.approve", "production.manage"],
   "/employees": ["employees.manage"],
   "/suppliers": ["suppliers.manage"],
+  "/payments": ["payments.manage"],
   "/reports": ["reports.view"],
   "/approvals": ["inventory.approve", "production.approve", "grn.approve"],
   "/administration": ["users.manage", "roles.manage"],

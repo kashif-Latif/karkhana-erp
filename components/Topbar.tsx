@@ -1,5 +1,6 @@
 "use client";
 import { Search, Bell, Plus } from "lucide-react";
+import Link from "next/link";
 import Clock from "./Clock";
 
 export default function Topbar({
@@ -28,9 +29,9 @@ export default function Topbar({
           <Bell size={17} />
           <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-salmon-strong" />
         </button>
-        <button className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
+        <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
           <Plus size={16} /> New GRN
-        </button>
+        </Link>
       </div>
     </header>
   );

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import {
   LayoutDashboard, Layers, Scissors, Shirt, Shrink, Flame, ShieldCheck,
-  Truck, Users, Boxes, FileBarChart, CheckSquare, Settings, ArrowUpRight,
+  Truck, Users, Boxes, FileBarChart, CheckSquare, Settings, ArrowUpRight, Wallet,
   BookOpen, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
@@ -38,6 +38,7 @@ const MANAGE: TileDef[] = [
   { href: "/catalog", label: "Catalog", Icon: BookOpen, accent: "ink", perm: ROUTE_PERMS["/catalog"] },
   { href: "/employees", label: "Employees", Icon: Users, accent: "ink", perm: ROUTE_PERMS["/employees"] },
   { href: "/inventory", label: "Inventory", Icon: Boxes, accent: "ink", perm: ROUTE_PERMS["/inventory"] },
+  { href: "/payments", label: "Payments", Icon: Wallet, accent: "ink", perm: ROUTE_PERMS["/payments"] },
   { href: "/reports", label: "Reports", Icon: FileBarChart, accent: "ink", perm: ROUTE_PERMS["/reports"] },
   { href: "/approvals", label: "Approvals", Icon: CheckSquare, accent: "ink", perm: ROUTE_PERMS["/approvals"] },
   { href: "/administration", label: "Administration", Icon: Settings, accent: "ink", perm: ROUTE_PERMS["/administration"] },

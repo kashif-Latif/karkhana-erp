@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Home, LayoutDashboard, Boxes, Layers, BookOpen, Factory, Users, Truck,
-  FileBarChart, CheckSquare, Settings, Gem, LogOut,
+  FileBarChart, CheckSquare, Settings, Gem, LogOut, Wallet,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
 import { usePermissions } from "@/lib/usePermissions";
@@ -19,6 +19,7 @@ const NAV = [
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Employees", href: "/employees", Icon: Users },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
+  { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
   { label: "Approvals", href: "/approvals", Icon: CheckSquare, badge: 7 },
   { label: "Administration", href: "/administration", Icon: Settings },
