@@ -3,10 +3,10 @@ import { useEffect, useState, useCallback } from "react";
 import Topbar from "@/components/Topbar";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { Loader2, Wallet, X, HandCoins, ScrollText } from "lucide-react";
+import { Loader2, Wallet, X, HandCoins, ScrollText, Trash2, AlertTriangle } from "lucide-react";
 
 type Due = { supplier_id: string; company_name: string; purchased: number; paid: number; outstanding: number };
-type StmtRow = { date: string; desc: string; isPurchase: boolean; amount: number; balance: number };
+type StmtRow = { date: string; desc: string; isPurchase: boolean; amount: number; balance: number; paymentId?: string };
 
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
@@ -17,6 +17,10 @@ export default function Payments() {
   const [dues, setDues] = useState<Due[]>([]);
   const [loading, setLoading] = useState(true);
   const [canPay, setCanPay] = useState(false);
+  const [isSuper, setIsSuper] = useState(false);
+  const [confirmPay, setConfirmPay] = useState<{ id: string; label: string } | null>(null);
+  const [payBusy, setPayBusy] = useState(false);
+  const [payErr, setPayErr] = useState("");
 
   const [payFor, setPayFor] = useState<Due | null>(null);
   const [amount, setAmount] = useState("");
@@ -43,6 +47,8 @@ export default function Payments() {
     setDues(rows);
     const { data: can } = await supabase.rpc("has_permission", { p_permission_code: "payments.manage" });
     setCanPay(!!can);
+    const { data: su } = await supabase.rpc("is_super_admin");
+    setIsSuper(!!su);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -81,9 +87,20 @@ export default function Payments() {
       const amt = Number(e.amount);
       bal += isPurchase ? amt : -amt;
       const ref = e.ref_table === "grns" ? grnMap.get(e.ref_id as string) : e.ref_table === "payments" ? payMap.get(e.ref_id as string) : null;
-      return { date: e.created_at as string, desc: ref || (isPurchase ? "Purchase" : "Payment"), isPurchase, amount: amt, balance: bal };
+      return { date: e.created_at as string, desc: ref || (isPurchase ? "Purchase" : "Payment"), isPurchase, amount: amt, balance: bal, paymentId: e.ref_table === "payments" ? (e.ref_id as string) : undefined };
     });
     setStmt(rows);
+  }
+
+  async function deletePayment() {
+    if (!supabase || !confirmPay) return;
+    setPayBusy(true); setPayErr("");
+    const { error } = await supabase.rpc("delete_payment", { p_payment_id: confirmPay.id });
+    setPayBusy(false);
+    if (error) { setPayErr(error.message); return; }
+    setConfirmPay(null);
+    load();
+    if (stmtFor) openStmt(stmtFor);
   }
 
   const totalOwed = dues.reduce((s, d) => s + Math.max(d.outstanding, 0), 0);
@@ -210,6 +227,7 @@ export default function Payments() {
                     <th className="px-3 py-2 text-right font-semibold">Purchase</th>
                     <th className="px-3 py-2 text-right font-semibold">Payment</th>
                     <th className="px-3 py-2 text-right font-semibold">Balance</th>
+                    {isSuper && <th className="px-3 py-2" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -220,11 +238,33 @@ export default function Payments() {
                       <td className="px-3 py-2 text-right tnum text-ink/80">{r.isPurchase ? fmt(r.amount) : ""}</td>
                       <td className="px-3 py-2 text-right tnum text-[#166534]">{!r.isPurchase ? fmt(r.amount) : ""}</td>
                       <td className="px-3 py-2 text-right tnum font-semibold text-ink">{fmt(r.balance)}</td>
+                      {isSuper && (
+                        <td className="px-3 py-2 text-right">
+                          {r.paymentId && (
+                            <button onClick={() => setConfirmPay({ id: r.paymentId as string, label: r.desc })} title="Delete this payment"
+                              className="rounded-full p-1.5 text-muted hover:bg-danger-soft hover:text-danger"><Trash2 size={13} /></button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {confirmPay && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-4" onClick={() => !payBusy && setConfirmPay(null)}>
+          <div className="w-full max-w-sm rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center gap-3"><span className="flex h-[38px] w-[38px] items-center justify-center rounded-2xl bg-danger-soft text-danger"><AlertTriangle size={18} /></span><h2 className="text-[16px] font-extrabold">Delete payment</h2></div>
+            <p className="text-[13px] text-muted">Permanently remove <b>{confirmPay.label}</b>? The supplier&rsquo;s balance will go back up by this amount. This cannot be undone.</p>
+            {payErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{payErr}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setConfirmPay(null)} disabled={payBusy} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={deletePayment} disabled={payBusy} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{payBusy && <Loader2 size={15} className="animate-spin" />}Delete</button>
+            </div>
           </div>
         </div>
       )}
