@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, UserPlus, ShieldCheck, X, KeyRound, Users, Trash2 } from "lucide-react";
+import { Loader2, UserPlus, ShieldCheck, X, KeyRound, Users, Trash2, RotateCcw } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase } from "@/lib/supabase";
 
 type Role = { id: string; name: string; code: string };
 type AppUser = Record<string, unknown>;
-type NewForm = { full_name: string; email: string; password: string; role_id: string };
-const EMPTY_NEW: NewForm = { full_name: "", email: "", password: "", role_id: "" };
+type NewForm = { full_name: string; email: string; phone: string; password: string; role_id: string };
+const EMPTY_NEW: NewForm = { full_name: "", email: "", phone: "", password: "", role_id: "" };
+const SYNTH = "@karkhana.local";
 
 export default function UsersTab({ canManage }: { canManage: boolean }) {
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -28,7 +29,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
     setLoading(true); setError("");
     const [u, r] = await Promise.all([
       supabase.from("app_users")
-        .select("id, full_name, email, status, is_super_admin, user_roles(role_id, roles(id,name))")
+        .select("id, full_name, email, phone, status, is_super_admin, user_roles(role_id, roles(id,name))")
         .order("full_name"),
       supabase.from("roles").select("id,name,code").order("name"),
     ]);
@@ -57,48 +58,56 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
     load();
   }
 
+  async function invokeError(error: { message?: string; context?: unknown }): Promise<string> {
+    let msg = error.message || "Something went wrong.";
+    try { const ctx = error.context as Response | undefined; if (ctx && typeof ctx.json === "function") { const b = await ctx.json(); if (b?.error) msg = b.error; } } catch { /* keep msg */ }
+    return msg;
+  }
+
   async function removeUser(userId: string, name: string) {
     if (!supabase) return;
     if (!window.confirm(`Remove ${name}'s account permanently? They will no longer be able to log in. This cannot be undone.`)) return;
     setBusy(userId); setError("");
     const { data, error } = await supabase.functions.invoke("create-user", { body: { action: "delete", user_id: userId } });
     setBusy(null);
-    if (error) {
-      let msg = error.message || "Could not remove the account.";
-      try { const ctx = (error as unknown as { context?: Response }).context; if (ctx && typeof ctx.json === "function") { const b = await ctx.json(); if (b?.error) msg = b.error; } } catch { /* keep msg */ }
-      setError(msg); return;
-    }
+    if (error) { setError(await invokeError(error)); return; }
     if ((data as { error?: string })?.error) { setError((data as { error: string }).error); return; }
     load();
+  }
+
+  async function resetPassword(userId: string, name: string) {
+    if (!supabase) return;
+    const np = window.prompt(`Enter a new temporary password for ${name} (at least 6 characters).\nThey'll be asked to set their own when they next log in.`);
+    if (np === null) return;
+    if (np.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setBusy(userId); setError("");
+    const { data, error } = await supabase.functions.invoke("create-user", { body: { action: "reset_password", user_id: userId, new_password: np } });
+    setBusy(null);
+    if (error) { setError(await invokeError(error)); return; }
+    if ((data as { error?: string })?.error) { setError((data as { error: string }).error); return; }
+    window.alert(`Password reset for ${name}. Share the new password with them — they'll set their own on next login.`);
   }
 
   function openAdd() { setNf({ ...EMPTY_NEW }); setCreateError(""); setCreatedMsg(""); setShowAdd(true); }
 
   async function createUser() {
     if (!supabase) return;
-    if (!nf.email.trim() || !nf.password) { setCreateError("Email and password are required."); return; }
+    if (!nf.email.trim() && !nf.phone.trim()) { setCreateError("Enter an email or a phone number."); return; }
+    if (!nf.password) { setCreateError("A temporary password is required."); return; }
     if (nf.password.length < 6) { setCreateError("Password must be at least 6 characters."); return; }
     setCreating(true); setCreateError("");
     const { data, error } = await supabase.functions.invoke("create-user", {
-      body: { full_name: nf.full_name, email: nf.email, password: nf.password, role_id: nf.role_id || null },
+      body: { full_name: nf.full_name, email: nf.email, phone: nf.phone, password: nf.password, role_id: nf.role_id || null },
     });
     setCreating(false);
-
     if (error) {
-      let msg = error.message || "Could not create the account.";
-      try {
-        const ctx = (error as unknown as { context?: Response }).context;
-        if (ctx && typeof ctx.json === "function") { const b = await ctx.json(); if (b?.error) msg = b.error; }
-      } catch { /* keep msg */ }
-      if (/fetch|not found|failed to send|404/i.test(msg)) {
-        msg = "The account-creation function isn't deployed yet. Deploy 'create-user' once (steps I gave you), then try again.";
-      }
-      setCreateError(msg);
-      return;
+      let msg = await invokeError(error);
+      if (/fetch|not found|failed to send|404/i.test(msg)) msg = "The account function isn't deployed yet. Deploy 'create-user', then try again.";
+      setCreateError(msg); return;
     }
     if ((data as { error?: string })?.error) { setCreateError((data as { error: string }).error); return; }
-
-    setCreatedMsg(`Account created for ${nf.email.trim()}. Share the email + password with them.`);
+    const who = nf.email.trim() || nf.phone.trim();
+    setCreatedMsg(`Account created for ${who}. Share the login + password with them.`);
     setNf({ ...EMPTY_NEW });
     load();
   }
@@ -136,7 +145,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                 <th className="px-5 py-3 font-semibold">Name</th>
-                <th className="px-5 py-3 font-semibold">Email</th>
+                <th className="px-5 py-3 font-semibold">Email / Phone</th>
                 <th className="px-5 py-3 font-semibold">Role</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3" />
@@ -146,6 +155,9 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
               {users.map((u) => {
                 const id = u.id as string;
                 const isSA = u.is_super_admin as boolean;
+                const email = (u.email as string) || "";
+                const phone = (u.phone as string) || "";
+                const isSynth = email.endsWith(SYNTH);
                 return (
                   <tr key={id} className="border-b border-line/60 last:border-0 hover:bg-canvas/60">
                     <td className="px-5 py-3">
@@ -158,17 +170,19 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-3 text-ink/70">{(u.email as string) || "—"}</td>
+                    <td className="px-5 py-3">
+                      <div className="text-ink/80">{isSynth ? (phone || "—") : (email || "—")}</div>
+                      {!isSynth && phone && <div className="text-[11px] text-muted">{phone}</div>}
+                    </td>
                     <td className="px-5 py-3">
                       {canManage ? (
                         <div className="flex items-center gap-2">
-                          <select value={roleOf(u)} disabled={busy === id}
-                            onChange={(e) => changeRole(id, e.target.value)}
+                          <select value={roleOf(u)} disabled={busy === id} onChange={(e) => changeRole(id, e.target.value)}
                             className="rounded-xl2 border border-line bg-canvas px-2.5 py-1.5 text-[12.5px] outline-none focus:border-salmon-strong/50 disabled:opacity-50">
                             <option value="">No role</option>
                             {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                           </select>
-                          {isSA && <span className="text-[11px] text-hint" title="Super admins keep full access regardless of role">(full access)</span>}
+                          {isSA && <span className="text-[11px] text-hint">(full access)</span>}
                         </div>
                       ) : (
                         <span className="text-ink/70">{(u.user_roles as { roles?: { name?: string } }[] | undefined)?.[0]?.roles?.name || "—"}</span>
@@ -176,8 +190,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                     </td>
                     <td className="px-5 py-3">
                       {canManage ? (
-                        <select value={(u.status as string) || "active"} disabled={busy === id}
-                          onChange={(e) => changeStatus(id, e.target.value)}
+                        <select value={(u.status as string) || "active"} disabled={busy === id} onChange={(e) => changeStatus(id, e.target.value)}
                           className="rounded-xl2 border border-line bg-canvas px-2.5 py-1.5 text-[12.5px] outline-none focus:border-salmon-strong/50 disabled:opacity-50">
                           <option value="active">Active</option>
                           <option value="inactive">Inactive</option>
@@ -189,12 +202,22 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                         </span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-right">
-                      {canManage && !isSA && id !== meId && (
-                        <button onClick={() => removeUser(id, u.full_name as string)} disabled={busy === id}
-                          className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft disabled:opacity-50">
-                          <Trash2 size={13} /> Remove
-                        </button>
+                    <td className="px-5 py-3">
+                      {canManage && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {id !== meId && (
+                            <button onClick={() => resetPassword(id, u.full_name as string)} disabled={busy === id}
+                              className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[12px] font-semibold text-ink/70 hover:bg-panel disabled:opacity-50" title="Reset password">
+                              <RotateCcw size={13} /> Reset
+                            </button>
+                          )}
+                          {!isSA && id !== meId && (
+                            <button onClick={() => removeUser(id, u.full_name as string)} disabled={busy === id}
+                              className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft disabled:opacity-50">
+                              <Trash2 size={13} /> Remove
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -221,7 +244,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
               <>
                 <div className="rounded-xl2 bg-success-soft px-4 py-3 text-[13px] font-medium text-[#166534]">{createdMsg}</div>
                 <div className="mt-5 flex justify-end gap-2">
-                  <button onClick={() => { setCreatedMsg(""); }} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Add another</button>
+                  <button onClick={() => setCreatedMsg("")} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Add another</button>
                   <button onClick={() => setShowAdd(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
                 </div>
               </>
@@ -229,7 +252,8 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
               <>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="sm:col-span-2"><Lbl label="Full name"><input value={nf.full_name} onChange={nSet("full_name")} placeholder="e.g. Bilal Khan" className={inp} /></Lbl></div>
-                  <div className="sm:col-span-2"><Lbl label="Email *"><input value={nf.email} onChange={nSet("email")} placeholder="name@factory.com" className={inp} /></Lbl></div>
+                  <Lbl label="Email"><input value={nf.email} onChange={nSet("email")} placeholder="name@factory.com" className={inp} /></Lbl>
+                  <Lbl label="Phone number"><input value={nf.phone} onChange={nSet("phone")} placeholder="0300 1234567" className={inp} /></Lbl>
                   <Lbl label="Temporary password *"><input value={nf.password} onChange={nSet("password")} placeholder="min 6 characters" className={inp} /></Lbl>
                   <Lbl label="Role">
                     <select value={nf.role_id} onChange={nSet("role_id")} className={inp}>
@@ -238,7 +262,7 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
                     </select>
                   </Lbl>
                 </div>
-                <p className="mt-2 text-[11.5px] text-hint">You set a temporary password and share it with them. They see only what their role allows.</p>
+                <p className="mt-2 text-[11.5px] text-hint">Enter an <b>email</b> or a <b>phone number</b> (or both). Phone-only users log in with their phone + password. You set a temporary password and share it; they choose their own on first login.</p>
                 {createError && <p className="mt-3 text-[12.5px] font-medium text-danger">{createError}</p>}
                 <div className="mt-5 flex justify-end gap-2">
                   <button onClick={() => setShowAdd(false)} disabled={creating} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
