@@ -45,6 +45,14 @@ export default function ReceiveStock() {
   const [supSaving, setSupSaving] = useState(false);
   const [supError, setSupError] = useState("");
 
+  const [canPay, setCanPay] = useState(false);
+  const [postedTotal, setPostedTotal] = useState<number | null>(null);
+  const [payMethod, setPayMethod] = useState("cash");
+  const [payAmount, setPayAmount] = useState("");
+  const [payRef, setPayRef] = useState("");
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState("");
+
   useEffect(() => {
     if (!supabase) return;
     supabase.from("suppliers").select("id, company_name").eq("is_active", true).order("company_name")
@@ -58,6 +66,7 @@ export default function ReceiveStock() {
     supabase.from("group_units").select("group_id, unit_id").then(({ data }) => setGunits((data as GU[]) ?? []));
     supabase.rpc("has_permission", { p_permission_code: "grn.create" }).then(({ data }) => setCanReceive(!!data));
     supabase.rpc("has_permission", { p_permission_code: "suppliers.manage" }).then(({ data }) => setCanAddSupplier(!!data));
+    supabase.rpc("has_permission", { p_permission_code: "payments.manage" }).then(({ data }) => setCanPay(!!data));
   }, []);
 
   function openSupModal() { setSupForm({ company_name: "", contact_person: "", phone: "" }); setSupError(""); setShowSup(true); }
@@ -131,6 +140,20 @@ export default function ReceiveStock() {
     });
     setSaving(false);
     if (error) { setError(error.message); return; }
+    if (canPay) { setPostedTotal(total); setPayAmount(String(total)); setPayMethod("cash"); setPayRef(""); setPayError(""); }
+    else router.push("/inventory");
+  }
+
+  async function savePayment() {
+    if (!supabase) return;
+    if (!(parseFloat(payAmount) > 0)) { setPayError("Enter an amount greater than zero."); return; }
+    setPaySaving(true); setPayError("");
+    const { error } = await supabase.rpc("record_payment", {
+      p_supplier_id: supplierId, p_amount: parseFloat(payAmount), p_method: payMethod,
+      p_reference: payRef, p_paid_at: new Date().toISOString(), p_note: "Paid on receipt",
+    });
+    setPaySaving(false);
+    if (error) { setPayError(error.message); return; }
     router.push("/inventory");
   }
 
@@ -271,6 +294,36 @@ export default function ReceiveStock() {
           </div>
         )}
       </div>
+
+      {postedTotal !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4">
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-card">
+            <div className="mb-1 flex items-center gap-3"><IconChip Icon={PackagePlus} size={38} /><h2 className="text-[17px] font-extrabold">Receipt posted</h2></div>
+            <p className="mb-4 text-[13px] text-muted">Stock added and the supplier payable recorded. Was this paid now, or on credit?</p>
+
+            <span className="mb-1 block text-[12px] font-medium text-muted">Payment method</span>
+            <div className="grid grid-cols-4 gap-2">
+              {[["cash","Cash"],["online","Online"],["bank","Bank"],["cheque","Cheque"]].map(([v,l]) => (
+                <button key={v} onClick={() => setPayMethod(v)} className={`rounded-xl2 border px-2 py-2 text-[12.5px] font-semibold ${payMethod===v ? "border-ink bg-ink text-white" : "border-line text-ink/70 hover:bg-panel"}`}>{l}</button>
+              ))}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Amount (Rs)</span>
+                <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className={inp} /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Reference</span>
+                <input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="optional" className={inp} /></label>
+            </div>
+            <p className="mt-2 text-[11.5px] text-hint">Full amount is Rs {(postedTotal).toLocaleString("en-PK")}. You can pay part now and the rest later.</p>
+            {payError && <p className="mt-3 text-[12.5px] font-medium text-danger">{payError}</p>}
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button onClick={() => router.push("/inventory")} disabled={paySaving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Pay later (on credit)</button>
+              <button onClick={savePayment} disabled={paySaving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{paySaving && <Loader2 size={15} className="animate-spin" />}Save payment</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !supSaving && setShowSup(false)}>

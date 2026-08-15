@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { Boxes, PackagePlus, Loader2, FileText, Ban, Trash2, AlertTriangle } from "lucide-react";
+import { Boxes, PackagePlus, Loader2, FileText, Ban, Trash2, AlertTriangle, X } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -30,6 +30,8 @@ export default function InventoryPage() {
   const [voidReason, setVoidReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [detailGrn, setDetailGrn] = useState<GrnRow | null>(null);
+  const [detailLines, setDetailLines] = useState<{ label: string; unit: string; qty: number; rate: number; lineTotal: number }[] | null>(null);
 
   const load = useCallback(async () => {
     if (!supabase) { setLoading(false); return; }
@@ -37,7 +39,7 @@ export default function InventoryPage() {
     const [bal, items, g] = await Promise.all([
       supabase.from("stock_balances").select("item_id, balance"),
       supabase.from("material_items").select("id, code, name, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name)"),
-      supabase.from("grns").select("id, grn_number, received_at, total, status, suppliers(company_name)").order("created_at", { ascending: false }).limit(15),
+      supabase.from("grns").select("id, grn_number, received_at, total, subtotal, freight, discount, note, status, suppliers(company_name)").order("created_at", { ascending: false }).limit(15),
     ]);
     const meta = new Map<string, { label: string; unit: string }>();
     ((items.data as unknown as Record<string, unknown>[]) ?? []).forEach((it) => {
@@ -69,6 +71,23 @@ export default function InventoryPage() {
     setBusy(false);
     if (error) { setActionError(error.message); return; }
     setConfirm(null); load();
+  }
+
+  async function openDetail(g: GrnRow) {
+    setDetailGrn(g); setDetailLines(null);
+    if (!supabase) return;
+    const { data } = await supabase.from("grn_lines")
+      .select("quantity, rate, line_total, material_items(name, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name))")
+      .eq("grn_id", g.id as string);
+    const rows = ((data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
+      const li = (r.material_items as Record<string, unknown>) || {};
+      return {
+        label: itemLabel(li),
+        unit: ((li.units as { symbol?: string; name?: string } | null)?.symbol) || ((li.units as { name?: string } | null)?.name) || "",
+        qty: Number(r.quantity), rate: Number(r.rate), lineTotal: Number(r.line_total),
+      };
+    });
+    setDetailLines(rows);
   }
 
   return (
@@ -141,7 +160,7 @@ export default function InventoryPage() {
                       const voided = (g.status as string) === "voided";
                       return (
                       <tr key={g.id as string} className="border-b border-line/60 last:border-0 hover:bg-canvas/60">
-                        <td className="px-5 py-2.5 font-mono text-[12px] tnum text-muted">{g.grn_number as string}</td>
+                        <td className="px-5 py-2.5"><button onClick={() => openDetail(g)} className="font-mono text-[12px] tnum text-ink underline decoration-dotted underline-offset-2 hover:text-salmon-strong">{g.grn_number as string}</button></td>
                         <td className="px-5 py-2.5 text-ink/80">{(g.suppliers as { company_name?: string } | null)?.company_name || "—"}</td>
                         <td className="px-5 py-2.5 text-ink/70">{when(g.received_at as string)}</td>
                         <td className={`px-5 py-2.5 text-right tnum font-semibold ${voided ? "text-hint line-through" : "text-ink"}`}>{money(g.total as number)}</td>
@@ -171,6 +190,57 @@ export default function InventoryPage() {
           </div>
         )}
       </div>
+
+      {detailGrn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => setDetailGrn(null)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <IconChip Icon={FileText} size={38} />
+                <div>
+                  <h2 className="text-[17px] font-extrabold">{detailGrn.grn_number as string}</h2>
+                  <p className="text-[12px] text-muted">{(detailGrn.suppliers as { company_name?: string } | null)?.company_name || "—"} · {when(detailGrn.received_at as string)}{(detailGrn.status as string) === "voided" ? " · Voided" : ""}</p>
+                </div>
+              </div>
+              <button onClick={() => setDetailGrn(null)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button>
+            </div>
+
+            {detailLines === null ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
+            ) : (
+              <>
+                <table className="w-full text-left text-[13px]">
+                  <thead>
+                    <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
+                      <th className="px-3 py-2 font-semibold">Material</th>
+                      <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                      <th className="px-3 py-2 text-right font-semibold">Rate</th>
+                      <th className="px-3 py-2 text-right font-semibold">Line total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailLines.map((r, i) => (
+                      <tr key={i} className="border-b border-line/60 last:border-0">
+                        <td className="px-3 py-2 font-medium text-ink">{r.label}</td>
+                        <td className="px-3 py-2 text-right tnum text-ink/80">{qty(r.qty)} <span className="text-[11px] text-muted">{r.unit}</span></td>
+                        <td className="px-3 py-2 text-right tnum text-ink/80">{money(r.rate)}</td>
+                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">{money(r.lineTotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-4 ml-auto w-full max-w-[260px] space-y-1.5 text-[13px]">
+                  <div className="flex justify-between"><span className="text-muted">Subtotal</span><span className="tnum text-ink">{money(Number(detailGrn.subtotal ?? 0))}</span></div>
+                  <div className="flex justify-between"><span className="text-muted">Freight (+)</span><span className="tnum text-ink">{money(Number(detailGrn.freight ?? 0))}</span></div>
+                  <div className="flex justify-between"><span className="text-muted">Discount (−)</span><span className="tnum text-ink">{money(Number(detailGrn.discount ?? 0))}</span></div>
+                  <div className="flex justify-between border-t border-line pt-1.5"><span className="font-extrabold text-ink">Total</span><span className="tnum text-[15px] font-extrabold text-ink">{money(Number(detailGrn.total ?? 0))}</span></div>
+                </div>
+                {(detailGrn.note as string) && <p className="mt-4 rounded-xl2 bg-panel px-3.5 py-2.5 text-[12.5px] text-muted"><b>Note:</b> {detailGrn.note as string}</p>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !busy && setConfirm(null)}>
