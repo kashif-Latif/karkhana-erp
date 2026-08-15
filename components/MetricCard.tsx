@@ -1,6 +1,7 @@
 "use client";
 import { ArrowUpRight, type LucideIcon } from "lucide-react";
 import IconChip from "./IconChip";
+import { useCountUp } from "@/lib/useCountUp";
 
 const TINT: Record<string, string> = {
   salmon: "#F5D9CE",
@@ -25,6 +26,15 @@ export default function MetricCard({
   accent?: string;
   Icon: LucideIcon;
 }) {
+  // Parse a value like "Rs 4,182,500" or "7" into prefix + number + suffix so
+  // we can count the number up while keeping the currency/units around it.
+  const m = value.match(/^([^\d-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
+  const target = m ? parseFloat(m[2].replace(/,/g, "")) : 0;
+  const decimals = m && m[2].includes(".") ? (m[2].split(".")[1]?.length ?? 0) : 0;
+  const n = useCountUp(target);
+  const display = m
+    ? `${m[1]}${n.toLocaleString("en-PK", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${m[3]}`
+    : value;
   return (
     <div
       className="rounded-card p-5 shadow-soft transition hover:-translate-y-0.5"
@@ -36,7 +46,7 @@ export default function MetricCard({
       </div>
       <p className="mt-4 text-[13px] font-medium text-ink/70">{label}</p>
       <div className="mt-1 flex items-end gap-2">
-        <span className="text-2xl font-extrabold tnum text-ink">{value}</span>
+        <span className="text-2xl font-extrabold tnum text-ink">{display}</span>
         {delta && (
           <span
             className="mb-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"

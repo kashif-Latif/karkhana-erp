@@ -25,22 +25,23 @@ export default function Dashboard() {
       <div className="space-y-5 px-6 pb-10">
         {/* KPI row */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {kpis.map((k) => (
-            <MetricCard
-              key={k.key}
-              label={k.label}
-              value={k.value}
-              delta={k.delta}
-              up={k.up}
-              accent={k.accent}
-              Icon={ICONS[k.key as keyof typeof ICONS]}
-            />
+          {kpis.map((k, i) => (
+            <div key={k.key} className="reveal" style={{ animationDelay: `${i * 80}ms` }}>
+              <MetricCard
+                label={k.label}
+                value={k.value}
+                delta={k.delta}
+                up={k.up}
+                accent={k.accent}
+                Icon={ICONS[k.key as keyof typeof ICONS]}
+              />
+            </div>
           ))}
         </div>
 
         {/* Gauge + consumption */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="rounded-card bg-surface p-5 shadow-card lg:col-span-1">
+          <div className="reveal rounded-card bg-surface p-5 shadow-card lg:col-span-1" style={{ animationDelay: "340ms" }}>
             <div className="mb-2 flex items-center gap-3">
               <IconChip Icon={TrendingUp} size={32} />
               <h3 className="text-[15px] font-bold">Inventory Score</h3>
@@ -51,7 +52,7 @@ export default function Dashboard() {
             </p>
           </div>
 
-          <div className="rounded-card bg-surface p-5 shadow-card lg:col-span-2">
+          <div className="reveal rounded-card bg-surface p-5 shadow-card lg:col-span-2" style={{ animationDelay: "400ms" }}>
             <div className="mb-1 flex items-center justify-between">
               <div>
                 <h3 className="text-[15px] font-bold">Material Consumption</h3>
@@ -69,8 +70,8 @@ export default function Dashboard() {
 
         {/* Stock + approvals */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <StockPanel />
-          <ApprovalsPanel />
+          <div className="reveal" style={{ animationDelay: "460ms" }}><StockPanel /></div>
+          <div className="reveal" style={{ animationDelay: "520ms" }}><ApprovalsPanel /></div>
         </div>
       </div>
     </>

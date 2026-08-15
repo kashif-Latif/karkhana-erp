@@ -1,4 +1,5 @@
 "use client";
+import { useState, useEffect } from "react";
 import { Boxes, FileText, ArrowRight, Flame } from "lucide-react";
 import IconChip from "./IconChip";
 import { materials, approvals } from "@/lib/sampleData";
@@ -19,6 +20,8 @@ const TILE: Record<string, string> = {
 };
 
 export function StockPanel() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
   return (
     <div className="rounded-card bg-surface p-5 shadow-card">
       <div className="mb-4 flex items-center gap-3">
@@ -26,7 +29,7 @@ export function StockPanel() {
         <h3 className="text-[15px] font-bold">Raw-Material Stock</h3>
       </div>
       <div className="space-y-3.5">
-        {materials.map((m) => (
+        {materials.map((m, i) => (
           <div key={m.name} className="flex items-center gap-3">
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -35,8 +38,8 @@ export function StockPanel() {
             <span className="w-32 shrink-0 text-[13.5px] font-medium text-ink">{m.name}</span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-panel">
               <div
-                className="h-full rounded-full"
-                style={{ width: `${m.pct}%`, background: DOT[m.accent] }}
+                className="h-full rounded-full transition-[width] duration-700 ease-out"
+                style={{ width: mounted ? `${m.pct}%` : "0%", background: DOT[m.accent], transitionDelay: `${i * 90}ms` }}
               />
             </div>
             <span className="w-28 shrink-0 text-right text-[12.5px] tnum text-muted">
