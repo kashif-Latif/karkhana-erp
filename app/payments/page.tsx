@@ -11,7 +11,7 @@ type StmtRow = { date: string; desc: string; isPurchase: boolean; amount: number
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
 const fmt = (n: number) => "Rs " + (n || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 });
-const fmtDate = (s: string) => new Date(s).toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" });
+const fmtDate = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 
 export default function Payments() {
   const [dues, setDues] = useState<Due[]>([]);
@@ -120,6 +120,7 @@ export default function Payments() {
               </div>
               {!canPay && <p className="text-[12.5px] text-muted">You can view balances. Recording payments needs the payments permission.</p>}
             </div>
+            <p className="mb-3 text-[12.5px] text-muted">Use <b>Record payment</b> to log money you&rsquo;ve paid a supplier (cash, online/bank, or cheque) — it reduces their outstanding balance. <b>Statement</b> shows every receipt and payment for that supplier.</p>
 
             <div className="overflow-hidden rounded-card bg-surface shadow-card">
               {loading ? (

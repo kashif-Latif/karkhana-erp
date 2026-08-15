@@ -18,7 +18,7 @@ function itemLabel(it: Record<string, unknown>): string {
 }
 const money = (n: number) => "Rs " + Number(n).toLocaleString("en-PK", { maximumFractionDigits: 2 });
 const qty = (n: number) => Number(n).toLocaleString("en-PK", { maximumFractionDigits: 3 });
-const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric" });
+const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 
 export default function InventoryPage() {
   const [stock, setStock] = useState<StockRow[]>([]);
