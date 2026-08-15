@@ -15,7 +15,8 @@ type GU = { group_id: string; unit_id: string };
 type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string };
 
 const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "" };
-function toLocalInput(d: Date) { const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
 const fmt = (n: number) => "Rs " + (n || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 });
 
 export default function ReceiveStock() {
@@ -30,7 +31,7 @@ export default function ReceiveStock() {
   const [canReceive, setCanReceive] = useState(true);
 
   const [supplierId, setSupplierId] = useState("");
-  const [receivedAt, setReceivedAt] = useState(() => toLocalInput(new Date()));
+  const [receivedAt, setReceivedAt] = useState(() => todayInput());
   const [note, setNote] = useState("");
   const [freight, setFreight] = useState("");
   const [discount, setDiscount] = useState("");
@@ -125,7 +126,7 @@ export default function ReceiveStock() {
       size_id: l.size_id || null, unit_id: l.unit_id, quantity: parseFloat(l.quantity), rate: parseFloat(l.rate),
     }));
     const { error } = await supabase.rpc("post_grn_smart", {
-      p_supplier_id: supplierId, p_received_at: new Date(receivedAt).toISOString(),
+      p_supplier_id: supplierId, p_received_at: dateToISO(receivedAt),
       p_freight: parseFloat(freight) || 0, p_discount: parseFloat(discount) || 0, p_note: note, p_lines,
     });
     setSaving(false);
@@ -170,7 +171,8 @@ export default function ReceiveStock() {
                   </label>
                   <label className="block">
                     <span className="mb-1 block text-[12px] font-medium text-muted">Received on</span>
-                    <input type="datetime-local" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} className={inp} />
+                    <input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} className={inp} />
+                    <span className="mt-1 block text-[11px] text-hint">Pick the date — the time is added automatically.</span>
                   </label>
                 </div>
               </div>

@@ -8,10 +8,8 @@ import { Loader2, Wallet, X, HandCoins, ScrollText } from "lucide-react";
 type Due = { supplier_id: string; company_name: string; purchased: number; paid: number; outstanding: number };
 type StmtRow = { date: string; desc: string; isPurchase: boolean; amount: number; balance: number };
 
-function toLocalInput(d: Date) {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
+function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
 const fmt = (n: number) => "Rs " + (n || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 });
 const fmtDate = (s: string) => new Date(s).toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -24,7 +22,7 @@ export default function Payments() {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
   const [reference, setReference] = useState("");
-  const [paidAt, setPaidAt] = useState(() => toLocalInput(new Date()));
+  const [paidAt, setPaidAt] = useState(() => todayInput());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +50,7 @@ export default function Payments() {
   function openPay(d: Due) {
     setPayFor(d);
     setAmount(d.outstanding > 0 ? String(d.outstanding) : "");
-    setMethod("cash"); setReference(""); setPaidAt(toLocalInput(new Date())); setNote(""); setError("");
+    setMethod("cash"); setReference(""); setPaidAt(todayInput()); setNote(""); setError("");
   }
   async function submitPay() {
     if (!supabase || !payFor) return;
@@ -60,7 +58,7 @@ export default function Payments() {
     setSaving(true); setError("");
     const { error } = await supabase.rpc("record_payment", {
       p_supplier_id: payFor.supplier_id, p_amount: parseFloat(amount), p_method: method,
-      p_reference: reference, p_paid_at: new Date(paidAt).toISOString(), p_note: note,
+      p_reference: reference, p_paid_at: dateToISO(paidAt), p_note: note,
     });
     setSaving(false);
     if (error) { setError(error.message.toLowerCase().includes("row-level") ? "You don't have permission to record payments." : error.message); return; }
@@ -173,7 +171,7 @@ export default function Payments() {
                   <option value="cash">Cash</option><option value="bank">Bank</option><option value="cheque">Cheque</option>
                 </select></label>
               <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Date</span>
-                <input type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className={inp} /></label>
+                <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className={inp} /></label>
               <label className="block sm:col-span-2"><span className="mb-1 block text-[12px] font-medium text-muted">Reference (cheque no, txn id…)</span>
                 <input value={reference} onChange={(e) => setReference(e.target.value)} className={inp} /></label>
               <label className="block sm:col-span-2"><span className="mb-1 block text-[12px] font-medium text-muted">Note (optional)</span>
