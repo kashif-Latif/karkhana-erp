@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { Plus, Trash2, Loader2, PackagePlus, ArrowLeft } from "lucide-react";
+import { Plus, Trash2, Loader2, PackagePlus, ArrowLeft, X, Building2 } from "lucide-react";
 import Link from "next/link";
 
 type Group = { id: string; code: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean };
@@ -38,6 +38,12 @@ export default function ReceiveStock() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const [canAddSupplier, setCanAddSupplier] = useState(false);
+  const [showSup, setShowSup] = useState(false);
+  const [supForm, setSupForm] = useState({ company_name: "", contact_person: "", phone: "" });
+  const [supSaving, setSupSaving] = useState(false);
+  const [supError, setSupError] = useState("");
+
   useEffect(() => {
     if (!supabase) return;
     supabase.from("suppliers").select("id, company_name").eq("is_active", true).order("company_name")
@@ -50,7 +56,24 @@ export default function ReceiveStock() {
     supabase.from("units").select("id, name, symbol").eq("is_active", true).order("name").then(({ data }) => setUnits((data as Unit[]) ?? []));
     supabase.from("group_units").select("group_id, unit_id").then(({ data }) => setGunits((data as GU[]) ?? []));
     supabase.rpc("has_permission", { p_permission_code: "grn.create" }).then(({ data }) => setCanReceive(!!data));
+    supabase.rpc("has_permission", { p_permission_code: "suppliers.manage" }).then(({ data }) => setCanAddSupplier(!!data));
   }, []);
+
+  function openSupModal() { setSupForm({ company_name: "", contact_person: "", phone: "" }); setSupError(""); setShowSup(true); }
+  async function saveSupplier() {
+    if (!supabase) return;
+    if (!supForm.company_name.trim()) { setSupError("Company name is required."); return; }
+    setSupSaving(true); setSupError("");
+    const { data, error } = await supabase.from("suppliers")
+      .insert({ company_name: supForm.company_name.trim(), contact_person: supForm.contact_person.trim() || null, phone: supForm.phone.trim() || null })
+      .select("id, company_name").single();
+    setSupSaving(false);
+    if (error) { setSupError(error.message.toLowerCase().includes("row-level") ? "You don't have permission to add suppliers." : error.message); return; }
+    const s = data as { id: string; company_name: string };
+    setSuppliers((prev) => [...prev, { id: s.id, name: s.company_name }].sort((a, b) => a.name.localeCompare(b.name)));
+    setSupplierId(s.id);
+    setShowSup(false);
+  }
 
   const groupById = (id: string) => groups.find((g) => g.id === id);
   const catsFor = (gid: string) => cats.filter((c) => c.group_id === gid);
@@ -131,11 +154,19 @@ export default function ReceiveStock() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="block">
                     <span className="mb-1 block text-[12px] font-medium text-muted">Supplier *</span>
-                    <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={inp}>
-                      <option value="">Choose supplier…</option>
-                      {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    {suppliers.length === 0 && <span className="mt-1 block text-[11px] text-hint">No suppliers yet — add one under Suppliers.</span>}
+                    <div className="flex items-center gap-2">
+                      <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={inp}>
+                        <option value="">Choose supplier…</option>
+                        {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      {canAddSupplier && (
+                        <button type="button" onClick={openSupModal} title="Add a new supplier"
+                          className="flex shrink-0 items-center gap-1 rounded-xl2 border border-line bg-canvas px-3 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">
+                          <Plus size={15} /> New
+                        </button>
+                      )}
+                    </div>
+                    {suppliers.length === 0 && <span className="mt-1 block text-[11px] text-hint">{canAddSupplier ? "No suppliers yet — click “New” to add one." : "No suppliers yet — ask an admin to add one."}</span>}
                   </label>
                   <label className="block">
                     <span className="mb-1 block text-[12px] font-medium text-muted">Received on</span>
@@ -238,6 +269,31 @@ export default function ReceiveStock() {
           </div>
         )}
       </div>
+
+      {showSup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !supSaving && setShowSup(false)}>
+          <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-3"><IconChip Icon={Building2} size={38} /><h2 className="text-[17px] font-extrabold">Add supplier</h2></div>
+              <button onClick={() => setShowSup(false)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button>
+            </div>
+            <div className="space-y-3">
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Company name *</span>
+                <input value={supForm.company_name} onChange={(e) => setSupForm((f) => ({ ...f, company_name: e.target.value }))} placeholder="e.g. Ravi Textiles" className={inp} autoFocus /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Contact person</span>
+                <input value={supForm.contact_person} onChange={(e) => setSupForm((f) => ({ ...f, contact_person: e.target.value }))} placeholder="optional" className={inp} /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-muted">Phone</span>
+                <input value={supForm.phone} onChange={(e) => setSupForm((f) => ({ ...f, phone: e.target.value }))} placeholder="optional" className={inp} /></label>
+            </div>
+            <p className="mt-2 text-[11.5px] text-hint">Saved to your Suppliers list — you can add full details there anytime.</p>
+            {supError && <p className="mt-3 text-[12.5px] font-medium text-danger">{supError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setShowSup(false)} disabled={supSaving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={saveSupplier} disabled={supSaving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{supSaving && <Loader2 size={15} className="animate-spin" />}Save supplier</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
