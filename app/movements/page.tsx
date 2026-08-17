@@ -26,11 +26,13 @@ export default function Movements() {
   const [items, setItems] = useState<Item[]>([]);
   const [depts, setDepts] = useState<Dept[]>([]);
   const [moves, setMoves] = useState<Move[]>([]);
+  const [emps, setEmps] = useState<{ id: string; name: string; department_id: string | null }[]>([]);
   const [perms, setPerms] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [type, setType] = useState<string>("issue");
   const [deptId, setDeptId] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
   const [direction, setDirection] = useState("remove");
   const [reason, setReason] = useState("");
   const [movedAt, setMovedAt] = useState(todayInput());
@@ -42,12 +44,13 @@ export default function Movements() {
   const load = useCallback(async () => {
     if (!supabase) { setLoading(false); return; }
     setLoading(true);
-    const [mi, sb, dp, mv, pm] = await Promise.all([
+    const [mi, sb, dp, mv, pm, em] = await Promise.all([
       supabase.from("material_items").select("id, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name)").eq("is_active", true),
       supabase.from("stock_balances").select("item_id, balance"),
       supabase.from("departments").select("id, name").order("name"),
-      supabase.from("stock_movements").select("id, movement_number, type, reason, moved_at, departments(name)").order("created_at", { ascending: false }).limit(20),
+      supabase.from("stock_movements").select("id, movement_number, type, reason, moved_at, departments(name), employees(name)").order("created_at", { ascending: false }).limit(20),
       supabase.rpc("my_permissions"),
+      supabase.from("employees").select("id, name, department_id").eq("is_active", true).order("name"),
     ]);
     const balMap = new Map(((sb.data as { item_id: string; balance: number }[]) ?? []).map((b) => [b.item_id, Number(b.balance)]));
     const list = ((mi.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
@@ -61,6 +64,7 @@ export default function Movements() {
     }).sort((a, b) => a.label.localeCompare(b.label));
     setItems(list);
     setDepts((dp.data as Dept[]) ?? []);
+    setEmps((em.data as { id: string; name: string; department_id: string | null }[]) ?? []);
     setMoves((mv.data as Move[]) ?? []);
     setPerms((pm.data as string[]) ?? []);
     setLoading(false);
@@ -85,13 +89,13 @@ export default function Movements() {
     setSaving(true);
     const p_lines = valid.map((l) => ({ item_id: l.item_id, quantity: parseFloat(l.quantity) }));
     const { error } = await supabase.rpc("post_stock_movement", {
-      p_type: type, p_department_id: active.dept ? deptId : null, p_reason: reason,
-      p_moved_at: dateToISO(movedAt), p_direction: direction, p_lines,
+      p_type: type, p_department_id: active.dept ? deptId : null, p_employee_id: active.dept ? (employeeId || null) : null,
+      p_reason: reason, p_moved_at: dateToISO(movedAt), p_direction: direction, p_lines,
     });
     setSaving(false);
     if (error) { setError(error.message); return; }
     setOkMsg(`${active.label} recorded.`);
-    setLines([{ item_id: "", quantity: "" }]); setReason("");
+    setLines([{ item_id: "", quantity: "" }]); setReason(""); setEmployeeId("");
     load();
   }
 
@@ -133,10 +137,20 @@ export default function Movements() {
                   {active.dept && (
                     <label className="block">
                       <span className="mb-1 block text-[12px] font-medium text-muted">Department *</span>
-                      <select value={deptId} onChange={(e) => setDeptId(e.target.value)} className={inp}>
+                      <select value={deptId} onChange={(e) => { setDeptId(e.target.value); setEmployeeId(""); }} className={inp}>
                         <option value="">Choose department…</option>
                         {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                       </select>
+                    </label>
+                  )}
+                  {active.dept && deptId && (
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] font-medium text-muted">Employee (optional)</span>
+                      <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inp}>
+                        <option value="">Not assigned</option>
+                        {emps.filter((e) => e.department_id === deptId).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
+                      {emps.filter((e) => e.department_id === deptId).length === 0 && <span className="mt-1 block text-[11px] text-hint">No employees in this department yet.</span>}
                     </label>
                   )}
                   {type === "adjustment" && (
@@ -211,7 +225,7 @@ export default function Movements() {
                         <span className="rounded-full bg-panel px-2 py-0.5 text-[10.5px] font-semibold text-muted">{TYPE_LABEL[m.type as string]}</span>
                       </div>
                       <div className="mt-0.5 text-[11.5px] text-muted">
-                        {(m.departments as { name?: string } | null)?.name || (m.reason as string) || "—"} · {when(m.moved_at as string)}
+                        {[(m.departments as { name?: string } | null)?.name, (m.employees as { name?: string } | null)?.name].filter(Boolean).join(" · ") || (m.reason as string) || "—"} · {when(m.moved_at as string)}
                       </div>
                     </div>
                   ))}
