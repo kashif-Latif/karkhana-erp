@@ -6,9 +6,11 @@ import Clock from "./Clock";
 export default function Topbar({
   title,
   subtitle,
+  action,
 }: {
   title: string;
   subtitle?: string;
+  action?: { label: string; href: string };
 }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 px-6 py-5">
@@ -29,9 +31,11 @@ export default function Topbar({
           <Bell size={17} />
           <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-salmon-strong" />
         </button>
-        <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
-          <Plus size={16} /> New GRN
-        </Link>
+        {action && (
+          <Link href={action.href} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
+            <Plus size={16} /> {action.label}
+          </Link>
+        )}
       </div>
     </header>
   );

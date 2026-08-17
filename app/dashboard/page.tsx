@@ -14,7 +14,7 @@ const ICONS = { value: Wallet, receipts: PackagePlus, issues: PackageMinus, appr
 export default function Dashboard() {
   return (
     <>
-      <Topbar title="Dashboard" subtitle="Head-office inventory & production at a glance" />
+      <Topbar title="Dashboard" subtitle="Head-office inventory & production at a glance" action={{ label: "New GRN", href: "/inventory/receive" }} />
 
       {!isSupabaseConfigured && (
         <div className="mx-6 mb-4 rounded-xl2 border border-amber-strong/30 bg-amber-soft px-4 py-2.5 text-[12.5px] text-ink/80">
