@@ -1,30 +1,55 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Gem, Lock, User, ShieldCheck } from "lucide-react";
+import { Gem, Lock, Mail, Phone, ShieldCheck, ArrowLeft, MailCheck } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+
+type Mode = "email" | "phone";
 
 export default function Login() {
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>("email");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
+
+  const [forgot, setForgot] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetSent, setResetSent] = useState(false);
+  const [resetErr, setResetErr] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
 
   async function submit() {
     setErr("");
     if (!isSupabaseConfigured || !supabase) { router.push("/"); return; }
-    if (!identifier.trim() || !password) { setErr("Enter your email or phone, and your password."); return; }
+    if (!identifier.trim() || !password) { setErr(mode === "email" ? "Enter your email and password." : "Enter your phone number and password."); return; }
     setLoading(true);
-    // Map email-or-phone to the login email, then sign in with password.
     const { data: email, error: rpcErr } = await supabase.rpc("resolve_login_email", { p_identifier: identifier.trim() });
-    if (rpcErr || !email) { setLoading(false); setErr("No account found for that email or phone."); return; }
+    if (rpcErr || !email) { setLoading(false); setErr(mode === "email" ? "No account found for that email." : "No account found for that phone number."); return; }
     const { error } = await supabase.auth.signInWithPassword({ email: email as string, password });
     setLoading(false);
-    if (error) setErr("Incorrect email/phone or password.");
+    if (error) setErr(mode === "email" ? "Incorrect email or password." : "Incorrect phone number or password.");
     else router.push("/");
   }
+
+  async function sendReset() {
+    setResetErr("");
+    if (!supabase) return;
+    if (!resetEmail.trim() || !resetEmail.includes("@")) { setResetErr("Enter the email address on your account."); return; }
+    setResetBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), { redirectTo: `${window.location.origin}/reset-password` });
+    setResetBusy(false);
+    if (error) { setResetErr(error.message); return; }
+    setResetSent(true);
+  }
+
+  function switchMode(m: Mode) { setMode(m); setErr(""); setIdentifier(""); }
+  function openForgot() { setForgot(true); setResetSent(false); setResetErr(""); setResetEmail(mode === "email" ? identifier.trim() : ""); }
+  function closeForgot() { setForgot(false); setResetSent(false); setResetErr(""); }
+
+  const field = "mt-1.5 flex items-center gap-2 rounded-xl2 border border-line bg-canvas px-3.5 py-2.5";
+  const inputCls = "w-full bg-transparent text-[14px] outline-none placeholder:text-hint";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
@@ -38,48 +63,64 @@ export default function Login() {
             </div>
           </div>
 
-          <h1 className="text-xl font-extrabold">Sign in</h1>
-          <p className="mt-1 text-[13px] text-muted">Accounts are created by an administrator. There is no public sign-up.</p>
+          {forgot ? (
+            <>
+              <button onClick={closeForgot} className="mb-3 flex items-center gap-1 text-[12.5px] text-muted hover:text-ink"><ArrowLeft size={14} /> Back to sign in</button>
+              <h1 className="text-xl font-extrabold">Reset password</h1>
 
-          <label className="mt-6 block text-[12px] font-medium text-muted">Email or phone number</label>
-          <div className="mt-1.5 flex items-center gap-2 rounded-xl2 border border-line bg-canvas px-3.5 py-2.5">
-            <User size={16} className="text-hint" />
-            <input
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="you@company.com  or  0300 1234567"
-              className="w-full bg-transparent text-[14px] outline-none placeholder:text-hint"
-            />
-          </div>
+              {mode === "email" ? (
+                resetSent ? (
+                  <div className="mt-4 flex gap-2.5 rounded-xl2 bg-panel px-4 py-4 text-[13px] leading-relaxed text-ink/80">
+                    <MailCheck size={18} className="mt-0.5 shrink-0 text-success" />
+                    <span>We&apos;ve sent a reset link to <b>{resetEmail}</b>. Open the email and click the link to set a new password. If you don&apos;t see it, check your spam folder.</span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="mt-1 text-[13px] text-muted">Enter the email on your account and we&apos;ll send a link to set a new password.</p>
+                    <label className="mt-5 block text-[12px] font-medium text-muted">Email</label>
+                    <div className={field}><Mail size={16} className="text-hint" /><input type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendReset()} placeholder="you@company.com" className={inputCls} /></div>
+                    {resetErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{resetErr}</p>}
+                    <button onClick={sendReset} disabled={resetBusy} className="mt-5 w-full rounded-xl2 bg-ink py-3 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">{resetBusy ? "Sending…" : "Send reset link"}</button>
+                  </>
+                )
+              ) : (
+                <div className="mt-4 flex gap-2.5 rounded-xl2 bg-panel px-4 py-4 text-[13px] leading-relaxed text-ink/80">
+                  <ShieldCheck size={18} className="mt-0.5 shrink-0 text-muted" />
+                  <span>Phone accounts can&apos;t reset their own password. Please <b>contact your administrator</b> — they&apos;ll reset it for you from the Users screen in a few seconds.</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <h1 className="text-xl font-extrabold">Sign in</h1>
+              <p className="mt-1 text-[13px] text-muted">Accounts are created by an administrator. There is no public sign-up.</p>
 
-          <label className="mt-4 block text-[12px] font-medium text-muted">Password</label>
-          <div className="mt-1.5 flex items-center gap-2 rounded-xl2 border border-line bg-canvas px-3.5 py-2.5">
-            <Lock size={16} className="text-hint" />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="••••••••"
-              className="w-full bg-transparent text-[14px] outline-none placeholder:text-hint"
-            />
-          </div>
+              <div className="mt-5 flex gap-1 rounded-full bg-panel p-1">
+                {(["email", "phone"] as Mode[]).map((m) => (
+                  <button key={m} onClick={() => switchMode(m)}
+                    className={`flex-1 rounded-full py-2 text-[13px] font-semibold transition ${mode === m ? "bg-ink text-white" : "text-muted hover:text-ink"}`}>
+                    {m === "email" ? "Email" : "Phone"}
+                  </button>
+                ))}
+              </div>
 
-          {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+              <label className="mt-4 block text-[12px] font-medium text-muted">{mode === "email" ? "Email" : "Phone number"}</label>
+              <div className={field}>
+                {mode === "email" ? <Mail size={16} className="text-hint" /> : <Phone size={16} className="text-hint" />}
+                <input value={identifier} type={mode === "email" ? "email" : "tel"} onChange={(e) => setIdentifier(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={mode === "email" ? "you@company.com" : "0300 1234567"} className={inputCls} />
+              </div>
 
-          <button onClick={submit} disabled={loading}
-            className="mt-6 w-full rounded-xl2 bg-ink py-3 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
-            {loading ? "Signing in…" : isSupabaseConfigured ? "Sign in" : "Enter preview"}
-          </button>
+              <label className="mt-4 block text-[12px] font-medium text-muted">Password</label>
+              <div className={field}><Lock size={16} className="text-hint" /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className={inputCls} /></div>
 
-          <button onClick={() => setShowForgot((s) => !s)} className="mt-3 w-full text-center text-[12.5px] text-muted hover:text-ink">
-            Forgot password?
-          </button>
-          {showForgot && (
-            <div className="mt-2 rounded-xl2 bg-panel px-3.5 py-3 text-[12px] leading-relaxed text-muted">
-              Please ask your administrator to reset your password for you. (Email-based self-reset will be enabled once the email service is set up.)
-            </div>
+              {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+
+              <button onClick={submit} disabled={loading} className="mt-6 w-full rounded-xl2 bg-ink py-3 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
+                {loading ? "Signing in…" : isSupabaseConfigured ? "Sign in" : "Enter preview"}
+              </button>
+
+              <button onClick={openForgot} className="mt-3 w-full text-center text-[12.5px] text-muted hover:text-ink">Forgot password?</button>
+            </>
           )}
 
           <div className="mt-5 flex items-center gap-2 rounded-xl2 bg-panel px-3 py-2.5 text-[11.5px] text-muted">
@@ -88,9 +129,7 @@ export default function Login() {
           </div>
         </div>
 
-        {!isSupabaseConfigured && (
-          <p className="mt-4 text-center text-[11.5px] text-hint">Preview build · connect Supabase to enable real logins</p>
-        )}
+        {!isSupabaseConfigured && <p className="mt-4 text-center text-[11.5px] text-hint">Preview build · connect Supabase to enable real logins</p>}
       </div>
     </div>
   );

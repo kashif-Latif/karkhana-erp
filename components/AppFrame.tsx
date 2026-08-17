@@ -38,7 +38,7 @@ function FrameContent({ children }: { children: React.ReactNode }) {
 export default function AppFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const isLogin = pathname === "/login";
+  const isLogin = pathname === "/login" || pathname === "/reset-password";
   const [authReady, setAuthReady] = useState(false);
   const [mustChange, setMustChange] = useState<boolean | null>(null);
 
