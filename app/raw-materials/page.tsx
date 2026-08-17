@@ -1,56 +1,72 @@
 "use client";
+import { useEffect, useState } from "react";
 import Topbar from "@/components/Topbar";
-import Link from "next/link";
-import { Layers, Shirt, ArrowUpRight } from "lucide-react";
+import MasterTab from "@/components/MasterTab";
+import ItemsTab from "@/components/ItemsTab";
+import MaterialsTab from "@/components/MaterialsTab";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
-// The five fixed raw-material groups (from the spec). Categories/units are the
-// planned structure; live stock & rates arrive with the inventory module (Phase 3).
-const GROUPS = [
-  { name: "Fabric", unit: "KG", accent: "amber", note: "Lycra · Jersey · Terry · Cotton — tracked by type + colour + lot" },
-  { name: "Thread", unit: "KG / Pieces", accent: "lavender", note: "Multiple units per configuration; by type + colour" },
-  { name: "Zip", unit: "Pieces", accent: "periwinkle", note: "Sizes 1–10 (master-managed) + optional colour" },
-  { name: "Sticker", unit: "KG", accent: "pink", note: "By sticker type/category" },
-  { name: "Packing Shopper", unit: "KG", accent: "salmon", note: "By shopper type" },
-] as const;
+const TABS = ["Items", "Materials", "Categories", "Colours", "Sizes", "Units"] as const;
+type Tab = (typeof TABS)[number];
 
-const TINT: Record<string, string> = {
-  amber: "#F7EAD3", lavender: "#ECE1F6", periwinkle: "#DCE7F5", pink: "#F8DCEE", salmon: "#F5D9CE",
-};
-const DOT: Record<string, string> = {
-  amber: "#E4B47E", lavender: "#B693DD", periwinkle: "#7FA3DC", pink: "#E07FBE", salmon: "#E1876B",
-};
+export default function RawMaterialsPage() {
+  const [tab, setTab] = useState<Tab>("Items");
+  const [canManage, setCanManage] = useState(false);
+  const [catGroups, setCatGroups] = useState<{ value: string; label: string }[]>([]);
 
-export default function RawMaterials() {
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.rpc("has_permission", { p_permission_code: "materials.manage" }).then(({ data }) => setCanManage(!!data));
+    supabase.from("material_groups").select("id,name").eq("has_category", true).eq("is_active", true).order("name")
+      .then(({ data }) => setCatGroups((data ?? []).map((g: { id: string; name: string }) => ({ value: g.id, label: g.name }))));
+  }, []);
+
   return (
     <>
-      <Topbar title="Raw Materials" subtitle="Your five material groups — tap a card to manage it in Catalog" />
+      <Topbar title="Raw Materials" subtitle="Materials, their items, and the shared building blocks" />
       <div className="px-6 pb-10">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {GROUPS.map((g) => (
-            <Link
-              key={g.name}
-              href="/catalog"
-              className="block rounded-card p-5 shadow-soft transition hover:-translate-y-0.5 hover:shadow-card"
-              style={{ background: TINT[g.accent] }}
-            >
-              <div className="flex items-start justify-between">
-                <span
-                  className="flex h-10 w-10 items-center justify-center rounded-full text-white"
-                  style={{ background: DOT[g.accent] }}
-                >
-                  {g.name === "Fabric" ? <Shirt size={18} /> : <Layers size={18} />}
-                </span>
-                <ArrowUpRight size={18} className="text-ink/40" />
-              </div>
-              <h3 className="mt-4 text-[16px] font-extrabold text-ink">{g.name}</h3>
-              <p className="mt-0.5 text-[12px] font-semibold text-ink/60">Unit: {g.unit}</p>
-              <p className="mt-2 text-[12.5px] leading-relaxed text-ink/70">{g.note}</p>
-              <p className="mt-3 text-[11.5px] font-semibold text-ink/55">
-                Open in Catalog to manage items &amp; attributes &rarr;
-              </p>
-            </Link>
-          ))}
-        </div>
+        {!isSupabaseConfigured ? (
+          <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage raw materials.</div>
+        ) : (
+          <>
+            <div className="mb-5 flex flex-wrap gap-2">
+              {TABS.map((t) => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === t ? "bg-ink text-white" : "bg-surface text-muted hover:bg-panel"}`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {tab === "Items" && <ItemsTab canManage={canManage} />}
+            {tab === "Materials" && <MaterialsTab canManage={canManage} />}
+
+            {tab === "Categories" && (
+              <MasterTab table="material_categories" singular="Category" canManage={canManage}
+                selectQuery="*, material_groups(name)"
+                cols={[{ key: "name", label: "Category" }, { key: "group", label: "Material", render: (r) => (r.material_groups as { name?: string } | null)?.name || "—" }]}
+                fields={[
+                  { key: "name", label: "Category name", required: true },
+                  { key: "group_id", label: "Material", type: "select", required: true, options: catGroups },
+                ]} />
+            )}
+            {tab === "Colours" && (
+              <MasterTab table="colors" singular="Colour" canManage={canManage}
+                cols={[{ key: "name", label: "Colour" }]}
+                fields={[{ key: "name", label: "Colour name", required: true }]} />
+            )}
+            {tab === "Sizes" && (
+              <MasterTab table="sizes" singular="Size" canManage={canManage}
+                cols={[{ key: "name", label: "Size" }, { key: "sort_order", label: "Order" }]}
+                fields={[{ key: "name", label: "Size name", required: true }, { key: "sort_order", label: "Sort order", type: "number" }]} />
+            )}
+            {tab === "Units" && (
+              <MasterTab table="units" singular="Unit" canManage={canManage}
+                cols={[{ key: "name", label: "Unit" }, { key: "symbol", label: "Symbol" }]}
+                fields={[{ key: "name", label: "Unit name", required: true }, { key: "symbol", label: "Symbol (KG, pcs…)" }]} />
+            )}
+          </>
+        )}
       </div>
     </>
   );

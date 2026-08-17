@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Home, LayoutDashboard, Boxes, Layers, BookOpen, Factory, Users, Truck,
+  LayoutDashboard, Boxes, Layers, Factory, Users, Truck,
   FileBarChart, CheckSquare, Settings, Gem, LogOut, Wallet, ArrowLeftRight,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
@@ -11,12 +11,10 @@ import { ROUTE_PERMS } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
 
 const NAV = [
-  { label: "Home", href: "/", Icon: Home },
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
+  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
   { label: "Inventory", href: "/inventory", Icon: Boxes },
   { label: "Movements", href: "/movements", Icon: ArrowLeftRight },
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
-  { label: "Catalog", href: "/catalog", Icon: BookOpen },
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Employees", href: "/employees", Icon: Users },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },

@@ -22,7 +22,7 @@ export default function Login() {
 
   async function submit() {
     setErr("");
-    if (!isSupabaseConfigured || !supabase) { router.push("/"); return; }
+    if (!isSupabaseConfigured || !supabase) { router.push("/dashboard"); return; }
     if (!identifier.trim() || !password) { setErr(mode === "email" ? "Enter your email and password." : "Enter your phone number and password."); return; }
     setLoading(true);
     const { data: email, error: rpcErr } = await supabase.rpc("resolve_login_email", { p_identifier: identifier.trim() });
@@ -30,7 +30,7 @@ export default function Login() {
     const { error } = await supabase.auth.signInWithPassword({ email: email as string, password });
     setLoading(false);
     if (error) setErr(mode === "email" ? "Incorrect email or password." : "Incorrect phone number or password.");
-    else router.push("/");
+    else router.push("/dashboard");
   }
 
   async function sendReset() {
