@@ -1,0 +1,229 @@
+"use client";
+import { useEffect, useState, useCallback } from "react";
+import Topbar from "@/components/Topbar";
+import IconChip from "@/components/IconChip";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { Loader2, ArrowLeftRight, Plus, Trash2, Send, RotateCcw, SlidersHorizontal, Flame } from "lucide-react";
+
+type Item = { id: string; label: string; unit: string; balance: number };
+type Dept = { id: string; name: string };
+type Line = { item_id: string; quantity: string };
+type Move = Record<string, unknown>;
+
+const TYPES = [
+  { key: "issue", label: "Issue", sub: "Out to a department", perm: "inventory.issue", Icon: Send, dept: true },
+  { key: "return", label: "Return", sub: "Back from a department", perm: "inventory.return", Icon: RotateCcw, dept: true },
+  { key: "adjustment", label: "Adjustment", sub: "Correct stock up / down", perm: "inventory.adjust", Icon: SlidersHorizontal, dept: false },
+  { key: "wastage", label: "Wastage", sub: "Wasted / damaged", perm: "inventory.adjust", Icon: Flame, dept: false },
+] as const;
+
+function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+function dateToISO(s: string) { const now = new Date(); const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
+const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+const TYPE_LABEL: Record<string, string> = { issue: "Issue", return: "Return", adjustment: "Adjustment", wastage: "Wastage" };
+
+export default function Movements() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [depts, setDepts] = useState<Dept[]>([]);
+  const [moves, setMoves] = useState<Move[]>([]);
+  const [perms, setPerms] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [type, setType] = useState<string>("issue");
+  const [deptId, setDeptId] = useState("");
+  const [direction, setDirection] = useState("remove");
+  const [reason, setReason] = useState("");
+  const [movedAt, setMovedAt] = useState(todayInput());
+  const [lines, setLines] = useState<Line[]>([{ item_id: "", quantity: "" }]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const load = useCallback(async () => {
+    if (!supabase) { setLoading(false); return; }
+    setLoading(true);
+    const [mi, sb, dp, mv, pm] = await Promise.all([
+      supabase.from("material_items").select("id, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name)").eq("is_active", true),
+      supabase.from("stock_balances").select("item_id, balance"),
+      supabase.from("departments").select("id, name").order("name"),
+      supabase.from("stock_movements").select("id, movement_number, type, reason, moved_at, departments(name)").order("created_at", { ascending: false }).limit(20),
+      supabase.rpc("my_permissions"),
+    ]);
+    const balMap = new Map(((sb.data as { item_id: string; balance: number }[]) ?? []).map((b) => [b.item_id, Number(b.balance)]));
+    const list = ((mi.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
+      const g = r.material_groups as { name?: string } | null;
+      const c = r.material_categories as { name?: string } | null;
+      const col = r.colors as { name?: string } | null;
+      const s = r.sizes as { name?: string } | null;
+      const u = r.units as { symbol?: string; name?: string } | null;
+      const label = [g?.name, c?.name, col?.name, s?.name].filter(Boolean).join(" · ");
+      return { id: r.id as string, label, unit: u?.symbol || u?.name || "", balance: balMap.get(r.id as string) ?? 0 };
+    }).sort((a, b) => a.label.localeCompare(b.label));
+    setItems(list);
+    setDepts((dp.data as Dept[]) ?? []);
+    setMoves((mv.data as Move[]) ?? []);
+    setPerms((pm.data as string[]) ?? []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const can = (p: string) => perms.includes(p);
+  const allowedTypes = TYPES.filter((t) => can(t.perm));
+  const active = TYPES.find((t) => t.key === type)!;
+  const itemById = (id: string) => items.find((i) => i.id === id);
+
+  const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((ls) => [...ls, { item_id: "", quantity: "" }]);
+  const removeLine = (i: number) => setLines((ls) => (ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i)));
+
+  async function post() {
+    setError(""); setOkMsg("");
+    if (!supabase) return;
+    if (active.dept && !deptId) { setError("Please choose a department."); return; }
+    const valid = lines.filter((l) => l.item_id && parseFloat(l.quantity) > 0);
+    if (valid.length === 0) { setError("Add at least one item with a quantity."); return; }
+    setSaving(true);
+    const p_lines = valid.map((l) => ({ item_id: l.item_id, quantity: parseFloat(l.quantity) }));
+    const { error } = await supabase.rpc("post_stock_movement", {
+      p_type: type, p_department_id: active.dept ? deptId : null, p_reason: reason,
+      p_moved_at: dateToISO(movedAt), p_direction: direction, p_lines,
+    });
+    setSaving(false);
+    if (error) { setError(error.message); return; }
+    setOkMsg(`${active.label} recorded.`);
+    setLines([{ item_id: "", quantity: "" }]); setReason("");
+    load();
+  }
+
+  return (
+    <>
+      <Topbar title="Stock Movements" subtitle="Issue · Return · Adjust · Wastage" />
+      <div className="px-6 pb-12">
+        {!isSupabaseConfigured ? (
+          <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to record movements.</div>
+        ) : loading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
+        ) : allowedTypes.length === 0 ? (
+          <div className="rounded-card bg-surface p-8 text-center shadow-card">
+            <IconChip Icon={ArrowLeftRight} size={44} />
+            <p className="mt-3 text-[15px] font-semibold text-ink">You can view movements only</p>
+            <p className="mt-1 text-[13px] text-muted">Your role doesn&apos;t include issuing, returning, or adjusting stock.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+            {/* form */}
+            <div className="space-y-5 lg:col-span-2">
+              <div className="rounded-card bg-surface p-5 shadow-card">
+                <h3 className="mb-3 text-[14px] font-extrabold text-ink">New movement</h3>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {allowedTypes.map((t) => {
+                    const on = type === t.key;
+                    return (
+                      <button key={t.key} type="button" onClick={() => { setType(t.key); setError(""); setOkMsg(""); }}
+                        className={`rounded-xl2 border p-3 text-center transition ${on ? "border-ink bg-ink text-white" : "border-line bg-canvas hover:bg-panel"}`}>
+                        <t.Icon size={18} className="mx-auto mb-1" />
+                        <div className="text-[12.5px] font-bold">{t.label}</div>
+                        <div className={`text-[10px] ${on ? "text-white/70" : "text-hint"}`}>{t.sub}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {active.dept && (
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] font-medium text-muted">Department *</span>
+                      <select value={deptId} onChange={(e) => setDeptId(e.target.value)} className={inp}>
+                        <option value="">Choose department…</option>
+                        {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {type === "adjustment" && (
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] font-medium text-muted">Direction</span>
+                      <select value={direction} onChange={(e) => setDirection(e.target.value)} className={inp}>
+                        <option value="remove">Remove stock (−)</option>
+                        <option value="add">Add stock (+)</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className="block">
+                    <span className="mb-1 block text-[12px] font-medium text-muted">Date</span>
+                    <input type="date" value={movedAt} onChange={(e) => setMovedAt(e.target.value)} className={inp} />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-[12px] font-medium text-muted">Reason / note {type === "adjustment" || type === "wastage" ? "" : "(optional)"}</span>
+                    <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={type === "wastage" ? "e.g. damaged in cutting" : type === "adjustment" ? "e.g. stock count correction" : "optional"} className={inp} />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-card bg-surface p-5 shadow-card">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-[14px] font-extrabold text-ink">Items</h3>
+                  <button onClick={addLine} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><Plus size={14} /> Add item</button>
+                </div>
+                <div className="space-y-2.5">
+                  {lines.map((l, i) => {
+                    const it = itemById(l.item_id);
+                    return (
+                      <div key={i} className="grid grid-cols-12 items-center gap-2">
+                        <div className="col-span-7">
+                          <select value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} className={inpSm}>
+                            <option value="">Choose item…</option>
+                            {items.map((it2) => <option key={it2.id} value={it2.id}>{it2.label} — {it2.balance} {it2.unit} in stock</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-4">
+                          <div className="flex items-center gap-1 rounded-xl2 border border-line bg-canvas px-2.5 py-2">
+                            <input type="number" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} placeholder="Qty" className="w-full bg-transparent text-[13px] outline-none" />
+                            <span className="text-[11px] text-hint">{it?.unit}</span>
+                          </div>
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          <button onClick={() => removeLine(i)} disabled={lines.length === 1} className="rounded-full p-1.5 text-muted hover:bg-danger-soft hover:text-danger disabled:opacity-30"><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {error && <p className="mt-3 text-[12.5px] font-medium text-danger">{error}</p>}
+                {okMsg && <p className="mt-3 text-[12.5px] font-medium text-[#166534]">{okMsg}</p>}
+                <button onClick={post} disabled={saving} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl2 bg-ink px-5 py-3 text-[14px] font-semibold text-white disabled:opacity-50">
+                  {saving && <Loader2 size={16} className="animate-spin" />} Record {active.label.toLowerCase()}
+                </button>
+              </div>
+            </div>
+
+            {/* recent */}
+            <div className="rounded-card bg-surface p-5 shadow-card">
+              <h3 className="mb-3 text-[14px] font-extrabold text-ink">Recent movements</h3>
+              {moves.length === 0 ? (
+                <p className="py-6 text-center text-[13px] text-muted">No movements yet.</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {moves.map((m) => (
+                    <div key={m.id as string} className="rounded-xl2 border border-line/70 px-3.5 py-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[12px] tnum text-ink">{m.movement_number as string}</span>
+                        <span className="rounded-full bg-panel px-2 py-0.5 text-[10.5px] font-semibold text-muted">{TYPE_LABEL[m.type as string]}</span>
+                      </div>
+                      <div className="mt-0.5 text-[11.5px] text-muted">
+                        {(m.departments as { name?: string } | null)?.name || (m.reason as string) || "—"} · {when(m.moved_at as string)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+const inp = "w-full rounded-xl2 border border-line bg-canvas px-3.5 py-2.5 text-[14px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
+const inpSm = "w-full rounded-xl2 border border-line bg-surface px-2.5 py-2 text-[13px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
