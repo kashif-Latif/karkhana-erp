@@ -1,5 +1,6 @@
 "use client";
 import Topbar from "@/components/Topbar";
+import Link from "next/link";
 import { Layers, Shirt, ArrowUpRight } from "lucide-react";
 
 // The five fixed raw-material groups (from the spec). Categories/units are the
@@ -22,13 +23,14 @@ const DOT: Record<string, string> = {
 export default function RawMaterials() {
   return (
     <>
-      <Topbar title="Raw Materials" subtitle="Your five material groups" />
+      <Topbar title="Raw Materials" subtitle="Your five material groups — tap a card to manage it in Catalog" />
       <div className="px-6 pb-10">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {GROUPS.map((g) => (
-            <div
+            <Link
               key={g.name}
-              className="rounded-card p-5 shadow-soft"
+              href="/catalog"
+              className="block rounded-card p-5 shadow-soft transition hover:-translate-y-0.5 hover:shadow-card"
               style={{ background: TINT[g.accent] }}
             >
               <div className="flex items-start justify-between">
@@ -43,10 +45,10 @@ export default function RawMaterials() {
               <h3 className="mt-4 text-[16px] font-extrabold text-ink">{g.name}</h3>
               <p className="mt-0.5 text-[12px] font-semibold text-ink/60">Unit: {g.unit}</p>
               <p className="mt-2 text-[12.5px] leading-relaxed text-ink/70">{g.note}</p>
-              <p className="mt-3 text-[11.5px] font-medium text-ink/50">
-                Live stock &amp; rates appear once the inventory module is live.
+              <p className="mt-3 text-[11.5px] font-semibold text-ink/55">
+                Open in Catalog to manage items &amp; attributes &rarr;
               </p>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
