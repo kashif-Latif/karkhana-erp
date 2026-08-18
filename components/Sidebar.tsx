@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, Boxes, Layers, Factory, Users, Truck,
+  LayoutDashboard, Boxes, Layers, Factory, Users, Truck, Shirt,
   FileBarChart, CheckSquare, Settings, Gem, LogOut, Wallet, ArrowLeftRight,
   ChevronDown, type LucideIcon,
 } from "lucide-react";
@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   ] },
   { label: "Movements", href: "/movements", Icon: ArrowLeftRight },
   { label: "Production", href: "/production", Icon: Factory },
+  { label: "Articles", href: "/articles", Icon: Shirt },
   { label: "Employees", href: "/employees", Icon: Users },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
   { label: "Payments", href: "/payments", Icon: Wallet },
