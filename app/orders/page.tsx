@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle } from "lucide-react";
+import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "lucide-react";
 
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
@@ -63,6 +63,7 @@ export default function Orders() {
   const [detailReqs, setDetailReqs] = useState<Req[] | null>(null);
   const [detailStatus, setDetailStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false); const [deleting, setDeleting] = useState(false); const [delErr, setDelErr] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -110,6 +111,7 @@ export default function Orders() {
 
   async function openDetail(o: Order) {
     setDetail(o); setDetailReqs(null); setDetailStatus(o.status);
+    setConfirmDel(false); setDelErr("");
     if (!supabase) return;
     const { data } = await supabase.rpc("get_order_requirements", { p_article_id: o.article_id, p_quantity: o.quantity });
     setDetailReqs((data as Req[]) ?? []);
@@ -120,6 +122,15 @@ export default function Orders() {
     const { error } = await supabase.rpc("update_production_order", { p_id: detail.id, p_quantity: detail.quantity, p_target_date: detail.target_date, p_notes: detail.notes, p_status: detailStatus });
     setSavingStatus(false);
     if (!error) { setDetail(null); load(); }
+  }
+
+  async function doDelete() {
+    if (!supabase || !detail) return;
+    setDelErr(""); setDeleting(true);
+    const { error } = await supabase.rpc("delete_production_order", { p_id: detail.id });
+    setDeleting(false);
+    if (error) { setDelErr(error.message); return; }
+    setDetail(null); load();
   }
 
   return (
@@ -223,6 +234,18 @@ export default function Orders() {
                   </select>
                   <button onClick={saveStatus} disabled={savingStatus || detailStatus === detail.status} className="flex shrink-0 items-center gap-1.5 rounded-xl2 bg-ink px-5 text-[13px] font-semibold text-white disabled:opacity-40">{savingStatus && <Loader2 size={15} className="animate-spin" />}Save</button>
                 </div>
+                {!confirmDel ? (
+                  <button onClick={() => setConfirmDel(true)} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
+                ) : (
+                  <div className="mt-4 rounded-xl2 bg-danger-soft p-3">
+                    <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? This can&apos;t be undone.</p>
+                    {delErr && <p className="mt-1 text-[12px] text-danger">{delErr}</p>}
+                    <div className="mt-2 flex gap-2">
+                      <button onClick={() => setConfirmDel(false)} disabled={deleting} className="rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink/70">Cancel</button>
+                      <button onClick={doDelete} disabled={deleting} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={14} className="animate-spin" />}Yes, delete</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
