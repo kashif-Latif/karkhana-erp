@@ -6,7 +6,7 @@ import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle } from "lucide-re
 
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
-type Req = { group_name: string; required: number; unit_symbol: string; available: number; enough: boolean };
+type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-panel text-muted" },
@@ -29,7 +29,7 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
         <tbody>
           {reqs.map((r, i) => (
             <tr key={i} className="border-t border-line/60">
-              <td className="px-3 py-2 font-medium text-ink">{r.group_name}</td>
+              <td className="px-3 py-2 font-medium text-ink">{r.material_label}</td>
               <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
               <td className="px-3 py-2 text-right tnum text-muted">{n(r.available)} {r.unit_symbol}</td>
               <td className="px-3 py-2 text-right">
