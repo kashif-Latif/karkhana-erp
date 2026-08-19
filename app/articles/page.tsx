@@ -6,10 +6,11 @@ import { Loader2, Plus, Pencil, Shirt, X, Trash2, BookOpen } from "lucide-react"
 
 type Cat = { id: string; name: string };
 type Group = { id: string; name: string; has_category: boolean; has_size: boolean; units: { id: string; symbol: string }[]; categories: Cat[] };
-type Article = { id: string; code: string; name: string; garment_type: string | null; audience: string | null; size: string | null; notes: string | null; is_active: boolean; bomCount: number };
+type Article = { id: string; code: string; name: string; garment_type: string | null; audience: string | null; size: string | null; notes: string | null; is_active: boolean; created_at: string; bomCount: number };
 type BomLine = { group_id: string; category_id: string; size_id: string; quantity: string; unit_id: string };
 
 const AUDIENCES = ["Kids", "Men", "Ladies", "Unisex"];
+const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 
 export default function Articles() {
   const [articles, setArticles] = useState<Article[]>([]);
@@ -33,14 +34,14 @@ export default function Articles() {
     if (!supabase) return;
     setLoading(true);
     const [a, g, sz, pm] = await Promise.all([
-      supabase.from("articles").select("id,code,name,garment_type,audience,size,notes,is_active, article_bom(count)").order("code", { ascending: false }),
+      supabase.from("articles").select("id,code,name,garment_type,audience,size,notes,is_active,created_at, article_bom(count)").order("code", { ascending: false }),
       supabase.from("material_groups").select("id,name,has_category,has_color,has_size, group_units(units(id,symbol)), material_categories(id,name)").eq("is_active", true).order("name"),
       supabase.from("sizes").select("id,name").eq("is_active", true).order("sort_order"),
       supabase.rpc("has_permission", { p_permission_code: "production.manage" }),
     ]);
     setArticles(((a.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
       const bc = (r.article_bom as { count: number }[] | null)?.[0]?.count ?? 0;
-      return { id: r.id as string, code: r.code as string, name: r.name as string, garment_type: (r.garment_type as string) || null, audience: (r.audience as string) || null, size: (r.size as string) || null, notes: (r.notes as string) || null, is_active: !!r.is_active, bomCount: Number(bc) };
+      return { id: r.id as string, code: r.code as string, name: r.name as string, garment_type: (r.garment_type as string) || null, audience: (r.audience as string) || null, size: (r.size as string) || null, notes: (r.notes as string) || null, is_active: !!r.is_active, created_at: r.created_at as string, bomCount: Number(bc) };
     }));
     setGroups(((g.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
       const gu = (r.group_units as { units: { id: string; symbol: string } | null }[]) ?? [];
@@ -140,7 +141,7 @@ export default function Articles() {
                   <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                     <th className="px-5 py-3 font-semibold">Code</th><th className="px-5 py-3 font-semibold">Article</th>
                     <th className="px-5 py-3 font-semibold">Type</th><th className="px-5 py-3 font-semibold">Audience</th>
-                    <th className="px-5 py-3 font-semibold">Recipe</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
+                    <th className="px-5 py-3 font-semibold">Recipe</th><th className="px-5 py-3 font-semibold">Added</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
                     {articles.map((a) => (
@@ -150,6 +151,7 @@ export default function Articles() {
                         <td className="px-5 py-3 text-ink/70">{a.garment_type || "—"}</td>
                         <td className="px-5 py-3 text-ink/70">{a.audience || "—"}</td>
                         <td className="px-5 py-3">{a.bomCount > 0 ? <span className="rounded-full bg-success-soft px-2 py-0.5 text-[11.5px] font-semibold text-[#166534]">{a.bomCount} material{a.bomCount > 1 ? "s" : ""}</span> : <span className="rounded-full bg-panel px-2 py-0.5 text-[11.5px] font-semibold text-muted">Not set</span>}</td>
+                        <td className="px-5 py-3 text-[12.5px] text-muted">{when(a.created_at)}</td>
                         <td className="px-5 py-3">{a.is_active ? <span className="text-[12.5px] font-medium text-[#166534]">Active</span> : <span className="text-[12.5px] text-muted">Inactive</span>}</td>
                         <td className="px-5 py-3"><div className="flex justify-end gap-1.5">
                           <button onClick={() => openRecipe(a)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><BookOpen size={13} /> Recipe</button>

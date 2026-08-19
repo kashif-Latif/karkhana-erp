@@ -5,7 +5,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "lucide-react";
 
 type Article = { id: string; name: string; code: string };
-type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
+type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
 type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -16,6 +16,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 };
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 const fmtDate = (s: string | null) => (s ? new Date(s + "T00:00:00").toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 const n = (v: number) => Number(v).toLocaleString("en-PK");
 
 function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean }) {
@@ -69,14 +70,14 @@ export default function Orders() {
     if (!supabase) return;
     setLoading(true);
     const [o, a, pm1, pm2] = await Promise.all([
-      supabase.from("production_orders").select("id,order_number,quantity,status,target_date,notes,article_id, articles(name,code)").order("created_at", { ascending: false }),
+      supabase.from("production_orders").select("id,order_number,quantity,status,target_date,created_at,notes,article_id, articles(name,code)").order("created_at", { ascending: false }),
       supabase.from("articles").select("id,name,code").eq("is_active", true).order("name"),
       supabase.rpc("has_permission", { p_permission_code: "production.entry" }),
       supabase.rpc("has_permission", { p_permission_code: "production.manage" }),
     ]);
     setOrders(((o.data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
       id: r.id as string, order_number: r.order_number as string, quantity: Number(r.quantity), status: r.status as string,
-      target_date: (r.target_date as string) || null, notes: (r.notes as string) || null, article_id: r.article_id as string,
+      target_date: (r.target_date as string) || null, created_at: r.created_at as string, notes: (r.notes as string) || null, article_id: r.article_id as string,
       article: (r.articles as { name?: string; code?: string }) || null,
     })));
     setArticles((a.data as Article[]) ?? []);
@@ -160,7 +161,7 @@ export default function Orders() {
                   <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                     <th className="px-5 py-3 font-semibold">Order</th><th className="px-5 py-3 font-semibold">Article</th>
                     <th className="px-5 py-3 text-right font-semibold">Pieces</th><th className="px-5 py-3 font-semibold">Target</th>
-                    <th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
+                    <th className="px-5 py-3 font-semibold">Placed</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
                     {orders.map((o) => {
@@ -171,6 +172,7 @@ export default function Orders() {
                           <td className="px-5 py-3 font-semibold text-ink">{o.article?.name || "—"}</td>
                           <td className="px-5 py-3 text-right tnum text-ink/80">{n(o.quantity)}</td>
                           <td className="px-5 py-3 text-ink/70">{fmtDate(o.target_date)}</td>
+                          <td className="px-5 py-3 text-[12.5px] text-muted">{when(o.created_at)}</td>
                           <td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${st.cls}`}>{st.label}</span></td>
                           <td className="px-5 py-3 text-right"><button onClick={() => openDetail(o)} className="rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">View</button></td>
                         </tr>
@@ -220,6 +222,7 @@ export default function Orders() {
           <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between"><h2 className="text-[16px] font-extrabold">{detail.order_number}</h2><button onClick={() => setDetail(null)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button></div>
             <p className="text-[13px] text-muted">{detail.article?.name} · <b className="text-ink">{n(detail.quantity)}</b> pieces · target {fmtDate(detail.target_date)}</p>
+            <p className="text-[12px] text-muted">Placed {when(detail.created_at)}</p>
             {detail.notes && <p className="mt-1 text-[12.5px] text-muted">Note: {detail.notes}</p>}
 
             <p className="mb-2 mt-4 text-[12px] font-semibold text-ink">Material needed</p>

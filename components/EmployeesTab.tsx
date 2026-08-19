@@ -4,6 +4,7 @@ import { Plus, Search, Pencil, X, Loader2, Trash2, Users } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase } from "@/lib/supabase";
 
+const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 type Opt = { id: string; name: string };
 type Emp = Record<string, unknown>;
 type FormState = {
@@ -142,6 +143,7 @@ export default function EmployeesTab({ canManage, departments, designations }: {
                 <th className="px-5 py-3 font-semibold">Designation</th>
                 <th className="px-5 py-3 font-semibold">Pay type</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 font-semibold">Added</th>
                 {canManage && <th className="px-5 py-3" />}
               </tr>
             </thead>
@@ -158,6 +160,7 @@ export default function EmployeesTab({ canManage, departments, designations }: {
                       {e.is_active ? "Active" : "Inactive"}
                     </span>
                   </td>
+                  <td className="px-5 py-3 text-[12.5px] text-muted">{e.created_at ? when(e.created_at as string) : "—"}</td>
                   {canManage && (
                     <td className="px-5 py-3 text-right">
                       <button onClick={() => openEdit(e)} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[12px] text-ink/70 hover:bg-panel">
