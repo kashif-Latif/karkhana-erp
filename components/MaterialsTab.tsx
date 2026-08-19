@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Pencil, Loader2, X, Check } from "lucide-react";
+import { Plus, Pencil, Loader2, X, Check, Trash2 } from "lucide-react";
 
 type Unit = { id: string; name: string; symbol: string };
 type Group = { id: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean; units: { id: string; symbol: string }[] };
@@ -10,6 +10,7 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteFor, setDeleteFor] = useState<Group | null>(null); const [deleting, setDeleting] = useState(false); const [deleteErr, setDeleteErr] = useState("");
 
   const [modal, setModal] = useState<null | { id?: string }>(null);
   const [name, setName] = useState("");
@@ -43,6 +44,15 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
 
   function openAdd() { setModal({}); setName(""); setHasCat(false); setHasCol(false); setHasSize(false); setUnitIds([]); setErr(""); }
   function openEdit(g: Group) { setModal({ id: g.id }); setName(g.name); setHasCat(g.has_category); setHasCol(g.has_color); setHasSize(g.has_size); setUnitIds(g.units.map((x) => x.id)); setErr(""); }
+
+  async function doDelete() {
+    if (!supabase || !deleteFor) return;
+    setDeleteErr(""); setDeleting(true);
+    const { error } = await supabase.rpc("delete_material_group", { p_id: deleteFor.id });
+    setDeleting(false);
+    if (error) { setDeleteErr(error.message); return; }
+    setDeleteFor(null); load();
+  }
   function toggleUnit(id: string) { setUnitIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])); }
 
   async function save() {
@@ -86,6 +96,7 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
                   return <span key={k} className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold ${on ? "bg-success-soft text-[#166534]" : "bg-panel text-muted"}`}>{on ? <Check size={13} /> : <span className="text-hint">—</span>} {label}</span>;
                 })}
                 {canManage && <button onClick={() => openEdit(g)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><Pencil size={13} /> Edit</button>}
+                {canManage && <button onClick={() => setDeleteFor(g)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-danger hover:bg-danger-soft"><Trash2 size={13} /> Delete</button>}
               </div>
             </div>
           </div>
@@ -122,6 +133,21 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setModal(null)} disabled={saving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
               <button onClick={save} disabled={saving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={15} className="animate-spin" />}{modal.id ? "Save changes" : "Add material"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !deleting && setDeleteFor(null)}>
+          <div className="w-full max-w-sm rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger-soft text-danger"><Trash2 size={22} /></div>
+            <h2 className="text-center text-[16px] font-extrabold">Delete this material?</h2>
+            <p className="mt-1.5 text-center text-[13px] text-muted"><b className="text-ink">{deleteFor.name}</b> will be permanently removed. This can&apos;t be undone.</p>
+            {deleteErr && <p className="mt-3 rounded-xl2 bg-danger-soft px-3 py-2 text-center text-[12.5px] font-medium text-danger">{deleteErr}</p>}
+            <div className="mt-5 flex justify-center gap-2">
+              <button onClick={() => setDeleteFor(null)} disabled={deleting} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={doDelete} disabled={deleting} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={15} className="animate-spin" />}Delete</button>
             </div>
           </div>
         </div>
