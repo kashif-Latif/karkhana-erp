@@ -27,6 +27,7 @@ export default function Articles() {
   const [lines, setLines] = useState<BomLine[]>([]);
   const [recipeLoading, setRecipeLoading] = useState(false);
   const [savingRecipe, setSavingRecipe] = useState(false); const [recipeErr, setRecipeErr] = useState("");
+  const [deleteFor, setDeleteFor] = useState<Article | null>(null); const [deleting, setDeleting] = useState(false); const [deleteErr, setDeleteErr] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -103,6 +104,15 @@ export default function Articles() {
     setRecipeFor(null); load();
   }
 
+  async function doDelete() {
+    setDeleteErr(""); if (!supabase || !deleteFor) return;
+    setDeleting(true);
+    const { error } = await supabase.rpc("delete_article", { p_id: deleteFor.id });
+    setDeleting(false);
+    if (error) { setDeleteErr(error.message); return; }
+    setDeleteFor(null); load();
+  }
+
   return (
     <>
       <Topbar title="Articles" subtitle="Your garments & their material recipe" />
@@ -144,6 +154,7 @@ export default function Articles() {
                         <td className="px-5 py-3"><div className="flex justify-end gap-1.5">
                           <button onClick={() => openRecipe(a)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><BookOpen size={13} /> Recipe</button>
                           {canManage && <button onClick={() => openEdit(a)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><Pencil size={13} /> Edit</button>}
+                          {canManage && <button onClick={() => setDeleteFor(a)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-danger hover:bg-danger-soft"><Trash2 size={13} /> Delete</button>}
                         </div></td>
                       </tr>
                     ))}
@@ -235,6 +246,20 @@ export default function Articles() {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+      {deleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !deleting && setDeleteFor(null)}>
+          <div className="w-full max-w-sm rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger-soft text-danger"><Trash2 size={22} /></div>
+            <h2 className="text-center text-[16px] font-extrabold">Delete this article?</h2>
+            <p className="mt-1.5 text-center text-[13px] text-muted"><b className="text-ink">{deleteFor.name}</b> and its recipe will be permanently removed. This can&apos;t be undone.</p>
+            {deleteErr && <p className="mt-3 rounded-xl2 bg-danger-soft px-3 py-2 text-center text-[12.5px] font-medium text-danger">{deleteErr}</p>}
+            <div className="mt-5 flex justify-center gap-2">
+              <button onClick={() => setDeleteFor(null)} disabled={deleting} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={doDelete} disabled={deleting} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={15} className="animate-spin" />}Delete</button>
+            </div>
           </div>
         </div>
       )}
