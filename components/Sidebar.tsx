@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Boxes, Layers, Factory, Users, Truck, Shirt, ClipboardList,
   FileBarChart, CheckSquare, Settings, Gem, LogOut, Wallet, ArrowLeftRight,
-  ChevronDown, type LucideIcon,
+  ChevronDown, ArrowLeft, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
 import { usePermissions } from "@/lib/usePermissions";
@@ -63,13 +63,16 @@ export default function Sidebar() {
 
   return (
     <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-surface md:flex">
-      <Link href="/" className="flex items-center gap-2.5 px-6 py-6">
+      <Link href="/" className="flex items-center gap-2 px-6 pt-5 text-[12.5px] font-semibold text-muted transition hover:text-ink">
+        <ArrowLeft size={15} /> All departments
+      </Link>
+      <div className="flex items-center gap-2.5 px-6 pb-5 pt-4">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white"><Gem size={18} /></span>
         <div className="leading-tight">
           <div className="text-[15px] font-extrabold tracking-tight">Karkhana</div>
           <div className="text-[11px] text-muted">Head Office ERP</div>
         </div>
-      </Link>
+      </div>
 
       <nav className="flex-1 space-y-1 px-3">
         {!ready ? (
