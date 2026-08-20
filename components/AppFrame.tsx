@@ -39,6 +39,12 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isLogin = pathname === "/login" || pathname === "/reset-password";
+  // The department chooser (/) and the new Online/Retail areas render full-screen
+  // (their own chrome), not inside the factory sidebar. Still auth-gated below.
+  const isFullScreen =
+    pathname === "/" ||
+    pathname === "/online" || pathname.startsWith("/online/") ||
+    pathname === "/retail" || pathname.startsWith("/retail/");
   const [authReady, setAuthReady] = useState(false);
   const [mustChange, setMustChange] = useState<boolean | null>(null);
 
@@ -58,6 +64,9 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   if (!authReady) return null;
   if (mustChange === null) return null;
   if (mustChange) return <SetPassword onDone={() => setMustChange(false)} />;
+
+  // Chooser + new department areas: authenticated, but full-screen (no factory sidebar).
+  if (isFullScreen) return <>{children}</>;
 
   // Only now (fully authenticated) do we load permissions — one shared copy.
   return (
