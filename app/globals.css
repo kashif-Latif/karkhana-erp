@@ -57,3 +57,12 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .reveal { animation: none; opacity: 1; transform: none; }
 }
+
+/* ---- Dark mode (opt-in via .dark on <html>) ---- */
+.dark body {
+  background: #17140f;
+  color: #f4f1ea;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #2e2a24;
+}
