@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Receipt, Store, BookText, Percent, Wallet, ArrowLeft, LogOut, Building2, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Receipt, Store, BookText, Percent, Wallet, ArrowLeft, LogOut, Building2, type LucideIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV: { label: string; href: string; Icon: LucideIcon; soon?: boolean }[] = [
+  { label: "Dashboard", href: "/retail/dashboard", Icon: LayoutDashboard },
   { label: "Sales", href: "/retail/sales", Icon: Receipt },
   { label: "Branches", href: "/retail/branches", Icon: Building2 },
   { label: "Cash Book", href: "/retail/cashbook", Icon: BookText, soon: true },
