@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 import Sidebar from "./Sidebar";
+import MobileBar from "./MobileBar";
 import SetPassword from "./SetPassword";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { PermissionsProvider, usePermissions } from "@/lib/usePermissions";
@@ -25,12 +26,16 @@ function FrameContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { ready, can } = usePermissions();
   const allowed = can(requiredFor(pathname));
+  const [navOpen, setNavOpen] = useState(false);
   return (
     <div className="flex min-h-screen bg-canvas">
-      <Sidebar />
-      <main className="min-w-0 flex-1">
-        {!ready ? null : allowed ? children : <AccessRestricted />}
-      </main>
+      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <MobileBar title="Karkhana" onOpen={() => setNavOpen(true)} />
+        <main className="min-w-0 flex-1">
+          {!ready ? null : allowed ? children : <AccessRestricted />}
+        </main>
+      </div>
     </div>
   );
 }

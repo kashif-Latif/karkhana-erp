@@ -34,7 +34,7 @@ const NAV: NavItem[] = [
   { label: "Administration", href: "/administration", Icon: Settings },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const profile = useProfile();
@@ -62,8 +62,10 @@ export default function Sidebar() {
   const childActive = (href: string) => (href === "/inventory" ? rawMaterialActive() : leafActive(href));
 
   return (
-    <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-surface md:flex">
-      <Link href="/" className="flex items-center gap-2 px-6 pt-5 text-[12.5px] font-semibold text-muted transition hover:text-ink">
+    <>
+      {open && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={onClose} />}
+      <aside className={`flex w-[248px] shrink-0 flex-col border-r border-line bg-surface fixed inset-y-0 left-0 z-50 transition-transform md:static md:z-auto md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
+      <Link href="/" onClick={onClose} className="flex items-center gap-2 px-6 pt-5 text-[12.5px] font-semibold text-muted transition hover:text-ink">
         <ArrowLeft size={15} /> All departments
       </Link>
       <div className="flex items-center gap-2.5 px-6 pb-5 pt-4">
@@ -74,7 +76,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
+      <nav className="flex-1 space-y-1 px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
         {!ready ? (
           Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="mx-1 my-1 h-9 animate-pulse rounded-xl2 bg-panel/70" />
@@ -136,5 +138,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }
