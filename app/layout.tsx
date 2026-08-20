@@ -1,10 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppFrame from "@/components/AppFrame";
 
 export const metadata: Metadata = {
   title: "Karkhana ERP — Head Office",
   description: "Raw-material inventory, production & piece-rate management",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

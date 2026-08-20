@@ -31,7 +31,7 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
             <div className="text-[11px] text-muted dark:text-[#a89f93]">Online orders</div>
           </div>
         </div>
-        <nav className="flex-1 space-y-1 px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
           {NAV.map(({ label, href, Icon, soon }) => {
             const on = active(href);
             return (

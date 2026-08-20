@@ -76,7 +76,7 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
         {!ready ? (
           Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="mx-1 my-1 h-9 animate-pulse rounded-xl2 bg-panel/70" />

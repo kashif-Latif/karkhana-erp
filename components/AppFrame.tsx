@@ -28,11 +28,11 @@ function FrameContent({ children }: { children: React.ReactNode }) {
   const allowed = can(requiredFor(pathname));
   const [navOpen, setNavOpen] = useState(false);
   return (
-    <div className="flex min-h-screen bg-canvas">
+    <div className="flex h-[100dvh] overflow-hidden bg-canvas">
       <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileBar title="Karkhana" onOpen={() => setNavOpen(true)} />
-        <main className="min-w-0 flex-1">
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
           {!ready ? null : allowed ? children : <AccessRestricted />}
         </main>
       </div>
