@@ -27,7 +27,7 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
         <div className="flex items-center gap-2.5 px-5 pb-5 pt-4">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white dark:bg-white dark:text-[#141414]"><ShoppingBag size={18} /></span>
           <div className="leading-tight">
-            <div className="text-[15px] font-extrabold tracking-tight dark:text-[#f4f1ea]">Grohub Solutions</div>
+            <div className="text-[15px] font-extrabold tracking-tight dark:text-[#f4f1ea]">Hub Department</div>
             <div className="text-[11px] text-muted dark:text-[#a89f93]">Online orders</div>
           </div>
         </div>

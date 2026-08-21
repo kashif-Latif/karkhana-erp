@@ -7,8 +7,8 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const DEPARTMENTS = [
-  { href: "/dashboard", title: "Garment Factory", subtitle: "Production, materials, inventory & payroll", icon: Factory, light: "bg-amber-soft", chip: "dark:bg-amber" },
-  { href: "/online", title: "Grohub Solutions", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle" },
+  { href: "/dashboard", title: "Karkhana", subtitle: "Production, materials, inventory & payroll", icon: Factory, light: "bg-amber-soft", chip: "dark:bg-amber" },
+  { href: "/online", title: "Hub Department", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle" },
   { href: "/retail", title: "FS Traders", subtitle: "Retail shops · sales, cash book & commissions", icon: Store, light: "bg-salmon-soft", chip: "dark:bg-salmon" },
 ];
 
@@ -30,7 +30,7 @@ export default function DepartmentChooser() {
     <div className="flex min-h-screen flex-col bg-canvas dark:bg-[#17140f]">
       {/* utility bar */}
       <div className="flex items-center justify-between px-5 py-4 sm:px-8">
-        <span className="text-[12.5px] font-semibold text-muted dark:text-[#a89f93]">Grohub Solutions</span>
+        <span className="text-[12.5px] font-semibold text-muted dark:text-[#a89f93]">Group workspace</span>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <button
@@ -49,7 +49,7 @@ export default function DepartmentChooser() {
             <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-ink text-white shadow-card dark:bg-white dark:text-[#141414]">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M3 7l9 5 9-5" /><path d="M12 12v10" /></svg>
             </span>
-            <h1 className="text-[26px] font-extrabold tracking-tight text-ink dark:text-[#f4f1ea]">Karkhana</h1>
+            <h1 className="text-[26px] font-extrabold tracking-tight text-ink dark:text-[#f4f1ea]">Grohub Solutions</h1>
             <p className="mt-1.5 text-[14px] font-medium text-muted dark:text-[#a89f93]">{email ? "Welcome back — choose a department" : "Choose a department"}</p>
           </div>
 
