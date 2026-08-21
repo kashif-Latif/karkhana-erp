@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookText, Receipt, ArrowLeftRight, Landmark, RefreshCw, ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import RangeBar from "@/components/RangeBar";
+import { rangeDates } from "@/lib/dateRange";
 
 type Tab = "daily" | "expenses" | "cashflow" | "bank";
 type Row = Record<string, unknown>;
@@ -22,6 +24,8 @@ export default function CashBookPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [preset, setPreset] = useState("30d");
+  const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
   const branchName = (id: unknown) => branches.find((b) => b.id === Number(id))?.name ?? "—";
 
   useEffect(() => {
@@ -29,10 +33,12 @@ export default function CashBookPage() {
     supabase.from("retail_branches").select("id,name").order("name").then(({ data }) => setBranches((data as Branch[]) ?? []));
   }, []);
 
-  async function load(which: Tab) {
+  const load = useCallback(async (which: Tab) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
-    const q =
+    const [from, to] = rangeDates(preset, cf, ct);
+    const dcol = which === "daily" ? "book_date" : which === "expenses" ? "expense_date" : which === "cashflow" ? "flow_date" : "sale_date";
+    let q =
       which === "daily"
         ? supabase.from("retail_daily_book").select("id,branch_id,book_date,opening_balance,net_sale,cash_sale,card_sale,expense,physical_cash").order("book_date", { ascending: false, nullsFirst: false }).limit(1000)
         : which === "expenses"
@@ -40,12 +46,14 @@ export default function CashBookPage() {
         : which === "cashflow"
         ? supabase.from("retail_ho_cashflow").select("id,flow_date,direction,category,amount,description").order("flow_date", { ascending: false, nullsFirst: false }).limit(1000)
         : supabase.from("retail_bank_settlements").select("id,branch_id,sale_date,actual_received,note").order("sale_date", { ascending: false, nullsFirst: false }).limit(1000);
+    if (from) q = q.gte(dcol, from);
+    if (to) q = q.lte(dcol, to);
     const { data, error } = await q;
     if (error) setErr(error.message);
     setRows((data as Row[]) ?? []);
     setLoading(false);
-  }
-  useEffect(() => { load(tab); /* eslint-disable-next-line */ }, [tab]);
+  }, [preset, cf, ct]);
+  useEffect(() => { load(tab); }, [tab, load]);
 
   const cards = useMemo(() => {
     if (tab === "daily") return [
@@ -79,7 +87,7 @@ export default function CashBookPage() {
   }, [tab, rows]);
 
   return (
-    <div className="px-6 py-8 md:px-10">
+    <div className="px-4 py-6 sm:px-6 md:px-10 md:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[22px] font-extrabold tracking-tight text-ink dark:text-[#f4f1ea]">Cash Book</h1>
@@ -90,16 +98,18 @@ export default function CashBookPage() {
         </button>
       </div>
 
-      <div className="mt-6 flex gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05] w-fit">
+      <RangeBar preset={preset} setPreset={setPreset} cf={cf} setCf={setCf} ct={ct} setCt={setCt} />
+
+      <div className="mt-5 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><div className="flex w-max gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05]">
         {TABS.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`rounded-full px-4 py-1.5 text-[12.5px] font-semibold transition ${tab === t.key ? "bg-ink text-white dark:bg-white dark:text-[#141414]" : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
             {t.label}
           </button>
         ))}
-      </div>
+      </div></div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(({ label, value, Icon, bg }, i) => (
           <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
@@ -111,7 +121,7 @@ export default function CashBookPage() {
 
       <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-[13px]">
+          <table className="w-full min-w-[640px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]">
                 {tab === "daily" && <><th className="px-4 py-3 font-semibold">Branch</th><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 text-right font-semibold">Opening</th><th className="px-4 py-3 text-right font-semibold">Net sale</th><th className="px-4 py-3 text-right font-semibold">Cash</th><th className="px-4 py-3 text-right font-semibold">Expense</th><th className="px-4 py-3 text-right font-semibold">Physical</th></>}
