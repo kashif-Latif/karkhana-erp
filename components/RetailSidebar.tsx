@@ -11,7 +11,7 @@ const NAV: { label: string; href: string; Icon: LucideIcon; soon?: boolean }[] =
   { label: "Branches", href: "/retail/branches", Icon: Building2 },
   { label: "Cash Book", href: "/retail/cashbook", Icon: BookText },
   { label: "Commissions", href: "/retail/commissions", Icon: Percent },
-  { label: "Salaries", href: "/retail/salaries", Icon: Wallet, soon: true },
+  { label: "Salaries", href: "/retail/salaries", Icon: Wallet },
 ];
 
 export default function RetailSidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
