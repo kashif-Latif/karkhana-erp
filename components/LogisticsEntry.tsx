@@ -19,11 +19,15 @@ export function AddShipment({ onDone }: { onDone: () => void }) {
   async function save() {
     if (!supabase || !f.order_number.trim()) { setRes({ ok: false, msg: "Order number is required." }); return; }
     setBusy(true); setRes(null);
-    const { error } = await supabase.from("online_logistics").upsert({
+    const payload = {
       order_number: f.order_number.trim(), store_code: f.store_code, courier: f.courier,
       tracking_id: f.tracking_id.trim() || null, dispatch_date: f.dispatch_date || null,
       delivery_status: f.delivery_status, cod_amount: f.cod_amount ? Number(f.cod_amount) : null,
-    }, { onConflict: "store_code,order_number" });
+    };
+    // tracking number is the real-world unique key for a parcel; without one we simply insert.
+    const { error } = payload.tracking_id
+      ? await supabase.from("online_logistics").upsert(payload, { onConflict: "tracking_id" })
+      : await supabase.from("online_logistics").insert(payload);
     setBusy(false);
     if (error) { setRes({ ok: false, msg: error.message }); return; }
     setRes({ ok: true, msg: "Shipment saved." });
@@ -93,7 +97,8 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
     const cCpr = matchHeader(H, ["cpr", "cpr number", "batch", "payment ref"]);
     const cNet = matchHeader(H, ["net amount", "payable", "net"]);
 
-    if (!cOrder && !cTrack) { setBusy(false); setRes({ ok: false, msg: "Couldn't find an order or tracking column in this file." }); return; }
+    if (mode !== "cpr" && !cTrack) { setBusy(false); setRes({ ok: false, msg: "This file needs a tracking-number column — that's how shipments are matched." }); return; }
+    if (mode === "cpr" && !cCpr) { setBusy(false); setRes({ ok: false, msg: "Couldn't find a CPR/batch number column in this file." }); return; }
 
     // record the batch first
     const { data: batch } = await supabase.from("online_import_batches").insert({
@@ -119,7 +124,7 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
       const seen = new Set<string>();
       const payload = preview.rows.map((r) => {
         const ord = cOrder ? r[cOrder] : "";
-        const row: Record<string, unknown> = { store_code: store, courier, order_number: ord || (cTrack ? r[cTrack] : ""), import_batch_id: batchId };
+        const row: Record<string, unknown> = { store_code: store, courier, order_number: ord || null, import_batch_id: batchId };
         if (cTrack) row.tracking_id = r[cTrack] || null;
         if (cDate) row[mode === "status" ? "delivery_date" : "dispatch_date"] = toDate(r[cDate]);
         if (cAmount) row.cod_amount = toNum(r[cAmount]);
@@ -130,12 +135,17 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
           row.delivery_status = /deliver/.test(s) ? "Delivered" : /return|rts/.test(s) ? "Returned" : /cancel/.test(s) ? "Cancelled" : "In Transit";
         } else if (mode === "load_sheet") row.delivery_status = "In Transit";
         return row;
-      }).filter((r) => { const k = `${r.store_code}|${r.order_number}`; if (!r.order_number || seen.has(k)) { skipped++; return false; } seen.add(k); return true; });
+      }).filter((r) => {
+        const k = String(r.tracking_id ?? "");
+        // one tracking number = one parcel; rows without one can't be safely deduped
+        if (!k || seen.has(k)) { skipped++; return false; }
+        seen.add(k); return true;
+      });
 
       for (let i = 0; i < payload.length; i += 300) {
         const chunk = payload.slice(i, i + 300);
         const { data, error } = await supabase.from("online_logistics")
-          .upsert(chunk, { onConflict: "store_code,order_number", ignoreDuplicates: mode === "load_sheet" })
+          .upsert(chunk, { onConflict: "tracking_id", ignoreDuplicates: mode === "load_sheet" })
           .select("id");
         if (error) { setBusy(false); setRes({ ok: false, msg: error.message }); return; }
         newRows += (data ?? []).length;
