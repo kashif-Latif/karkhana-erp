@@ -4,6 +4,7 @@ import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock } from "lucide-
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates } from "@/lib/dateRange";
+import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
 
 type Tab = "payments" | "cpr" | "returns";
 type Row = Record<string, unknown>;
@@ -39,6 +40,7 @@ export default function FinancePage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [editRow, setEditRow] = useState<Row | null>(null);
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
@@ -103,6 +105,7 @@ export default function FinancePage() {
             className="rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
             {STORES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
+          <AddFinanceRow tab={tab} onDone={() => load(tab)} />
           <button onClick={() => load(tab)} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -158,7 +161,7 @@ export default function FinancePage() {
                 <tr><td colSpan={7} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
                 rowsF.map((r, i) => (
-                  <tr key={i} className="text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
+                  <tr key={i} onClick={() => setEditRow(r)} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.store_code ?? "—")}</td>
@@ -193,6 +196,12 @@ export default function FinancePage() {
           </table>
         </div>
       </div>
+
+      {!loading && !err && rowsF.length > 0 && (
+        <p className="mt-3 text-center text-[12px] text-hint dark:text-[#8a8175]">Tip: click any row to {tab === "payments" ? "mark it paid" : tab === "cpr" ? "update the batch" : "mark it received"}.</p>
+      )}
+
+      <EditFinanceRow tab={tab} row={editRow} onClose={() => setEditRow(null)} onDone={() => load(tab)} />
 
       {!isSupabaseConfigured && <p className="mt-4 text-center text-[12px] text-hint dark:text-[#8a8175]">Preview build · connect Supabase to load live finance data.</p>}
     </div>
