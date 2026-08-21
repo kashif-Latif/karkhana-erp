@@ -5,6 +5,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
 import { AddShipment, UploadCourierFile } from "@/components/LogisticsEntry";
+import CourierSync from "@/components/CourierSync";
 
 type Logi = Record<string, unknown>;
 type View = "list" | "couriers" | "status";
@@ -116,6 +117,7 @@ export default function LogisticsPage() {
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">PostEx / OwnEx tracking, delivery performance &amp; RTS.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CourierSync onDone={load} />
           <UploadCourierFile onDone={load} />
           <AddShipment onDone={load} />
           <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
