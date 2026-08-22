@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Package, Truck, CheckCircle2, Undo2, Percent, Wallet, Search, RefreshCw } from "lucide-react";
+import { Package, Truck, CheckCircle2, Undo2, Percent, Wallet, Search, RefreshCw, XCircle, Clock, TrendingUp } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
@@ -24,6 +24,7 @@ function deliveryClass(s: string) {
     case "Delivered": return "bg-success-soft text-success dark:bg-white/[0.08] dark:text-success";
     case "RTS": case "Returned": return "bg-danger-soft text-danger dark:bg-white/[0.08] dark:text-danger";
     case "In Transit": return "bg-periwinkle-soft text-periwinkle-strong dark:bg-white/[0.08] dark:text-periwinkle";
+    case "Cancelled": return "bg-panel text-muted dark:bg-white/[0.06] dark:text-[#a89f93]";
     default: return "bg-amber-soft text-amber-strong dark:bg-white/[0.08] dark:text-amber";
   }
 }
@@ -68,24 +69,45 @@ export default function LogisticsPage() {
   const M = useMemo(() => {
     const delivered = filtered.filter((l) => l.delivery_status === "Delivered").length;
     const rts = filtered.filter(isRts).length;
+    const cancelled = filtered.filter((l) => l.delivery_status === "Cancelled").length;
     const settled = delivered + rts;
+    const isPaid = (l: Logi) => l.payment_status === "Paid" || l.payment_status === "Received";
     return {
       total: filtered.length,
+      active: filtered.length - cancelled,      // what the courier portal counts
       transit: filtered.filter((l) => l.delivery_status === "In Transit").length,
-      delivered, rts,
+      delivered, rts, cancelled,
       rate: settled ? (delivered / settled) * 100 : 0,
       cod: filtered.filter((l) => l.delivery_status === "Delivered").reduce((a, l) => a + num(l.cod_amount), 0),
+      // money already collected by the courier but not yet paid over to us
+      receivable: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l))
+                          .reduce((a, l) => a + num(l.cod_amount), 0),
+      receivableCount: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l)).length,
       fees: filtered.reduce((a, l) => a + num(l.courier_fee), 0),
     };
   }, [filtered]);
 
+  // 14-day delivered trend, drawn from the rows we already have
+  const trend = useMemo(() => {
+    const byDay: Record<string, number> = {};
+    filtered.forEach((l) => {
+      if (l.delivery_status !== "Delivered") return;
+      const d = String(l.delivery_date ?? "").slice(0, 10);
+      if (d) byDay[d] = (byDay[d] || 0) + 1;
+    });
+    return Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+      .map(([date, count]) => ({ date, count }));
+  }, [filtered]);
+
   const cards = [
-    { label: "Shipments", value: M.total.toLocaleString(), Icon: Package, bg: "bg-periwinkle-soft" },
+    { label: "Active shipments", value: M.active.toLocaleString(), sub: M.cancelled ? `${M.total.toLocaleString()} incl. cancelled` : undefined, Icon: Package, bg: "bg-periwinkle-soft" },
     { label: "In transit", value: M.transit.toLocaleString(), Icon: Truck, bg: "bg-amber-soft" },
     { label: "Delivered", value: M.delivered.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft" },
     { label: "RTS / returns", value: M.rts.toLocaleString(), Icon: Undo2, bg: "bg-salmon-soft" },
+    { label: "Cancelled", value: M.cancelled.toLocaleString(), Icon: XCircle, bg: "bg-panel" },
     { label: "Delivery rate", value: `${M.rate.toFixed(1)}%`, Icon: Percent, bg: "bg-lavender-soft" },
     { label: "COD delivered", value: rs(M.cod), Icon: Wallet, bg: "bg-pink-soft" },
+    { label: "COD receivable", value: rs(M.receivable), sub: M.receivableCount ? `${M.receivableCount.toLocaleString()} parcels unpaid` : "all settled", Icon: Clock, bg: "bg-success-soft", warn: M.receivable > 0 },
   ];
 
   const byCourier = useMemo(() => {
@@ -142,15 +164,35 @@ export default function LogisticsPage() {
           </>
         } />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        {cards.map(({ label, value, Icon, bg }) => (
+      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+        {cards.map(({ label, value, sub, Icon, bg, warn }) => (
           <div key={label} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17]`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
-            <div className="mt-3 text-[16px] font-extrabold tabular-nums text-ink sm:text-[18px] dark:text-[#f4f1ea]">{loading ? "—" : value}</div>
+            <div className={`mt-3 text-[15px] font-extrabold tabular-nums sm:text-[17px] ${warn ? "text-amber-strong dark:text-amber" : "text-ink dark:text-[#f4f1ea]"}`}>{loading ? "—" : value}</div>
             <div className="text-[12px] font-medium text-muted dark:text-[#a89f93]">{label}</div>
+            {sub && <div className="mt-0.5 text-[10.5px] text-hint dark:text-[#8a8175]">{sub}</div>}
           </div>
         ))}
       </div>
+
+      {/* delivered trend — the courier portals show this, so we do too */}
+      {!loading && trend.length > 1 && (
+        <div className="mt-4 rounded-card border border-line bg-surface p-5 dark:border-white/[0.06] dark:bg-[#201c17]">
+          <h3 className="mb-3 flex items-center gap-2 text-[14px] font-bold text-ink dark:text-[#f4f1ea]"><TrendingUp size={16} /> Delivered per day</h3>
+          <div className="flex h-28 items-end gap-1.5">
+            {trend.map((d) => {
+              const max = Math.max(...trend.map((x) => x.count), 1);
+              return (
+                <div key={d.date} className="group flex flex-1 flex-col items-center gap-1">
+                  <span className="text-[10px] font-semibold tabular-nums text-muted opacity-0 transition group-hover:opacity-100 dark:text-[#a89f93]">{d.count}</span>
+                  <div className="w-full rounded-t bg-success transition hover:opacity-80" style={{ height: `${Math.max((d.count / max) * 80, 3)}px` }} title={`${d.date}: ${d.count} delivered`} />
+                  <span className="text-[9.5px] text-hint dark:text-[#8a8175]">{d.date.slice(8)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="flex w-max gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05]">
