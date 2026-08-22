@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { Upload, Loader2, CheckCircle2, AlertTriangle, FileSpreadsheet } from "lucide-react";
 import * as XLSX from "xlsx";
+import * as pdfjsLib from "pdfjs-dist";
 import { supabase } from "@/lib/supabase";
 import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
 import { matchHeader, toNum, toDate } from "@/lib/csv";
@@ -16,6 +17,9 @@ type Detected = {
   couriers: Record<string, number>;
   stores: Record<string, number>;
   withTracking: number;
+  /** for PDFs: what the sheet says vs what we read. The import is blocked
+   *  unless they agree, so a mis-read column can never become wrong money. */
+  proof?: { declaredCount?: number; parsedCount: number; declaredTotal?: number; parsedTotal: number; sheet?: string };
 };
 
 /* the courier is written into the tracking number itself — no need to ask */
@@ -31,6 +35,68 @@ function storeFromRef(ref: string) {
   if (/^#?TS/.test(u)) return "TS";
   if (/^#?LM/.test(u)) return "LM";
   return null;
+}
+
+/** Read a courier load-sheet PDF.
+ *  These are machine-generated with a fixed layout, so the text can be grouped
+ *  back into rows by vertical position and read column by column. That is only
+ *  safe because the format is consistent — a scan or a hand-made PDF would not
+ *  be, which is why the summary below always shows what was read before
+ *  anything is written. */
+type PdfRead = { headers: string[]; rows: Row[]; declared: { count?: number; total?: number; sheet?: string } };
+async function readPdf(file: File): Promise<PdfRead> {
+  // the worker build has to match the installed version exactly
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const lines: string[] = [];
+
+  for (let p = 1; p <= doc.numPages; p++) {
+    const content = await (await doc.getPage(p)).getTextContent();
+    // group text fragments that sit on the same line
+    const byRow = new Map<number, { x: number; t: string }[]>();
+    for (const item of content.items as { str: string; transform: number[] }[]) {
+      if (!item.str?.trim()) continue;
+      const y = Math.round(item.transform[5]);
+      const key = [...byRow.keys()].find((k) => Math.abs(k - y) <= 3) ?? y;
+      const bucket = byRow.get(key) ?? [];
+      bucket.push({ x: item.transform[4], t: item.str });
+      byRow.set(key, bucket);
+    }
+    [...byRow.entries()]
+      .sort((a, b) => b[0] - a[0])                    // top of the page downwards
+      .forEach(([, parts]) =>
+        lines.push(parts.sort((a, b) => a.x - b.x).map((c) => c.t).join(" ").replace(/\s+/g, " ").trim()));
+  }
+
+  // A load sheet states its own totals. Capturing them lets us PROVE the parse
+  // is complete instead of trusting it — the whole reason PDF is safe here.
+  const text = lines.join("\n");
+  const declared = {
+    count: Number(/Total\s+Shipment\(?s?\)?\s*:?\s*(\d+)/i.exec(text)?.[1] ?? "") || undefined,
+    total: Number((/Total\s+Amount\s*:?\s*Rs\.?\s*([\d,]+(?:\.\d+)?)/i.exec(text)?.[1] ?? "").replace(/,/g, "")) || undefined,
+    sheet: /Loadsheet\s+Number\s*:?\s*(\S+)/i.exec(text)?.[1],
+  };
+
+  // a shipment line always carries both a tracking number and an order reference
+  const rows: Row[] = [];
+  for (const line of lines) {
+    const track = line.match(/\b(\d{11,14})\b/);
+    const ref = line.match(/#\s?([A-Za-z]{0,4}\d+)/);
+    if (!track || !ref) continue;
+    const amount = line.match(/Rs\.?\s*([\d,]+(?:\.\d+)?)/i);
+    const date = line.match(/\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/);
+    const city = line.match(/\b(LHE|KHI|ISB|RWP|FSD|MUL|PEW|QTA|GUJ|SIA|SKT)\b/);
+    rows.push({
+      "Tracking No": track[1],
+      "Order Ref": "#" + ref[1],
+      "Booking Date": date?.[1] ?? "",
+      "Delivery City": city?.[1] ?? "",
+      "Amount": amount ? amount[1].replace(/,/g, "") : "",
+    });
+  }
+  return { headers: ["Tracking No", "Order Ref", "Booking Date", "Delivery City", "Amount"], rows, declared };
 }
 
 /** read CSV or Excel into plain rows — Excel because courier portals export
@@ -114,15 +180,27 @@ export default function SmartImport({ onDone }: { onDone: () => void }) {
   async function pick(f: File | null) {
     setRes(null); setDet(null); setFileName("");
     if (!f) return;
-    if (/\.pdf$/i.test(f.name)) {
-      setRes({ ok: false, msg: "PDF can't be read reliably — a mis-read column would mean wrong money.", detail: "Open it in Excel and save as CSV, or use the portal's Excel export." });
-      return;
-    }
     try {
-      const { headers, rows } = await readAnyFile(f);
+      const isPdf = /\.pdf$/i.test(f.name) || f.type === "application/pdf";
+      const parsed = isPdf ? await readPdf(f) : await readAnyFile(f);
+      const { headers, rows } = parsed;
+      if (isPdf && !rows.length) {
+        setRes({ ok: false, msg: "No shipment rows found in that PDF.", detail: "If it is a scan rather than a downloaded load sheet, use the portal's Excel or CSV export instead." });
+        return;
+      }
       if (!rows.length) { setRes({ ok: false, msg: "No rows found in that file." }); return; }
       setFileName(f.name);
-      setDet(detect(headers, rows));
+      const d = detect(headers, rows);
+      if (isPdf) {
+        const declared = (parsed as PdfRead).declared;
+        d.proof = {
+          declaredCount: declared.count, parsedCount: rows.length,
+          declaredTotal: declared.total,
+          parsedTotal: rows.reduce((sum, r) => sum + (toNum(r["Amount"]) ?? 0), 0),
+          sheet: declared.sheet,
+        };
+      }
+      setDet(d);
     } catch (e) {
       setRes({ ok: false, msg: String((e as Error)?.message ?? e) });
     }
@@ -206,11 +284,11 @@ export default function SmartImport({ onDone }: { onDone: () => void }) {
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} wide title="Smart import"
-        subtitle="Drop in any courier file — the courier, store and file type are worked out for you.">
-        <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls,text/csv"
+        subtitle="Drop in any courier file — CSV, Excel or load-sheet PDF. Courier, store and type are worked out for you.">
+        <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls,.pdf,text/csv,application/pdf"
           onChange={(e) => pick(e.target.files?.[0] ?? null)}
           className="block w-full text-[13px] text-muted file:mr-3 file:rounded-full file:border-0 file:bg-ink file:px-4 file:py-2 file:text-[12.5px] file:font-semibold file:text-white dark:text-[#a89f93] dark:file:bg-white dark:file:text-[#141414]" />
-        <p className="mt-2 text-[11.5px] text-hint dark:text-[#8a8175]">CSV or Excel from PostEx or OwnEx. PDF isn't supported — export Excel instead.</p>
+        <p className="mt-2 text-[11.5px] text-hint dark:text-[#8a8175]">CSV, Excel, or a courier load-sheet PDF. PDF totals are verified against the sheet before anything is written.</p>
 
         {det && (
           <div className="mt-4 space-y-3">
@@ -225,13 +303,37 @@ export default function SmartImport({ onDone }: { onDone: () => void }) {
                 <span className="text-[11.5px]">Matched columns: {Object.entries(det.cols).filter(([, v]) => v).map(([k, v]) => `${k}→${v}`).join(", ") || "none"}</span>
               </div>
             </div>
+            {det.proof && (() => {
+              const p = det.proof;
+              const countOk = p.declaredCount === undefined || p.declaredCount === p.parsedCount;
+              const totalOk = p.declaredTotal === undefined || Math.abs(p.declaredTotal - p.parsedTotal) < 1;
+              const good = countOk && totalOk;
+              return (
+                <div className={`rounded-card border p-3.5 text-[12.5px] ${good ? "border-success/30 bg-success-soft" : "border-danger/30 bg-danger-soft"} dark:border-white/[0.06] dark:bg-white/[0.05]`}>
+                  <div className="flex items-center gap-1.5 text-[13px] font-bold text-ink dark:text-[#f4f1ea]">
+                    {good ? <CheckCircle2 size={15} className="text-success" /> : <AlertTriangle size={15} className="text-danger" />}
+                    {good ? "Checked against the sheet's own totals" : "Does not match the sheet's totals"}
+                  </div>
+                  <div className="mt-1.5 space-y-0.5 text-muted dark:text-[#a89f93]">
+                    {p.sheet && <div>Load sheet {p.sheet}</div>}
+                    <div>Shipments — read {p.parsedCount}{p.declaredCount !== undefined && ` · sheet says ${p.declaredCount}`}</div>
+                    <div>Amount — read Rs {p.parsedTotal.toLocaleString()}{p.declaredTotal !== undefined && ` · sheet says Rs ${p.declaredTotal.toLocaleString()}`}</div>
+                  </div>
+                  {!good && <p className="mt-1.5 font-semibold text-danger">Import blocked — the numbers must agree first.</p>}
+                </div>
+              );
+            })()}
             {det.couriers.unknown > 0 && (
               <p className="flex items-start gap-1.5 text-[12px] text-muted dark:text-[#a89f93]">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0 text-danger" />
                 {det.couriers.unknown.toLocaleString()} row(s) have a tracking number in neither courier&apos;s format — they&apos;ll import without a courier label so you can review them.
               </p>
             )}
-            <button onClick={importRows} disabled={busy} className={btnPrimary}>
+            <button onClick={importRows}
+              disabled={busy || (!!det.proof && !(
+                (det.proof.declaredCount === undefined || det.proof.declaredCount === det.proof.parsedCount) &&
+                (det.proof.declaredTotal === undefined || Math.abs(det.proof.declaredTotal - det.proof.parsedTotal) < 1)))}
+              className={btnPrimary}>
               {busy && <Loader2 size={14} className="animate-spin" />} Import {det.rows.length.toLocaleString()} rows
             </button>
           </div>
