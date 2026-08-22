@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Users, CalendarCheck, HandCoins, Wallet, RefreshCw } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { AddEmployee, MarkAttendance, AddAdvance, MarkSalary } from "@/components/AttendanceEntry";
 
 type Tab = "employees" | "attendance" | "advances" | "salaries";
 type Row = Record<string, unknown>;
@@ -106,9 +107,15 @@ export default function AttendancePage() {
           <h1 className="text-[20px] font-extrabold sm:text-[22px] tracking-tight text-ink dark:text-[#f4f1ea]">Attendance</h1>
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">Employees, daily attendance, advances &amp; salaries.</p>
         </div>
-        <button onClick={() => load(tab)} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === "employees" && <AddEmployee onDone={() => load(tab)} />}
+          {tab === "attendance" && <MarkAttendance emps={emps} onDone={() => load(tab)} />}
+          {tab === "advances" && <AddAdvance emps={emps} onDone={() => load(tab)} />}
+          {tab === "salaries" && <MarkSalary emps={emps} onDone={() => load(tab)} />}
+          <button onClick={() => load(tab)} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><div className="flex w-max gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05]">

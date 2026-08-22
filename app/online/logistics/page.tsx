@@ -6,6 +6,7 @@ import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
 import { AddShipment, UploadCourierFile } from "@/components/LogisticsEntry";
 import CourierSync from "@/components/CourierSync";
+import ShopifySync from "@/components/ShopifySync";
 
 type Logi = Record<string, unknown>;
 type View = "list" | "couriers" | "status";
@@ -139,6 +140,7 @@ export default function LogisticsPage() {
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">PostEx / OwnEx tracking, delivery performance &amp; RTS.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ShopifySync onDone={load} />
           <CourierSync onDone={load} />
           <UploadCourierFile onDone={load} />
           <AddShipment onDone={load} />

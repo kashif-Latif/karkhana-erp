@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ShoppingBag, Clock, Truck, XCircle, Wallet, TrendingUp, Search, RefreshCw } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { AddOrder, ImportOrders } from "@/components/OrdersEntry";
+import ShopifySync from "@/components/ShopifySync";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
 
@@ -95,9 +97,14 @@ export default function OrdersPage() {
           <h1 className="text-[20px] font-extrabold tracking-tight text-ink sm:text-[22px] dark:text-[#f4f1ea]">Orders</h1>
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">Online orders across Little Minors, TopShop &amp; Trenzee.</p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ShopifySync onDone={load} />
+          <AddOrder onDone={load} />
+          <ImportOrders onDone={load} />
+          <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       <RangeBar preset={preset} setPreset={setPreset} cf={cf} setCf={setCf} ct={ct} setCt={setCt}
