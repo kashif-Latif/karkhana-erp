@@ -10,6 +10,23 @@ const STORES = ["LM", "TS", "TRZ"];
 const COURIERS = ["PostEx", "OwnEx"];
 const DSTATUS = ["In Transit", "Delivered", "Returned", "RTS", "Cancelled"];
 
+/** A courier file usually holds every store mixed together, and the tracking
+ *  number already says which courier it is — so both can be worked out per row
+ *  instead of forcing one value on the whole file. */
+function courierFromTracking(t: string) {
+  const v = (t ?? "").trim();
+  if (/^3120100/.test(v)) return "OwnEx";
+  if (/^\d{14}$/.test(v)) return "PostEx";
+  return null;
+}
+function storeFromRef(ref: string) {
+  const u = (ref ?? "").trim().toUpperCase();
+  if (/^#?TRZ/.test(u)) return "TRZ";
+  if (/^#?TS/.test(u)) return "TS";
+  if (/^#?LM/.test(u)) return "LM";
+  return null;
+}
+
 export function AddShipment({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,8 +85,8 @@ const MODES: { key: Mode; label: string; hint: string }[] = [
 export function UploadCourierFile({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("load_sheet");
-  const [courier, setCourier] = useState("PostEx");
-  const [store, setStore] = useState("LM");
+  const [courier, setCourier] = useState("AUTO");
+  const [store, setStore] = useState("AUTO");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<{ headers: string[]; rows: Record<string, string>[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,7 +119,8 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
 
     // record the batch first
     const { data: batch } = await supabase.from("online_import_batches").insert({
-      batch_type: mode, courier, store_code: store, file_name: file.name, rows_in_file: preview.rows.length,
+      batch_type: mode, courier: courier === "AUTO" ? "Mixed" : courier,
+      store_code: store === "AUTO" ? "ALL" : store, file_name: file.name, rows_in_file: preview.rows.length,
     }).select("id").maybeSingle();
     const batchId = batch?.id ?? null;
 
@@ -110,7 +128,8 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
     if (mode === "cpr") {
       const seen = new Set<string>();
       const payload = preview.rows.map((r) => ({
-        store_code: store, courier,
+        store_code: store === "AUTO" ? "LM" : store,
+        courier: courier === "AUTO" ? "OwnEx" : courier,
         cpr_number: cCpr ? r[cCpr] : null,
         cpr_date: cDate ? toDate(r[cDate]) : null,
         amount: cAmount ? toNum(r[cAmount]) ?? 0 : 0,
@@ -124,8 +143,13 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
       const seen = new Set<string>();
       const payload = preview.rows.map((r) => {
         const ord = cOrder ? r[cOrder] : "";
-        const row: Record<string, unknown> = { store_code: store, courier, order_number: ord || null, import_batch_id: batchId };
-        if (cTrack) row.tracking_id = r[cTrack] || null;
+        const trk = cTrack ? (r[cTrack] || "") : "";
+        // when the dropdown says AUTO, read it off the row itself
+        const rowCourier = courier === "AUTO" ? courierFromTracking(trk) : courier;
+        const rowStore = store === "AUTO" ? (storeFromRef(ord) ?? "LM") : store;
+        const row: Record<string, unknown> = { store_code: rowStore, order_number: ord || null, import_batch_id: batchId };
+        if (rowCourier) row.courier = rowCourier;
+        if (cTrack) row.tracking_id = trk || null;
         if (cDate) row[mode === "status" ? "delivery_date" : "dispatch_date"] = toDate(r[cDate]);
         if (cAmount) row.cod_amount = toNum(r[cAmount]);
         if (cNet) row.cpr_net_amount = toNum(r[cNet]);
@@ -171,7 +195,8 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
         <p className="mt-2 text-[12px] text-hint dark:text-[#8a8175]">{MODES.find((m) => m.key === mode)?.hint}</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <Field label="Courier"><select className={inputCls} value={courier} onChange={(e) => setCourier(e.target.value)}>{COURIERS.map((c) => <option key={c}>{c}</option>)}</select></Field>
+          <Field label="Courier"><select className={inputCls} value={courier} onChange={(e) => setCourier(e.target.value)}><option value="AUTO">Detect from tracking number</option>
+              {COURIERS.map((c) => <option key={c}>{c}</option>)}</select></Field>
           <Field label="Store"><select className={inputCls} value={store} onChange={(e) => setStore(e.target.value)}>{STORES.map((s) => <option key={s}>{s}</option>)}</select></Field>
         </div>
         <div className="mt-3">
