@@ -197,7 +197,10 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Courier"><select className={inputCls} value={courier} onChange={(e) => setCourier(e.target.value)}><option value="AUTO">Detect from tracking number</option>
               {COURIERS.map((c) => <option key={c}>{c}</option>)}</select></Field>
-          <Field label="Store"><select className={inputCls} value={store} onChange={(e) => setStore(e.target.value)}>{STORES.map((s) => <option key={s}>{s}</option>)}</select></Field>
+          <Field label="Store"><select className={inputCls} value={store} onChange={(e) => setStore(e.target.value)}>
+            <option value="AUTO">All stores — detect per row</option>
+            {STORES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select></Field>
         </div>
         <div className="mt-3">
           <Field label="CSV file">
