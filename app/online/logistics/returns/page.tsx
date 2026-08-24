@@ -245,8 +245,15 @@ export default function ReturnsPage() {
             {!loading && filtered.map((r) => {
               const ret = r as ReturnRow;
               const up = r as UnpaidRow;
+              // The agent types the real reason into Shopify's order Note, so
+              // that wins. cancel_reason is only Shopify's fixed list
+              // (customer / declined / fraud / inventory / other), and the
+              // courier's wording is the last resort, not the first.
               const reason = isReturns
-                ? (ret.shopify_reason || ret.courier_reason || ret.shopify_note || "—")
+                ? (ret.shopify_note || ret.shopify_reason || ret.courier_reason || "—")
+                : "";
+              const reasonFrom = isReturns
+                ? (ret.shopify_note ? "agent" : ret.shopify_reason ? "Shopify" : ret.courier_reason ? "courier" : "")
                 : "";
               return (
                 <tr key={r.tracking_id} className="transition hover:bg-panel/60 dark:hover:bg-white/[0.04]">
@@ -270,7 +277,10 @@ export default function ReturnsPage() {
                         <td className="px-4 py-3">
                           <span className="inline-block rounded-full bg-panel px-2.5 py-1 text-[11.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{ret.stage ?? "—"}</span>
                         </td>
-                        <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{reason}</td>
+                        <td className="px-4 py-3 text-muted dark:text-[#a89f93]">
+                          {reason}
+                          {reasonFrom && <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{reasonFrom}</span>}
+                        </td>
                       </>
                     : <>
                         <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{up.customer_name ?? "—"}</td>
