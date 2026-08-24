@@ -27,7 +27,8 @@ type Sum = {
 
 const n = (v: unknown) => Number(v ?? 0);
 
-export default function ReturnsPanel({ store = "ALL" }: { store?: string }) {
+export default function ReturnsPanel({ store = "ALL", from = null, to = null }:
+  { store?: string; from?: string | null; to?: string | null }) {
   const [rows, setRows] = useState<Pending[]>([]);
   const [sum, setSum] = useState<Sum | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,29 +38,41 @@ export default function ReturnsPanel({ store = "ALL" }: { store?: string }) {
   const [showClaim, setShowClaim] = useState(false);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"all" | "overdue" | "travelling" | "claimed">("all");
+  const [courier, setCourier] = useState("All couriers");
 
   const load = useCallback(async () => {
     if (!supabase) return;
     setLoading(true); setErr("");
+    // the date range on the page has to actually do something — a filter that
+    // silently does nothing is worse than no filter
+    let q = supabase.from("v_returns_pending").select("*")
+      .order("age_days", { ascending: false, nullsFirst: false }).limit(1000);
+    if (from) q = q.gte("return_date", from);
+    if (to)   q = q.lte("return_date", to);
+
     const [p, s] = await Promise.all([
-      supabase.from("v_returns_pending").select("*").limit(1000),
-      supabase.rpc("hub_returns_summary", { p_store: store === "ALL" ? null : store, p_courier: null }),
+      q,
+      supabase.rpc("hub_returns_summary", {
+        p_store: store === "ALL" ? null : store, p_courier: null,
+        p_from: from, p_to: to,
+      }),
     ]);
     if (p.error) setErr(p.error.message);
     setRows((p.data as Pending[]) ?? []);
     setSum(((s.data as Sum[]) ?? [])[0] ?? null);
     setPicked([]);
     setLoading(false);
-  }, [store]);
+  }, [store, from, to]);
   useEffect(() => { load(); }, [load]);
 
   const view = useMemo(() => {
-    const base = store === "ALL" ? rows : rows.filter((r) => r.store_code === store);
+    let base = store === "ALL" ? rows : rows.filter((r) => r.store_code === store);
+    if (courier !== "All couriers") base = base.filter((r) => r.courier === courier);
     if (filter === "overdue")    return base.filter((r) => !r.still_travelling && (r.age_days ?? 0) > 14);
     if (filter === "travelling") return base.filter((r) => r.still_travelling);
     if (filter === "claimed")    return base.filter((r) => r.claim_status === "claimed");
     return base;
-  }, [rows, store, filter]);
+  }, [rows, store, filter, courier]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -117,8 +130,17 @@ export default function ReturnsPanel({ store = "ALL" }: { store?: string }) {
         <button onClick={() => setShowClaim(true)} disabled={!picked.length} className={btnGhost}>
           <FileWarning size={15} /> Raise claim
         </button>
+        <select value={courier} onChange={(e) => setCourier(e.target.value)}
+          className="rounded-full border border-line bg-surface px-3 py-2 text-[12.5px] font-semibold text-ink outline-none dark:border-white/10 dark:bg-white/[0.06] dark:text-white">
+          <option>All couriers</option><option>PostEx</option><option>OwnEx</option>
+        </select>
         <button onClick={load} className={btnGhost}><RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh</button>
         {filter !== "all" && <button onClick={() => setFilter("all")} className="text-[12px] underline text-muted dark:text-[#a89f93]">clear filter</button>}
+        {(from || to) && (
+          <span className="text-[11.5px] text-hint dark:text-[#8a8175]">
+            showing returns dated {from ?? "any"} → {to ?? "today"} · switch to All time to see everything outstanding
+          </span>
+        )}
       </div>
 
       {err && <p className="mt-3 text-[13px] font-semibold text-danger">{err}</p>}

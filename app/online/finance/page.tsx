@@ -124,7 +124,7 @@ export default function FinancePage() {
         ))}
       </div></div>
 
-      {tab === "returns" ? <div className="mt-5"><ReturnsPanel store={store} /></div> : <>
+      {tab === "returns" ? <div className="mt-5"><ReturnsPanel store={store} from={rangeDates(preset, cf, ct)[0]} to={rangeDates(preset, cf, ct)[1]} /></div> : <>
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(({ label, value, Icon, bg }, i) => (
           <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
