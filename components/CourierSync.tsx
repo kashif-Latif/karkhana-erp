@@ -68,7 +68,7 @@ export default function CourierSync({ onDone }: { onDone: () => void }) {
         read: (d) => `${Number(d.updated ?? 0).toLocaleString()} updated of ${Number(d.checked ?? 0).toLocaleString()}` },
       { label: "PostEx COD", fn: "postex-sync", body: { action: "postex_payments" },
         read: (d) => `${Number(d.settled ?? 0).toLocaleString()} newly paid` },
-      { label: "OwnEx status", fn: "ownex-sync", body: { action: "track", limit: 800 },
+      { label: "OwnEx status", fn: "ownex-sync", body: { action: "track", limit: 250, max_seconds: 50 },
         read: (d) => `${Number(d.updated ?? 0).toLocaleString()} updated of ${Number(d.checked ?? 0).toLocaleString()}` },
     ];
 
