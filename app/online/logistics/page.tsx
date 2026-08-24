@@ -66,18 +66,22 @@ export default function LogisticsPage() {
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
-  /* One fetch at a time, and never two for one click.
-     `silent` skips the spinner: an automatic refresh (a realtime change, or a
-     click on a control) should update the numbers without flashing the page.
-     `inFlight` and `lastLoadAt` are refs, not state, so they cannot themselves
-     trigger a render and start the cycle again. */
-  const inFlight = useRef(false);
+  /* Every fetch carries a sequence number and only the newest one may write to
+     state.
+     WHY: `load` is rebuilt whenever preset/store/courier changes, so switching
+     Today -> Yesterday can leave two queries in the air at once. Without this
+     guard whichever FINISHES last wins — and that is often the OLDER one, which
+     is why the range button and the figures on screen could disagree. Blocking
+     the second request instead is not the answer either: that leaves the
+     previous period's numbers sitting under the newly pressed button.
+     `silent` skips the spinner so an automatic refresh does not flash the page.
+     Both are refs, not state, so they cannot themselves cause a render. */
+  const reqId = useRef(0);
   const lastLoadAt = useRef(0);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
-    if (inFlight.current) return;                       // a fetch is already running
-    inFlight.current = true;
+    const myReq = ++reqId.current;
     if (!opts?.silent) setLoading(true);
     setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
@@ -104,6 +108,10 @@ export default function LogisticsPage() {
       supabase.rpc("hub_logistics_by_courier", { p_from: args.p_from, p_to: args.p_to, p_store: args.p_store }),
       supabase.rpc("hub_logistics_status_counts", args),
     ]);
+    // a newer request has started since this one left — throw the answer away
+    // rather than painting stale figures under a freshly pressed button
+    if (myReq !== reqId.current) return;
+
     if (rowsRes.error) setErr(rowsRes.error.message);
     setRows((rowsRes.data as Logi[]) ?? []);
     setSummary((sumRes.data as Summary[])?.[0] ?? null);
@@ -114,7 +122,6 @@ export default function LogisticsPage() {
     setCourierSplit(courier === "All couriers" ? split : split.filter((c) => c.courier === courier));
     setStatusCounts((statusRes.data as StatusRow[]) ?? []);
     setLoading(false);
-    inFlight.current = false;
     lastLoadAt.current = Date.now();
   }, [preset, cf, ct, store, courier, rawStatus]);
   useEffect(() => { load(); }, [load]);
@@ -141,7 +148,8 @@ export default function LogisticsPage() {
     if (!t?.closest?.("button, select, [role='tab'], [role='option']")) return;
     if (clickTimer.current) clearTimeout(clickTimer.current);
     clickTimer.current = setTimeout(() => {
-      if (Date.now() - lastLoadAt.current < 1500) return;   // something already refreshed
+      if (Date.now() - lastLoadAt.current < 2500) return;   // something already refreshed
+      if (reqId.current > 0 && loading) return;             // one is in the air right now
       load({ silent: true });
     }, 500);
   }, [load]);
