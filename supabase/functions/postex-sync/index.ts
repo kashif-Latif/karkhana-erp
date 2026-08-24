@@ -231,7 +231,16 @@ Deno.serve(async (req) => {
       const { data: open } = await db.from("online_logistics")
         .select("tracking_id").eq("courier", "PostEx")
         .not("tracking_id", "is", null)
-        .in("delivery_status", ["In Transit", "Pending"])
+        // Everything NOT finally settled.
+        //
+        // This used to be ["In Transit", "Pending"] only, which froze two groups
+        // permanently:
+        //   * "Failed Attempt" — 22 parcels untouched since 21 Aug, and these
+        //     are precisely the ones that need chasing
+        //   * "RTS" — a parcel on its way back could never progress to Returned,
+        //     the same fault ownex-sync had before migration 0059
+        // Delivered / Returned / Cancelled are terminal and stay excluded.
+        .not("delivery_status", "in", '("Delivered","Returned","Cancelled")')
         .limit(body.limit ?? 250);
       const nums = (open ?? []).map((r: { tracking_id: string }) => r.tracking_id).filter(Boolean);
       if (!nums.length) return json({ ok: true, action, checked: 0, updated: 0, note: "nothing in transit" });
