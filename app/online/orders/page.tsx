@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLiveTables } from "@/lib/useLiveTables";
 import { ShoppingBag, Clock, Truck, XCircle, Wallet, TrendingUp, Search, RefreshCw } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { AddOrder, ImportOrders } from "@/components/OrdersEntry";
@@ -57,6 +58,11 @@ export default function OrdersPage() {
     setLoading(false);
   }, [preset, cf, ct, store]);
   useEffect(() => { load(); }, [load]);
+
+  /* Shopify pushes order, payment and fulfilment changes to shopify-webhook,
+     which writes to online_orders. This is what turns that write into something
+     visible without a manual refresh. */
+  useLiveTables(["online_orders"], load);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();

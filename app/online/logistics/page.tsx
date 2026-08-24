@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLiveTables } from "@/lib/useLiveTables";
 import { Package, Truck, CheckCircle2, Undo2, Percent, Wallet, Search, RefreshCw, XCircle, Clock, TrendingUp } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
@@ -104,6 +105,25 @@ export default function LogisticsPage() {
     setLoading(false);
   }, [preset, cf, ct, store, courier, rawStatus]);
   useEffect(() => { load(); }, [load]);
+
+  /* Live. The couriers push (PostEx webhook) or are polled (OwnEx), both of
+     which write straight to online_logistics — this repaints the page when they
+     do, so nobody has to press Refresh to find out a parcel was delivered. */
+  const { live, lastChange } = useLiveTables(["online_logistics", "online_orders"], load);
+
+  /* Any click on a control in this section refreshes the data.
+     Debounced on purpose: the range and filter buttons already reload through
+     load()'s dependency list, so without the delay one click would fetch twice.
+     Everything here is a read, so a stray extra call costs nothing. */
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshOnClick = useCallback((e: React.MouseEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (!t?.closest?.("button, select, [role='tab'], [role='option']")) return;
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+    clickTimer.current = setTimeout(() => load(), 400);
+  }, [load]);
+
+  useEffect(() => () => { if (clickTimer.current) clearTimeout(clickTimer.current); }, []);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -222,11 +242,18 @@ export default function LogisticsPage() {
   const maxStatus = Math.max(...byStatus.map((s) => s.count), 1);
 
   return (
-    <div className="px-4 py-6 sm:px-6 md:px-10 md:py-8">
+    <div onClickCapture={refreshOnClick} className="px-4 py-6 sm:px-6 md:px-10 md:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold tracking-tight text-ink sm:text-[22px] dark:text-[#f4f1ea]">Logistics</h1>
-          <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">PostEx / OwnEx tracking, delivery performance &amp; RTS.</p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-muted dark:text-[#a89f93]">
+            PostEx / OwnEx tracking, delivery performance &amp; RTS.
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${live ? "bg-success-soft text-success dark:bg-white/[0.08]" : "bg-panel text-muted dark:bg-white/[0.06] dark:text-[#a89f93]"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-success" : "bg-muted"}`} />
+              {live ? "Live" : "Not live"}
+              {lastChange && live ? ` \u00b7 updated ${lastChange.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
+            </span>
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SmartImport onDone={load} />
