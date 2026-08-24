@@ -32,14 +32,16 @@ function deliveryClass(s: string) {
   }
 }
 type Summary = {
-  total: number; active: number; transit: number; delivered: number;
-  rts: number; cancelled: number; delivery_rate: number;
+  total: number; active: number; transit: number; transit_portal: number;
+  delivered: number; rts: number; returned_received: number; out_for_return: number;
+  cancelled: number; delivery_rate: number;
   cod: number; receivable: number; receivable_count: number; fees: number;
 };
 
 type CourierRow = {
-  courier: string; total: number; transit: number; delivered: number;
-  rts: number; cancelled: number; delivery_rate: number;
+  courier: string; total: number; transit: number; transit_portal: number;
+  delivered: number; rts: number; returned_received: number; out_for_return: number;
+  cancelled: number; delivery_rate: number;
   cod: number; receivable: number; receivable_count: number; fees: number;
 };
 
@@ -107,7 +109,10 @@ export default function LogisticsPage() {
       const n = (v: unknown) => Number(v ?? 0);
       return {
         total: n(summary.total), active: n(summary.active), transit: n(summary.transit),
-        delivered: n(summary.delivered), rts: n(summary.rts), cancelled: n(summary.cancelled),
+        transitPortal: n(summary.transit_portal),
+        delivered: n(summary.delivered), rts: n(summary.rts),
+        returnedReceived: n(summary.returned_received), outForReturn: n(summary.out_for_return),
+        cancelled: n(summary.cancelled),
         rate: n(summary.delivery_rate), cod: n(summary.cod),
         receivable: n(summary.receivable), receivableCount: n(summary.receivable_count),
         fees: n(summary.fees),
@@ -123,7 +128,8 @@ export default function LogisticsPage() {
       total: filtered.length,
       active: filtered.length - cancelled,
       transit: filtered.filter((l) => l.delivery_status === "In Transit").length,
-      delivered, rts, cancelled,
+      transitPortal: filtered.filter((l) => l.delivery_status === "In Transit").length,
+      delivered, rts, returnedReceived: rts, outForReturn: 0, cancelled,
       rate: settled ? (delivered / settled) * 100 : 0,
       cod: filtered.filter((l) => l.delivery_status === "Delivered").reduce((a, l) => a + num(l.cod_amount), 0),
       receivable: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l)).reduce((a, l) => a + num(l.cod_amount), 0),
@@ -149,9 +155,16 @@ export default function LogisticsPage() {
 
   const cards = [
     { label: "Active shipments", value: M.active.toLocaleString(), sub: M.cancelled ? `${M.total.toLocaleString()} incl. cancelled` : undefined, Icon: Package, bg: "bg-periwinkle-soft" },
-    { label: "In transit", value: M.transit.toLocaleString(), Icon: Truck, bg: "bg-amber-soft" },
+    { label: "In transit", value: (M.transitPortal || M.transit).toLocaleString(),
+      sub: M.outForReturn ? `incl. ${M.outForReturn} coming back` : undefined,
+      Icon: Truck, bg: "bg-amber-soft" },
     { label: "Delivered", value: M.delivered.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft" },
-    { label: "RTS / returns", value: M.rts.toLocaleString(), Icon: Undo2, bg: "bg-salmon-soft" },
+    // split the way the courier portals do: a parcel travelling back is still
+    // moving, only a received one is a finished return
+    { label: "Returned", value: (M.returnedReceived ?? M.rts).toLocaleString(),
+      sub: "back with us", Icon: Undo2, bg: "bg-salmon-soft" },
+    { label: "Out for return", value: M.outForReturn.toLocaleString(),
+      sub: M.outForReturn ? "counted in transit" : "none", Icon: Undo2, bg: "bg-panel" },
     { label: "Cancelled", value: M.cancelled.toLocaleString(), Icon: XCircle, bg: "bg-panel" },
     { label: "Delivery rate", value: `${M.rate.toFixed(1)}%`, Icon: Percent, bg: "bg-lavender-soft" },
     { label: "COD delivered", value: rs(M.cod), Icon: Wallet, bg: "bg-pink-soft" },
@@ -165,7 +178,8 @@ export default function LogisticsPage() {
     if (courierSplit.length)
       return courierSplit.filter((c) => c.courier !== "TOTAL").map((c) => ({
         name: c.courier, total: Number(c.total), delivered: Number(c.delivered),
-        rts: Number(c.rts), transit: Number(c.transit), cancelled: Number(c.cancelled),
+        rts: Number(c.returned_received ?? c.rts), outForReturn: Number(c.out_for_return ?? 0),
+        transit: Number(c.transit_portal ?? c.transit), cancelled: Number(c.cancelled),
         cod: Number(c.cod), receivable: Number(c.receivable), fees: Number(c.fees),
         rate: Number(c.delivery_rate),
       }));
@@ -226,7 +240,7 @@ export default function LogisticsPage() {
           </>
         } />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9">
         {cards.map(({ label, value, sub, Icon, bg, warn }) => (
           <div key={label} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17]`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
@@ -248,7 +262,8 @@ export default function LogisticsPage() {
                 <th className="px-4 py-2.5 text-right">Total</th>
                 <th className="px-4 py-2.5 text-right">In transit</th>
                 <th className="px-4 py-2.5 text-right">Delivered</th>
-                <th className="px-4 py-2.5 text-right">RTS</th>
+                <th className="px-4 py-2.5 text-right">Returned</th>
+                <th className="px-4 py-2.5 text-right">Out for return</th>
                 <th className="px-4 py-2.5 text-right">Cancelled</th>
                 <th className="px-4 py-2.5 text-right">Rate</th>
                 <th className="px-4 py-2.5 text-right">COD delivered</th>
@@ -262,9 +277,10 @@ export default function LogisticsPage() {
                   <tr key={c.courier} className={`border-b border-line last:border-0 dark:border-white/[0.06] ${isTotal ? "bg-panel font-bold dark:bg-white/[0.06]" : "text-ink dark:text-[#e7e2d8]"}`}>
                     <td className="px-4 py-2.5 font-semibold text-ink dark:text-[#f4f1ea]">{c.courier}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.total).toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.transit).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.transit_portal ?? c.transit).toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-success">{Number(c.delivered).toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-danger">{Number(c.rts).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-danger">{Number(c.returned_received ?? c.rts).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">{Number(c.out_for_return ?? 0).toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">{Number(c.cancelled).toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.delivery_rate).toFixed(1)}%</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{rs(Number(c.cod))}</td>
