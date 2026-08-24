@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { RefreshCcw, Loader2, CheckCircle2, AlertTriangle, Wallet, Truck, Download, Zap } from "lucide-react";
+import { RefreshCcw, Loader2, CheckCircle2, AlertTriangle, Wallet, Truck, Download, Zap, Undo2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
 
@@ -80,13 +80,67 @@ export default function CourierSync({ onDone }: { onDone: () => void }) {
     onDone();
   }
 
+  /** Repair parcels filed on the wrong leg.
+   *
+   *  OwnEx reuses `transit-received` and `in-transit` on BOTH the outbound and
+   *  the return journey, and the codes that DO say "returning" are transient —
+   *  on one verified parcel the return signal was the current status for only
+   *  16 minutes against a 45-minute polling window. Reading the current status
+   *  alone therefore misses returns entirely, which is how 34 parcels sat in
+   *  the forward bucket while the OwnEx portal counted them as coming back.
+   *
+   *  The sync now reads the full movement history instead, so direction is a
+   *  recorded fact. This pass applies that to parcels imported or tracked
+   *  before the fix existed.
+   *
+   *  The edge function stops on a row limit and a time budget, so one call
+   *  rarely clears the whole backlog. Loop until a pass finds nothing left
+   *  rather than making anyone press the button over and over. */
+  async function runReturnFix() {
+    if (!supabase) return;
+    setBusy("return_fix"); setRes(null); setSteps([]);
+    let pass = 0, corrected = 0, checked = 0;
+    try {
+      while (pass < 8) {
+        pass++;
+        const { data, error } = await supabase.functions.invoke("ownex-sync", {
+          body: { action: "backfill_return_leg", dry_run: false, limit: 250, concurrency: 8, max_seconds: 100 },
+        });
+        if (error) throw error;
+        const d = data as Record<string, unknown>;
+        if (d?.error) throw new Error(String(d.error));
+
+        const fixed = Number(d.direction_corrected ?? 0);
+        const seen = Number(d.checked ?? 0);
+        corrected += fixed; checked += seen;
+        setSteps((p) => [...p, {
+          label: `Pass ${pass}`, ok: true,
+          text: `${seen.toLocaleString()} checked · ${fixed.toLocaleString()} corrected`,
+        }]);
+        // nothing corrected, or nothing left to look at — the backlog is clear
+        if (fixed === 0 || seen === 0) break;
+      }
+      setRes({
+        ok: true,
+        msg: corrected
+          ? `${corrected.toLocaleString()} parcel${corrected === 1 ? "" : "s"} moved to the return leg`
+          : "Every parcel is already on the correct leg",
+        detail: `${checked.toLocaleString()} checked across ${pass} pass${pass === 1 ? "" : "es"}`,
+      });
+      onDone();
+    } catch (e) {
+      const m = String((e as Error)?.message ?? e);
+      setRes({ ok: false, msg: /401|unauthor/i.test(m) ? "You don't have permission to run the courier sync." : m });
+    } finally { setBusy(""); }
+  }
+
   return (
     <>
       <button onClick={() => { setOpen(true); setRes(null); }} className={btnPrimary}>
         <RefreshCcw size={15} /> Sync courier
       </button>
       <Modal open={open} onClose={() => setOpen(false)} wide title="Courier sync"
-        subtitle="Pull live data straight from PostEx — no files, no uploads.">
+        subtitle="Pull live data straight from PostEx and OwnEx — no files, no uploads.">
         <div className="space-y-2.5">
           {/* the one-click option, first because it is what you want most days */}
           <div className="flex flex-wrap items-start gap-3 rounded-card border-2 border-ink p-3.5 dark:border-white/20">
@@ -137,6 +191,24 @@ export default function CourierSync({ onDone }: { onDone: () => void }) {
               </button>
             </div>
           ))}
+
+          {/* Occasional repair, not part of the daily run — the nightly sync
+              now records direction on its own, so this is only for the backlog
+              and for anything Smart import brought in under portal labels. */}
+          <div className="flex flex-wrap items-start gap-3 rounded-card border border-dashed border-line p-3.5 dark:border-white/[0.12]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Undo2 size={16} /></span>
+            <div className="min-w-[180px] flex-1">
+              <div className="text-[13.5px] font-bold text-ink dark:text-[#f4f1ea]">Fix return directions</div>
+              <p className="mt-0.5 text-[12px] leading-snug text-muted dark:text-[#a89f93]">
+                OwnEx uses the same status codes going out and coming back. This reads each
+                parcel&apos;s full movement history and moves anything already on its way back
+                out of the in-transit count. Repeats by itself until nothing is left to fix.
+              </p>
+            </div>
+            <button onClick={runReturnFix} disabled={!!busy} className={`${btnGhost} shrink-0`}>
+              {busy === "return_fix" ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />} Run
+            </button>
+          </div>
         </div>
 
         {res && (
