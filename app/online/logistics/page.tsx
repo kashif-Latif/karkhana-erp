@@ -31,10 +31,18 @@ function deliveryClass(s: string) {
     default: return "bg-amber-soft text-amber-strong dark:bg-white/[0.08] dark:text-amber";
   }
 }
+type Summary = {
+  total: number; active: number; transit: number; delivered: number;
+  rts: number; cancelled: number; delivery_rate: number;
+  cod: number; receivable: number; receivable_count: number; fees: number;
+};
+
 const isRts = (l: Logi) => l.delivery_status === "RTS" || l.delivery_status === "Returned" || (!!l.rts && l.rts !== "No" && l.rts !== "false");
 
 export default function LogisticsPage() {
   const [rows, setRows] = useState<Logi[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [trendRows, setTrendRows] = useState<{ day: string; delivered: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [store, setStore] = useState("ALL");
@@ -54,11 +62,26 @@ export default function LogisticsPage() {
     if (from) q2 = q2.gte("dispatch_date", from);
     if (to) q2 = q2.lte("dispatch_date", to);
     if (store !== "ALL") q2 = q2.eq("store_code", store);
-    const { data, error } = await q2;
-    if (error) setErr(error.message);
-    setRows((data as Logi[]) ?? []);
+    if (courier !== "All couriers") q2 = q2.eq("courier", courier);
+    // Rows are for the table only. The cards and the chart come from database
+    // aggregates, because PostgREST caps a response at 1,000 rows and counting
+    // a truncated page understated every total (see migration 0051).
+    const args = {
+      p_from: from ?? null, p_to: to ?? null,
+      p_store: store === "ALL" ? null : store,
+      p_courier: courier === "All couriers" ? null : courier,
+    };
+    const [rowsRes, sumRes, trendRes] = await Promise.all([
+      q2,
+      supabase.rpc("hub_logistics_summary", args),
+      supabase.rpc("hub_logistics_trend", { ...args, p_days: 14 }),
+    ]);
+    if (rowsRes.error) setErr(rowsRes.error.message);
+    setRows((rowsRes.data as Logi[]) ?? []);
+    setSummary((sumRes.data as Summary[])?.[0] ?? null);
+    setTrendRows((trendRes.data as { day: string; delivered: number }[]) ?? []);
     setLoading(false);
-  }, [preset, cf, ct, store]);
+  }, [preset, cf, ct, store, courier]);
   useEffect(() => { load(); }, [load]);
 
   const filtered = useMemo(() => {
@@ -70,6 +93,17 @@ export default function LogisticsPage() {
   }, [rows, courier, q]);
 
   const M = useMemo(() => {
+    if (summary) {
+      const n = (v: unknown) => Number(v ?? 0);
+      return {
+        total: n(summary.total), active: n(summary.active), transit: n(summary.transit),
+        delivered: n(summary.delivered), rts: n(summary.rts), cancelled: n(summary.cancelled),
+        rate: n(summary.delivery_rate), cod: n(summary.cod),
+        receivable: n(summary.receivable), receivableCount: n(summary.receivable_count),
+        fees: n(summary.fees),
+      };
+    }
+    // fallback: only correct while the result set is under PostgREST's row cap
     const delivered = filtered.filter((l) => l.delivery_status === "Delivered").length;
     const rts = filtered.filter(isRts).length;
     const cancelled = filtered.filter((l) => l.delivery_status === "Cancelled").length;
@@ -77,21 +111,22 @@ export default function LogisticsPage() {
     const isPaid = (l: Logi) => l.payment_status === "Paid" || l.payment_status === "Received";
     return {
       total: filtered.length,
-      active: filtered.length - cancelled,      // what the courier portal counts
+      active: filtered.length - cancelled,
       transit: filtered.filter((l) => l.delivery_status === "In Transit").length,
       delivered, rts, cancelled,
       rate: settled ? (delivered / settled) * 100 : 0,
       cod: filtered.filter((l) => l.delivery_status === "Delivered").reduce((a, l) => a + num(l.cod_amount), 0),
-      // money already collected by the courier but not yet paid over to us
-      receivable: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l))
-                          .reduce((a, l) => a + num(l.cod_amount), 0),
+      receivable: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l)).reduce((a, l) => a + num(l.cod_amount), 0),
       receivableCount: filtered.filter((l) => l.delivery_status === "Delivered" && !isPaid(l)).length,
       fees: filtered.reduce((a, l) => a + num(l.courier_fee), 0),
     };
-  }, [filtered]);
+  }, [filtered, summary]);
 
   // 14-day delivered trend, drawn from the rows we already have
   const trend = useMemo(() => {
+    if (trendRows.length)
+      return [...trendRows].sort((a, b) => a.day.localeCompare(b.day))
+        .map((r) => ({ date: r.day, count: Number(r.delivered ?? 0) }));
     const byDay: Record<string, number> = {};
     filtered.forEach((l) => {
       if (l.delivery_status !== "Delivered") return;
@@ -100,7 +135,7 @@ export default function LogisticsPage() {
     });
     return Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
       .map(([date, count]) => ({ date, count }));
-  }, [filtered]);
+  }, [filtered, trendRows]);
 
   const cards = [
     { label: "Active shipments", value: M.active.toLocaleString(), sub: M.cancelled ? `${M.total.toLocaleString()} incl. cancelled` : undefined, Icon: Package, bg: "bg-periwinkle-soft" },
