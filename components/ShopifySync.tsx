@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { RefreshCcw, Loader2, CheckCircle2, AlertTriangle, ShoppingBag, Truck } from "lucide-react";
+import { RefreshCcw, Loader2, CheckCircle2, AlertTriangle, ShoppingBag, Truck, History } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
 
@@ -57,6 +57,45 @@ export default function ShopifySync({ onDone }: { onDone: () => void }) {
     onDone();
   }
 
+  /** Full history cannot be pulled in one request — Shopify paginates and the
+   *  function has a time budget. So we walk backwards a month at a time and
+   *  stop after three consecutive empty windows, which means we are past the
+   *  first order. Safe to re-run: everything matches on natural keys. */
+  async function backfill() {
+    if (!supabase) return;
+    setBusy("backfill"); setLines([]);
+    const start = new Date();
+    let empties = 0, windows = 0;
+
+    for (let i = 0; i < 60 && empties < 3; i++) {
+      const end = new Date(start); end.setMonth(end.getMonth() - i);
+      const from = new Date(start); from.setMonth(from.getMonth() - (i + 1));
+      const s1 = from.toISOString().slice(0, 10), s2 = end.toISOString().slice(0, 10);
+      let found = 0;
+
+      for (const store of STORES) {
+        for (const action of ["pull_orders", "pull_fulfillments"]) {
+          try {
+            const { data, error } = await supabase.functions.invoke("shopify-sync", {
+              body: { action, store, start_date: s1, end_date: s2, pages: 20, max_seconds: 90, dry_run: false },
+            });
+            if (error) throw error;
+            const r = (data as { summary?: Record<string, unknown>[] })?.summary?.[0] ?? {};
+            found += Number(r.fetched ?? r.orders ?? 0);
+          } catch { /* one window failing must not stop the walk */ }
+        }
+      }
+
+      windows++;
+      empties = found === 0 ? empties + 1 : 0;
+      setLines([{ store: "LM", ok: true, text: `${s1} → ${s2} · ${found.toLocaleString()} orders` }]);
+    }
+
+    setBusy("");
+    setLines((p) => [...p, { store: "TS", ok: true, text: `Finished — ${windows} month(s) covered.` }]);
+    onDone();
+  }
+
   return (
     <>
       <button onClick={() => { setOpen(true); setLines([]); }} className={btnPrimary}>
@@ -86,6 +125,19 @@ export default function ShopifySync({ onDone }: { onDone: () => void }) {
               </button>
             </div>
           ))}
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-start gap-3 rounded-card border border-line p-3.5 dark:border-white/[0.06]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><History size={16} /></span>
+          <div className="min-w-[180px] flex-1">
+            <div className="text-[13.5px] font-bold text-ink dark:text-[#f4f1ea]">Fetch all history</div>
+            <p className="mt-0.5 text-[12px] leading-snug text-muted dark:text-[#a89f93]">
+              Walks back month by month to the very first order in every store. Takes several minutes — leave this window open.
+            </p>
+          </div>
+          <button onClick={backfill} disabled={!!busy} className={`${btnGhost} shrink-0`}>
+            {busy === "backfill" ? <Loader2 size={14} className="animate-spin" /> : <History size={14} />} Run
+          </button>
         </div>
 
         {(busy || lines.length > 0) && (

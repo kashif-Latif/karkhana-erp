@@ -1,8 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
 import { Upload, Loader2, CheckCircle2, AlertTriangle, FileSpreadsheet } from "lucide-react";
-import * as XLSX from "xlsx";
-import * as pdfjsLib from "pdfjs-dist";
 import { supabase } from "@/lib/supabase";
 import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
 import { matchHeader, toNum, toDate } from "@/lib/csv";
@@ -45,7 +43,9 @@ function storeFromRef(ref: string) {
  *  anything is written. */
 type PdfRead = { headers: string[]; rows: Row[]; declared: { count?: number; total?: number; sheet?: string } };
 async function readPdf(file: File): Promise<PdfRead> {
-  // the worker build has to match the installed version exactly
+  // loaded only when a PDF is actually chosen. Kept out of the page bundle
+  // because it is ~200 kB and its modern syntax breaks older mobile browsers.
+  const pdfjsLib = await import("pdfjs-dist");
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -102,6 +102,7 @@ async function readPdf(file: File): Promise<PdfRead> {
 /** read CSV or Excel into plain rows — Excel because courier portals export
  *  .xlsx far more often than .csv */
 async function readAnyFile(file: File): Promise<{ headers: string[]; rows: Row[] }> {
+  const XLSX = await import("xlsx");           // on demand, not on page load
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array", cellDates: false, raw: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
