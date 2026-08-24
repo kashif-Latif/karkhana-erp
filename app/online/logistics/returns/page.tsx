@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Undo2, PackageCheck, Wallet, RefreshCw, Loader2, ArrowLeft, AlertTriangle } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import Modal, { Field, inputCls, btnPrimary, btnGhost } from "@/components/Modal";
 import { PRESETS, rangeDates, rs } from "@/lib/dateRange";
 import { useLiveTables } from "@/lib/useLiveTables";
 
@@ -60,6 +61,7 @@ export default function ReturnsPage() {
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showReceive, setShowReceive] = useState(false);
 
   /* Same request-token guard as Logistics: switching tab or range can leave two
      queries in the air, and without this the slower, older one wins and paints
@@ -129,17 +131,28 @@ export default function ReturnsPage() {
 
   const isReturns = tab !== "delivered_unpaid";
 
-  async function markReceived() {
+  /* A courier saying "returned" is not the same as the parcel being on your
+     shelf, so nothing marks itself received — a person has to confirm they are
+     holding the box, and record who and when. That is what closes any open
+     claim, so it cannot be a silent one-click action.
+
+     The signature matters: mark_return_received takes an ARRAY of tracking ids
+     plus date, receiver, condition and notes. Calling it with a single id and
+     three arguments is why this returned 404 — PostgREST could not find a
+     function with that shape. */
+  async function receive(f: { date: string; by: string; condition: string; notes: string }) {
     if (!supabase || !picked.length) return;
     setBusy(true);
-    try {
-      for (const t of picked) {
-        await supabase.rpc("mark_return_received", { p_tracking_id: t, p_condition: null, p_notes: null });
-      }
-      setPicked([]);
-      await load();
-    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
-    finally { setBusy(false); }
+    const { error } = await supabase.rpc("mark_return_received", {
+      p_tracking_ids: picked,
+      p_received_at: f.date || null,
+      p_received_by: f.by || null,
+      p_condition: f.condition,
+      p_notes: f.notes || null,
+    });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setShowReceive(false); setPicked([]); load();
   }
 
   return (
@@ -201,7 +214,7 @@ export default function ReturnsPage() {
       {isReturns && picked.length > 0 && (
         <div className="mt-4 flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 dark:border-white/10 dark:bg-white/[0.05]">
           <span className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">{picked.length} selected</span>
-          <button onClick={markReceived} disabled={busy}
+          <button onClick={() => setShowReceive(true)} disabled={busy}
             className="flex items-center gap-2 rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-semibold text-white dark:bg-white dark:text-[#141414]">
             {busy ? <Loader2 size={13} className="animate-spin" /> : <PackageCheck size={13} />} Mark received
           </button>
@@ -270,11 +283,48 @@ export default function ReturnsPage() {
         </table>
       </div>
 
+      <ReceiveDialog open={showReceive} count={picked.length} busy={busy}
+        onClose={() => setShowReceive(false)} onSave={receive} />
+
       {rows.length >= PAGE && (
         <p className="mt-3 text-[11.5px] text-hint dark:text-[#8a8175]">
           Showing the first {PAGE.toLocaleString()} rows. The card totals above are counted in the database, so they are complete — narrow the range or the store to see the rest here.
         </p>
       )}
     </div>
+  );
+}
+
+/* Confirming receipt is a deliberate act with a record attached: who took it in,
+   on what date, and what state it arrived in. Condition drives whether it goes
+   back into sellable stock, so it cannot default silently. */
+function ReceiveDialog({ open, count, busy, onClose, onSave }: {
+  open: boolean; count: number; busy: boolean; onClose: () => void;
+  onSave: (f: { date: string; by: string; condition: string; notes: string }) => void;
+}) {
+  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), by: "", condition: "good", notes: "" });
+  return (
+    <Modal open={open} onClose={onClose} title="Confirm return received"
+      subtitle={`${count} parcel(s) will be marked as physically in your inventory.`}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Date received"><input type="date" className={inputCls} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+        <Field label="Received by"><input className={inputCls} value={f.by} onChange={(e) => setF({ ...f, by: e.target.value })} placeholder="name" /></Field>
+        <Field label="Condition">
+          <select className={inputCls} value={f.condition} onChange={(e) => setF({ ...f, condition: e.target.value })}>
+            <option value="good">Good — back in stock</option>
+            <option value="damaged">Damaged</option>
+            <option value="partial">Partial / items missing</option>
+          </select>
+        </Field>
+        <Field label="Notes"><input className={inputCls} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+      </div>
+      <p className="mt-3 text-[12px] text-hint dark:text-[#8a8175]">
+        Only confirm what you are actually holding — this closes any open claim on these parcels.
+      </p>
+      <div className="mt-5 flex gap-2">
+        <button onClick={() => onSave(f)} disabled={busy} className={btnPrimary}>{busy && <Loader2 size={14} className="animate-spin" />} Confirm received</button>
+        <button onClick={onClose} className={btnGhost}>Cancel</button>
+      </div>
+    </Modal>
   );
 }
