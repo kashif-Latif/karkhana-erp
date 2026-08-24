@@ -36,6 +36,40 @@ export default function HealthCheck({ days = 7 }: { days?: number }) {
     const out: Check[] = [];
 
     try {
+      /* 0 — is the automation even running?
+         Every cron job reported "succeeded" for months while every HTTP call
+         came back 401. pg_net resolves the reply asynchronously, so cron only
+         records that the request was DISPATCHED, never what returned. Two syncs
+         were dead — the vault held the literal placeholder PUT_YOUR_SYNC_KEY_HERE,
+         and postex-sync had Verify JWT on while reading the key from the body
+         instead of the header — and nothing anywhere said so.
+         This reads the actual reply. It runs first because if a sync is down,
+         every number below it is stale and the panel would look clean. */
+      type SyncRow = {
+        fn: string; last_status: number | null; last_verdict: string | null;
+        ok_24h: number | null; failed_24h: number | null; last_called: string | null;
+      };
+      const { data: syncRaw, error: syncErr } = await supabase
+        .from("v_sync_health_summary").select("*");
+      if (!syncErr) {
+        const sync = (syncRaw ?? []) as SyncRow[];
+        const broken = sync.filter((s) => {
+          const c = Number(s.last_status ?? 0);
+          return !(c >= 200 && c <= 299);
+        });
+        out.push({
+          key: "sync",
+          title: "Automatic sync",
+          detail: "Whether each scheduled job actually reached its edge function. A job reports success the moment it dispatches, so this reads the reply instead — an auth failure is invisible any other way.",
+          count: broken.length,
+          rows: sync.map((s) => ({
+            label: `${s.fn} · ${s.last_verdict ?? "no reply recorded"}`,
+            sub: `${s.ok_24h ?? 0} ok · ${s.failed_24h ?? 0} failed in 24h · last ${String(s.last_called ?? "—").slice(0, 16).replace("T", " ")}`,
+          })),
+          severity: broken.length ? "bad" : "ok",
+        });
+      }
+
       /* 1 — the exact failure we just hit: shipped but never marked fulfilled.
          An order still Pending after two days is either not shipped or not
          recorded, and both need a human to look. */
