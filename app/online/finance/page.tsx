@@ -19,7 +19,6 @@ const STORES = [
 const TABS: { key: Tab; label: string }[] = [
   { key: "payments", label: "Payments" },
   { key: "cpr", label: "CPR" },
-  { key: "returns", label: "Returns" },
 ];
 const money = (n: unknown) => (n == null ? "—" : "Rs " + (Number(n) || 0).toLocaleString("en-PK"));
 const sum = (rows: Row[], k: string) => rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
@@ -99,7 +98,7 @@ export default function FinancePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold sm:text-[22px] tracking-tight text-ink dark:text-[#f4f1ea]">Finance</h1>
-          <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">CPR reconciliation, pending &amp; received payments, and returns.</p>
+          <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">CPR reconciliation, and pending &amp; received payments. Returns moved to Logistics.</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={store} onChange={(e) => setStore(e.target.value)}

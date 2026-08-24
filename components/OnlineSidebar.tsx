@@ -1,14 +1,24 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, ArrowLeft, LogOut, ShoppingBag, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import ThemeToggle from "@/components/ThemeToggle";
 
-const NAV: { label: string; href: string; Icon: LucideIcon; soon?: boolean }[] = [
+type NavItem = {
+  label: string; href: string; Icon: LucideIcon; soon?: boolean;
+  children?: { label: string; href: string; Icon: LucideIcon }[];
+};
+
+/* Returns sit under Logistics, not Finance. A return is a parcel problem before
+   it is a money problem, and the people chasing one are the logistics team. */
+const NAV: NavItem[] = [
   { label: "Dashboard", href: "/online/dashboard", Icon: LayoutDashboard },
   { label: "Orders", href: "/online/orders", Icon: ClipboardList },
-  { label: "Logistics", href: "/online/logistics", Icon: Truck },
+  { label: "Logistics", href: "/online/logistics", Icon: Truck, children: [
+      { label: "Shipments", href: "/online/logistics", Icon: Truck },
+      { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },
+  ] },
   { label: "Finance", href: "/online/finance", Icon: Wallet },
   { label: "Attendance", href: "/online/attendance", Icon: CalendarCheck },
 ];
@@ -33,14 +43,33 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
           </div>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
-          {NAV.map(({ label, href, Icon, soon }) => {
+          {NAV.map(({ label, href, Icon, soon, children }) => {
             const on = active(href);
+            // a parent opens only while you are inside it, so the sidebar stays
+            // short until the section is actually in use
+            const openGroup = !!children && on;
             return (
-              <Link key={href} href={href} className={`flex items-center gap-3 rounded-xl2 px-3.5 py-2.5 text-[14px] transition ${on ? "bg-periwinkle-soft font-semibold text-ink dark:bg-white/[0.10] dark:text-white" : "text-muted hover:bg-panel hover:text-ink dark:text-[#a89f93] dark:hover:bg-white/[0.06] dark:hover:text-white"}`}>
-                <Icon size={18} strokeWidth={2} />
-                <span className="flex-1">{label}</span>
-                {soon && <span className="rounded-full bg-panel px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-hint dark:bg-white/[0.06] dark:text-[#8a8175]">Soon</span>}
-              </Link>
+              <div key={href}>
+                <Link href={href} className={`flex items-center gap-3 rounded-xl2 px-3.5 py-2.5 text-[14px] transition ${on ? "bg-periwinkle-soft font-semibold text-ink dark:bg-white/[0.10] dark:text-white" : "text-muted hover:bg-panel hover:text-ink dark:text-[#a89f93] dark:hover:bg-white/[0.06] dark:hover:text-white"}`}>
+                  <Icon size={18} strokeWidth={2} />
+                  <span className="flex-1">{label}</span>
+                  {soon && <span className="rounded-full bg-panel px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-hint dark:bg-white/[0.06] dark:text-[#8a8175]">Soon</span>}
+                  {children && <ChevronDown size={15} className={`transition ${openGroup ? "rotate-180" : ""}`} />}
+                </Link>
+                {openGroup && (
+                  <div className="ml-4 mt-1 space-y-0.5 border-l border-line pl-3 dark:border-white/[0.08]">
+                    {children!.map((c) => {
+                      const cOn = pathname === c.href;
+                      return (
+                        <Link key={c.href} href={c.href} className={`flex items-center gap-2.5 rounded-xl2 px-3 py-2 text-[13px] transition ${cOn ? "font-semibold text-ink dark:text-white" : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
+                          <c.Icon size={15} strokeWidth={2} />
+                          {c.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>
