@@ -91,6 +91,36 @@ async function pxQuery(path: string, token: string, params: Record<string, unkno
   return { ...post, via: "POST", getAttempt: { status: get.status, body: get.body } };
 }
 
+
+/** Track ONE parcel. The documented single-order endpoint, used per parcel.
+ *
+ *  WHY THIS EXISTS: /v1/track-bulk-order returned 405 Method Not Allowed on
+ *  every scheduled run — GET was refused and the POST fallback rejected too. It
+ *  reported ok:true with `updated: 0` and the failures buried in an `errors`
+ *  array, so nothing surfaced. The effect was that any parcel older than the
+ *  3-day pull window never changed status again: dispatched six days ago,
+ *  delivered yesterday, still "In Transit" in our table.
+ *
+ *  One request per parcel is slower than a bulk call, but a slow endpoint that
+ *  answers beats a fast one that 405s. */
+async function pxTrackOne(tracking: string, token: string) {
+  const paths = [
+    `${B}/v1/track-order/${encodeURIComponent(tracking)}`,
+    `${B1}/v1/track-order/${encodeURIComponent(tracking)}`,
+  ];
+  for (const path of paths) {
+    const r = await px(path, token, { method: "GET" });
+    if (!r.ok) continue;
+    const raw = (r.body ?? {}) as Record<string, unknown>;
+    const dist = raw.dist ?? raw;
+    const d = (Array.isArray(dist) ? (dist[0] ?? {}) : (dist ?? {})) as Record<string, unknown>;
+    const t = (d.trackingResponse ?? d) as Record<string, unknown>;
+    const status = String(t.transactionStatus ?? d.transactionStatus ?? "");
+    if (status) return { ok: true, status, detail: t };
+  }
+  return { ok: false as const, status: "", detail: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
@@ -202,11 +232,45 @@ Deno.serve(async (req) => {
         .select("tracking_id").eq("courier", "PostEx")
         .not("tracking_id", "is", null)
         .in("delivery_status", ["In Transit", "Pending"])
-        .limit(body.limit ?? 300);
+        .limit(body.limit ?? 250);
       const nums = (open ?? []).map((r: { tracking_id: string }) => r.tracking_id).filter(Boolean);
       if (!nums.length) return json({ ok: true, action, checked: 0, updated: 0, note: "nothing in transit" });
 
-      let updated = 0; const errors: string[] = [];
+      let updated = 0; let bulkWorked = false; const errors: string[] = [];
+
+      // Try the bulk endpoint once. If it answers, use it — it is far cheaper.
+      // If it does not, fall through to one request per parcel rather than
+      // reporting success while updating nothing.
+      const probe = await pxQuery(`${B}/v1/track-bulk-order`, token, { trackingNumber: nums.slice(0, 5) });
+      bulkWorked = probe.ok;
+      if (!bulkWorked) errors.push(`bulk endpoint unavailable: HTTP ${probe.status} (${probe.via}) — using per-parcel tracking`);
+
+      if (!bulkWorked) {
+        // small waves, so we stay polite to their API
+        for (let i = 0; i < nums.length; i += 8) {
+          const wave = nums.slice(i, i + 8);
+          const results = await Promise.all(wave.map(async (tn) => ({ tn, ...(await pxTrackOne(tn, token)) })));
+          for (const r of results) {
+            if (!r.ok || !r.status) continue;
+            const { delivery_status, needs_review } = classify(r.status);
+            const upd: Record<string, unknown> = {
+              delivery_status, needs_review, raw_status: r.status,
+              updated_at: new Date().toISOString(),
+            };
+            if (needs_review) upd.review_status = r.status;
+            if (delivery_status === "Delivered" || delivery_status === "Returned")
+              upd.delivery_date = day((r.detail as Record<string, unknown>)?.orderDeliveryDate) ?? new Date().toISOString().slice(0, 10);
+            if (delivery_status === "Returned") { upd.rts = "Yes"; upd.rts_reason = `PostEx: ${r.status}`; }
+            else if (/refus|attempt/i.test(r.status)) { upd.rts_reason = `PostEx: ${r.status}`; }
+            const { data } = await db.from("online_logistics").update(upd).eq("tracking_id", r.tn).select("id");
+            updated += (data ?? []).length;
+            await db.from("online_courier_events").insert({ courier: "PostEx", tracking_id: r.tn, raw_status: r.status, payload: { source: "track-single" } });
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        return json({ ok: true, action, checked: nums.length, updated, method: "per-parcel", errors: errors.slice(0, 5) });
+      }
+
       for (let i = 0; i < nums.length; i += 50) {          // bulk endpoint, 50 at a time
         const chunk = nums.slice(i, i + 50);
         const res = await pxQuery(`${B}/v1/track-bulk-order`, token, { trackingNumber: chunk });
@@ -229,7 +293,7 @@ Deno.serve(async (req) => {
         }
         await new Promise((r) => setTimeout(r, 200));
       }
-      return json({ ok: true, action, checked: nums.length, updated, errors: errors.slice(0, 10) });
+      return json({ ok: true, action, checked: nums.length, updated, method: "bulk", errors: errors.slice(0, 10) });
     }
 
     // ---------------------------------------------------------------
