@@ -292,7 +292,7 @@ export default function LogisticsPage() {
           <CourierSync onDone={load} />
           
           <AddShipment onDone={load} />
-          <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+          <button onClick={() => load()} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
         </div>
