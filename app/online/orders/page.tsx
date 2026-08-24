@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveTables } from "@/lib/useLiveTables";
 import { ShoppingBag, Clock, Truck, XCircle, Wallet, TrendingUp, Search, RefreshCw } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -10,6 +10,12 @@ import { rangeDates, num, rs } from "@/lib/dateRange";
 
 type Order = Record<string, unknown>;
 type View = "list" | "cities" | "status" | "stores";
+
+type OrdersSummary = {
+  total: number; pending: number; dispatched: number; cancelled: number;
+  delivered: number; returned: number; in_transit: number;
+  value: number; avg_value: number;
+};
 
 const STORES = [
   { code: "ALL", label: "All stores" }, { code: "LM", label: "Little Minors" },
@@ -38,23 +44,41 @@ export default function OrdersPage() {
   const [store, setStore] = useState("ALL");
   const [status, setStatus] = useState("All");
   const [q, setQ] = useState("");
+  const [summary, setSummary] = useState<OrdersSummary | null>(null);
   const [view, setView] = useState<View>("list");
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
-  const load = useCallback(async () => {
+  /* Rows are for the TABLE only. The cards come from hub_orders_summary(),
+     because PostgREST caps a response at 1,000 rows whatever .limit() asks for
+     — so counting the returned array reported "1,000 orders" on every single
+     range, which was the size of the page, not the size of the business.
+     A request token keeps a slow older query from painting over a newer one. */
+  const reqId = useRef(0);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
-    setLoading(true); setErr("");
+    const my = ++reqId.current;
+    if (!opts?.silent) setLoading(true);
+    setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
     let q2 = supabase.from("online_orders")
       .select("id,order_number,store_code,order_date,customer_name,phone,city,amount,status")
-      .order("order_date", { ascending: false, nullsFirst: false }).limit(5000);
+      .order("order_date", { ascending: false, nullsFirst: false }).limit(1000);
     if (from) q2 = q2.gte("order_date", from);
     if (to) q2 = q2.lte("order_date", to);
     if (store !== "ALL") q2 = q2.eq("store_code", store);
-    const { data, error } = await q2;
-    if (error) setErr(error.message);
-    setOrders((data as Order[]) ?? []);
+
+    const [rowsRes, sumRes] = await Promise.all([
+      q2,
+      supabase.rpc("hub_orders_summary", {
+        p_from: from, p_to: to, p_store: store === "ALL" ? null : store,
+      }),
+    ]);
+    if (my !== reqId.current) return;
+    if (rowsRes.error) setErr(rowsRes.error.message);
+    setOrders((rowsRes.data as Order[]) ?? []);
+    setSummary((sumRes.data as OrdersSummary[])?.[0] ?? null);
     setLoading(false);
   }, [preset, cf, ct, store]);
   useEffect(() => { load(); }, [load]);
@@ -62,7 +86,7 @@ export default function OrdersPage() {
   /* Shopify pushes order, payment and fulfilment changes to shopify-webhook,
      which writes to online_orders. This is what turns that write into something
      visible without a manual refresh. */
-  useLiveTables(["online_orders"], load);
+  useLiveTables(["online_orders", "online_logistics"], useCallback(() => load({ silent: true }), [load]));
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -72,15 +96,19 @@ export default function OrdersPage() {
     );
   }, [orders, status, q]);
 
-  const totalAmt = useMemo(() => filtered.reduce((a, o) => a + num(o.amount), 0), [filtered]);
-  const by = (s: string) => filtered.filter((o) => o.status === s).length;
+  // every figure below is counted in the database, so it is the real total and
+  // not however many rows happened to fit in one response
+  const S = summary;
   const cards = [
-    { label: "Orders", value: filtered.length.toLocaleString(), Icon: ShoppingBag, bg: "bg-periwinkle-soft" },
-    { label: "Pending", value: by("Pending").toLocaleString(), Icon: Clock, bg: "bg-amber-soft" },
-    { label: "Dispatched", value: by("Dispatched").toLocaleString(), Icon: Truck, bg: "bg-lavender-soft" },
-    { label: "Delivered", value: by("Delivered").toLocaleString(), Icon: Truck, bg: "bg-success-soft" },
-    { label: "Order value", value: rs(totalAmt), Icon: Wallet, bg: "bg-pink-soft" },
-    { label: "Avg order", value: rs(filtered.length ? totalAmt / filtered.length : 0), Icon: TrendingUp, bg: "bg-salmon-soft" },
+    { label: "Orders", value: (S?.total ?? 0).toLocaleString(), Icon: ShoppingBag, bg: "bg-periwinkle-soft" },
+    { label: "Pending", value: (S?.pending ?? 0).toLocaleString(), Icon: Clock, bg: "bg-amber-soft" },
+    { label: "Dispatched", value: (S?.dispatched ?? 0).toLocaleString(), Icon: Truck, bg: "bg-lavender-soft" },
+    // Delivered is not a property of an order — the courier owns it, in
+    // online_logistics. Counting it on online_orders.status is why this card
+    // always read 0.
+    { label: "Delivered", value: (S?.delivered ?? 0).toLocaleString(), Icon: Truck, bg: "bg-success-soft" },
+    { label: "Order value", value: rs(Number(S?.value ?? 0)), Icon: Wallet, bg: "bg-pink-soft" },
+    { label: "Avg order", value: rs(Number(S?.avg_value ?? 0)), Icon: TrendingUp, bg: "bg-salmon-soft" },
   ];
 
   const grouped = useMemo(() => {
@@ -107,7 +135,7 @@ export default function OrdersPage() {
           <ShopifySync onDone={load} />
           <AddOrder onDone={load} />
           <ImportOrders onDone={load} />
-          <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+          <button onClick={() => load()} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
         </div>

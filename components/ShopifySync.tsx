@@ -88,11 +88,18 @@ export default function ShopifySync({ onDone }: { onDone: () => void }) {
 
       windows++;
       empties = found === 0 ? empties + 1 : 0;
-      setLines([{ store: "LM", ok: true, text: `${s1} → ${s2} · ${found.toLocaleString()} orders` }]);
+      // every store IS walked inside this window. The progress line used to be
+      // hardcoded to "LM" and the finish line to "TS", so TRZ never received a
+      // line and sat on "waiting" forever while it was in fact being synced.
+      setLines(STORES.map((st) => ({
+        store: st, ok: true, text: `${s1} → ${s2} · ${found.toLocaleString()} orders`,
+      })));
     }
 
     setBusy("");
-    setLines((p) => [...p, { store: "TS", ok: true, text: `Finished — ${windows} month(s) covered.` }]);
+    setLines(STORES.map((st) => ({
+      store: st, ok: true, text: `Finished — ${windows} month(s) covered.`,
+    })));
     onDone();
   }
 
