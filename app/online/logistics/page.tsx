@@ -37,12 +37,19 @@ type Summary = {
   cod: number; receivable: number; receivable_count: number; fees: number;
 };
 
+type CourierRow = {
+  courier: string; total: number; transit: number; delivered: number;
+  rts: number; cancelled: number; delivery_rate: number;
+  cod: number; receivable: number; receivable_count: number; fees: number;
+};
+
 const isRts = (l: Logi) => l.delivery_status === "RTS" || l.delivery_status === "Returned" || (!!l.rts && l.rts !== "No" && l.rts !== "false");
 
 export default function LogisticsPage() {
   const [rows, setRows] = useState<Logi[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trendRows, setTrendRows] = useState<{ day: string; delivered: number }[]>([]);
+  const [courierSplit, setCourierSplit] = useState<CourierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [store, setStore] = useState("ALL");
@@ -71,15 +78,18 @@ export default function LogisticsPage() {
       p_store: store === "ALL" ? null : store,
       p_courier: courier === "All couriers" ? null : courier,
     };
-    const [rowsRes, sumRes, trendRes] = await Promise.all([
+    const [rowsRes, sumRes, trendRes, courierRes] = await Promise.all([
       q2,
       supabase.rpc("hub_logistics_summary", args),
       supabase.rpc("hub_logistics_trend", { ...args, p_days: 14 }),
+      // the split is never courier-filtered — its whole job is comparing them
+      supabase.rpc("hub_logistics_by_courier", { p_from: args.p_from, p_to: args.p_to, p_store: args.p_store }),
     ]);
     if (rowsRes.error) setErr(rowsRes.error.message);
     setRows((rowsRes.data as Logi[]) ?? []);
     setSummary((sumRes.data as Summary[])?.[0] ?? null);
     setTrendRows((trendRes.data as { day: string; delivered: number }[]) ?? []);
+    setCourierSplit((courierRes.data as CourierRow[]) ?? []);
     setLoading(false);
   }, [preset, cf, ct, store, courier]);
   useEffect(() => { load(); }, [load]);
@@ -148,19 +158,30 @@ export default function LogisticsPage() {
     { label: "COD receivable", value: rs(M.receivable), sub: M.receivableCount ? `${M.receivableCount.toLocaleString()} parcels unpaid` : "all settled", Icon: Clock, bg: "bg-success-soft", warn: M.receivable > 0 },
   ];
 
+  // Counted in the database (0052). The previous version tallied the rows the
+  // browser happened to receive, which PostgREST caps at 1,000 — so on wide
+  // ranges this table under-reported exactly like the cards did.
   const byCourier = useMemo(() => {
-    const m: Record<string, { total: number; delivered: number; rts: number; transit: number; cod: number; fees: number }> = {};
+    if (courierSplit.length)
+      return courierSplit.filter((c) => c.courier !== "TOTAL").map((c) => ({
+        name: c.courier, total: Number(c.total), delivered: Number(c.delivered),
+        rts: Number(c.rts), transit: Number(c.transit), cancelled: Number(c.cancelled),
+        cod: Number(c.cod), receivable: Number(c.receivable), fees: Number(c.fees),
+        rate: Number(c.delivery_rate),
+      }));
+    const m: Record<string, { total: number; delivered: number; rts: number; transit: number; cancelled: number; cod: number; receivable: number; fees: number }> = {};
     filtered.forEach((l) => {
       const k = String(l.courier || "—");
-      (m[k] ||= { total: 0, delivered: 0, rts: 0, transit: 0, cod: 0, fees: 0 });
+      (m[k] ||= { total: 0, delivered: 0, rts: 0, transit: 0, cancelled: 0, cod: 0, receivable: 0, fees: 0 });
       m[k].total += 1;
       if (l.delivery_status === "Delivered") { m[k].delivered += 1; m[k].cod += num(l.cod_amount); }
       if (isRts(l)) m[k].rts += 1;
       if (l.delivery_status === "In Transit") m[k].transit += 1;
+      if (l.delivery_status === "Cancelled") m[k].cancelled += 1;
       m[k].fees += num(l.courier_fee);
     });
     return Object.entries(m).map(([name, v]) => ({ name, ...v, rate: v.delivered + v.rts ? (v.delivered / (v.delivered + v.rts)) * 100 : 0 })).sort((a, b) => b.total - a.total);
-  }, [filtered]);
+  }, [filtered, courierSplit]);
 
   const byStatus = useMemo(() => {
     const m: Record<string, number> = {};
@@ -215,6 +236,46 @@ export default function LogisticsPage() {
           </div>
         ))}
       </div>
+
+      {/* per-courier split — reconciling against a courier portal needs their
+          share, not a combined figure. Counted in the database (0052). */}
+      {courierSplit.length > 1 && (
+        <div className="mt-4 overflow-x-auto rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
+          <table className="w-full min-w-[760px] text-[12.5px]">
+            <thead className="text-left text-[11px] uppercase tracking-wide text-hint dark:text-[#8a8175]">
+              <tr className="border-b border-line dark:border-white/[0.06]">
+                <th className="px-4 py-2.5">Courier</th>
+                <th className="px-4 py-2.5 text-right">Total</th>
+                <th className="px-4 py-2.5 text-right">In transit</th>
+                <th className="px-4 py-2.5 text-right">Delivered</th>
+                <th className="px-4 py-2.5 text-right">RTS</th>
+                <th className="px-4 py-2.5 text-right">Cancelled</th>
+                <th className="px-4 py-2.5 text-right">Rate</th>
+                <th className="px-4 py-2.5 text-right">COD delivered</th>
+                <th className="px-4 py-2.5 text-right">Receivable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {courierSplit.map((c) => {
+                const isTotal = c.courier === "TOTAL";
+                return (
+                  <tr key={c.courier} className={`border-b border-line last:border-0 dark:border-white/[0.06] ${isTotal ? "bg-panel font-bold dark:bg-white/[0.06]" : "text-ink dark:text-[#e7e2d8]"}`}>
+                    <td className="px-4 py-2.5 font-semibold text-ink dark:text-[#f4f1ea]">{c.courier}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.total).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.transit).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-success">{Number(c.delivered).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-danger">{Number(c.rts).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">{Number(c.cancelled).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.delivery_rate).toFixed(1)}%</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{rs(Number(c.cod))}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{Number(c.receivable) > 0 ? rs(Number(c.receivable)) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* delivered trend — the courier portals show this, so we do too */}
       {!loading && trend.length > 1 && (
