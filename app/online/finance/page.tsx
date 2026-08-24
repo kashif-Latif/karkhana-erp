@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import ReturnsPanel from "@/components/ReturnsPanel";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates } from "@/lib/dateRange";
 import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
@@ -123,6 +124,7 @@ export default function FinancePage() {
         ))}
       </div></div>
 
+      {tab === "returns" ? <div className="mt-5"><ReturnsPanel store={store} /></div> : <>
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(({ label, value, Icon, bg }, i) => (
           <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
@@ -145,10 +147,6 @@ export default function FinancePage() {
                 {tab === "cpr" && <>
                   <th className="px-4 py-3 font-semibold">CPR #</th><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 font-semibold">Store</th>
                   <th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 text-right font-semibold">Amount</th><th className="px-4 py-3 text-right font-semibold">Orders</th><th className="px-4 py-3 font-semibold">Status</th>
-                </>}
-                {tab === "returns" && <>
-                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Courier</th>
-                  <th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Return date</th><th className="px-4 py-3 font-semibold">Reason</th><th className="px-4 py-3 font-semibold">Received</th>
                 </>}
               </tr>
             </thead>
@@ -180,15 +178,6 @@ export default function FinancePage() {
                       <td className="px-4 py-3 text-right tabular-nums">{String(r.orders_count ?? 0)}</td>
                       <td className="px-4 py-3">{badge(String(r.status ?? "Pending"), r.status === "Paid" || r.status === "Cleared" ? "ok" : "warn")}</td>
                     </>}
-                    {tab === "returns" && <>
-                      <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.tracking_id ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.courier ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.store_code ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.return_date ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.reason ?? "—")}</td>
-                      <td className="px-4 py-3">{r.received ? badge("Received", "ok") : badge("Awaiting", "warn")}</td>
-                    </>}
                   </tr>
                 ))
               )}
@@ -204,6 +193,7 @@ export default function FinancePage() {
       <EditFinanceRow tab={tab} row={editRow} onClose={() => setEditRow(null)} onDone={() => load(tab)} />
 
       {!isSupabaseConfigured && <p className="mt-4 text-center text-[12px] text-hint dark:text-[#8a8175]">Preview build · connect Supabase to load live finance data.</p>}
+      </>}
     </div>
   );
 }

@@ -4,9 +4,8 @@ import { Package, Truck, CheckCircle2, Undo2, Percent, Wallet, Search, RefreshCw
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
-import { AddShipment, UploadCourierFile } from "@/components/LogisticsEntry";
+import { AddShipment } from "@/components/LogisticsEntry";
 import CourierSync from "@/components/CourierSync";
-import ShopifySync from "@/components/ShopifySync";
 import SmartImport from "@/components/SmartImport";
 import HealthCheck from "@/components/HealthCheck";
 
@@ -56,6 +55,7 @@ export default function LogisticsPage() {
   const [err, setErr] = useState("");
   const [store, setStore] = useState("ALL");
   const [courier, setCourier] = useState("All couriers");
+  const [statusFilter, setStatusFilter] = useState("");
   const [q, setQ] = useState("");
   const [view, setView] = useState<View>("list");
   const [preset, setPreset] = useState("30d");
@@ -100,9 +100,11 @@ export default function LogisticsPage() {
     const n = q.trim().toLowerCase();
     return rows.filter((l) =>
       (courier === "All couriers" || l.courier === courier) &&
+      (!statusFilter
+        || (statusFilter === "RTS" ? isRts(l) : l.delivery_status === statusFilter)) &&
       (!n || [l.order_number, l.tracking_id].some((v) => String(v ?? "").toLowerCase().includes(n)))
     );
-  }, [rows, courier, q]);
+  }, [rows, courier, q, statusFilter]);
 
   const M = useMemo(() => {
     if (summary) {
@@ -155,17 +157,17 @@ export default function LogisticsPage() {
 
   const cards = [
     { label: "Active shipments", value: M.active.toLocaleString(), sub: M.cancelled ? `${M.total.toLocaleString()} incl. cancelled` : undefined, Icon: Package, bg: "bg-periwinkle-soft" },
-    { label: "In transit", value: (M.transitPortal || M.transit).toLocaleString(),
+    { label: "In transit", filter: "In Transit", value: (M.transitPortal || M.transit).toLocaleString(),
       sub: M.outForReturn ? `incl. ${M.outForReturn} coming back` : undefined,
       Icon: Truck, bg: "bg-amber-soft" },
-    { label: "Delivered", value: M.delivered.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft" },
+    { label: "Delivered", filter: "Delivered", value: M.delivered.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft" },
     // split the way the courier portals do: a parcel travelling back is still
     // moving, only a received one is a finished return
-    { label: "Returned", value: (M.returnedReceived ?? M.rts).toLocaleString(),
+    { label: "Returned", filter: "Returned", value: (M.returnedReceived ?? M.rts).toLocaleString(),
       sub: "back with us", Icon: Undo2, bg: "bg-salmon-soft" },
-    { label: "Out for return", value: M.outForReturn.toLocaleString(),
+    { label: "Out for return", filter: "RTS", value: M.outForReturn.toLocaleString(),
       sub: M.outForReturn ? "counted in transit" : "none", Icon: Undo2, bg: "bg-panel" },
-    { label: "Cancelled", value: M.cancelled.toLocaleString(), Icon: XCircle, bg: "bg-panel" },
+    { label: "Cancelled", filter: "Cancelled", value: M.cancelled.toLocaleString(), Icon: XCircle, bg: "bg-panel" },
     { label: "Delivery rate", value: `${M.rate.toFixed(1)}%`, Icon: Percent, bg: "bg-lavender-soft" },
     { label: "COD delivered", value: rs(M.cod), Icon: Wallet, bg: "bg-pink-soft" },
     { label: "COD receivable", value: rs(M.receivable), sub: M.receivableCount ? `${M.receivableCount.toLocaleString()} parcels unpaid` : "all settled", Icon: Clock, bg: "bg-success-soft", warn: M.receivable > 0 },
@@ -212,11 +214,10 @@ export default function LogisticsPage() {
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">PostEx / OwnEx tracking, delivery performance &amp; RTS.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <ShopifySync onDone={load} />
           <SmartImport onDone={load} />
           <HealthCheck />
           <CourierSync onDone={load} />
-          <UploadCourierFile onDone={load} />
+          
           <AddShipment onDone={load} />
           <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
@@ -241,15 +242,30 @@ export default function LogisticsPage() {
         } />
 
       <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9">
-        {cards.map(({ label, value, sub, Icon, bg, warn }) => (
-          <div key={label} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17]`}>
+        {cards.map(({ label, value, sub, Icon, bg, warn, filter }) => {
+          const clickable = filter !== undefined;
+          const active = clickable && statusFilter === filter && !(filter === "" && !statusFilter);
+          return (
+          <button key={label} type="button"
+            onClick={() => clickable && setStatusFilter(statusFilter === filter ? "" : (filter as string))}
+            disabled={!clickable}
+            title={clickable ? `Show only ${label.toLowerCase()}` : undefined}
+            className={`rounded-card border ${active ? "border-ink ring-2 ring-ink/20 dark:border-white/40" : "border-line dark:border-white/[0.06]"} ${bg} p-4 text-left transition ${clickable ? "cursor-pointer hover:brightness-95 dark:hover:brightness-110" : "cursor-default"} dark:bg-[#201c17]`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
             <div className={`mt-3 text-[15px] font-extrabold tabular-nums sm:text-[17px] ${warn ? "text-amber-strong dark:text-amber" : "text-ink dark:text-[#f4f1ea]"}`}>{loading ? "—" : value}</div>
             <div className="text-[12px] font-medium text-muted dark:text-[#a89f93]">{label}</div>
             {sub && <div className="mt-0.5 text-[10.5px] text-hint dark:text-[#8a8175]">{sub}</div>}
-          </div>
-        ))}
+          </button>
+          );
+        })}
       </div>
+
+      {statusFilter && (
+        <button onClick={() => setStatusFilter("")}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white dark:bg-white dark:text-[#141414]">
+          Showing {statusFilter} only · clear
+        </button>
+      )}
 
       {/* per-courier split — reconciling against a courier portal needs their
           share, not a combined figure. Counted in the database (0052). */}
