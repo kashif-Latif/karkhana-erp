@@ -66,9 +66,20 @@ export default function LogisticsPage() {
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
-  const load = useCallback(async () => {
+  /* One fetch at a time, and never two for one click.
+     `silent` skips the spinner: an automatic refresh (a realtime change, or a
+     click on a control) should update the numbers without flashing the page.
+     `inFlight` and `lastLoadAt` are refs, not state, so they cannot themselves
+     trigger a render and start the cycle again. */
+  const inFlight = useRef(false);
+  const lastLoadAt = useRef(0);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
-    setLoading(true); setErr("");
+    if (inFlight.current) return;                       // a fetch is already running
+    inFlight.current = true;
+    if (!opts?.silent) setLoading(true);
+    setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
     let q2 = supabase.from("online_logistics")
       .select("id,order_number,store_code,courier,tracking_id,dispatch_date,delivery_status,delivery_date,cod_amount,cpr_net_amount,courier_fee,payment_status,rts,rts_reason")
@@ -103,24 +114,36 @@ export default function LogisticsPage() {
     setCourierSplit(courier === "All couriers" ? split : split.filter((c) => c.courier === courier));
     setStatusCounts((statusRes.data as StatusRow[]) ?? []);
     setLoading(false);
+    inFlight.current = false;
+    lastLoadAt.current = Date.now();
   }, [preset, cf, ct, store, courier, rawStatus]);
   useEffect(() => { load(); }, [load]);
 
   /* Live. The couriers push (PostEx webhook) or are polled (OwnEx), both of
      which write straight to online_logistics — this repaints the page when they
      do, so nobody has to press Refresh to find out a parcel was delivered. */
-  const { live, lastChange } = useLiveTables(["online_logistics", "online_orders"], load);
+  const { live, lastChange } = useLiveTables(
+    ["online_logistics", "online_orders"],
+    useCallback(() => load({ silent: true }), [load]),
+  );
 
-  /* Any click on a control in this section refreshes the data.
-     Debounced on purpose: the range and filter buttons already reload through
-     load()'s dependency list, so without the delay one click would fetch twice.
-     Everything here is a read, so a stray extra call costs nothing. */
+  /* Any click on a control in this section refreshes the data — but only if
+     nothing else already did.
+     The range and filter buttons change state, which changes load()'s identity
+     and reloads through the effect below. Firing a second fetch on top of that
+     is what made the page blink twice for one click. So: wait, then check
+     whether a load has happened in the meantime, and stay out of the way if it
+     has. Refreshes triggered this way are silent — the numbers change, the
+     spinner does not. */
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshOnClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement | null;
     if (!t?.closest?.("button, select, [role='tab'], [role='option']")) return;
     if (clickTimer.current) clearTimeout(clickTimer.current);
-    clickTimer.current = setTimeout(() => load(), 400);
+    clickTimer.current = setTimeout(() => {
+      if (Date.now() - lastLoadAt.current < 1500) return;   // something already refreshed
+      load({ silent: true });
+    }, 500);
   }, [load]);
 
   useEffect(() => () => { if (clickTimer.current) clearTimeout(clickTimer.current); }, []);
