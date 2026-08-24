@@ -8,6 +8,7 @@ import { AddShipment, UploadCourierFile } from "@/components/LogisticsEntry";
 import CourierSync from "@/components/CourierSync";
 import ShopifySync from "@/components/ShopifySync";
 import SmartImport from "@/components/SmartImport";
+import HealthCheck from "@/components/HealthCheck";
 
 type Logi = Record<string, unknown>;
 type View = "list" | "couriers" | "status";
@@ -143,6 +144,7 @@ export default function LogisticsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <ShopifySync onDone={load} />
           <SmartImport onDone={load} />
+          <HealthCheck />
           <CourierSync onDone={load} />
           <UploadCourierFile onDone={load} />
           <AddShipment onDone={load} />
