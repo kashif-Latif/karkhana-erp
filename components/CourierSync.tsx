@@ -7,7 +7,7 @@ import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
 type Res = { ok: boolean; msg: string; detail?: string } | null;
 
 const JOBS = [
-  { key: "postex_pull",     label: "Fetch orders",   Icon: Download, hint: "Pulls every PostEx order from the last 7 days — replaces the load-sheet and status-file uploads. Stores are detected from the order number." },
+  { key: "postex_pull",     label: "Fetch orders",   Icon: Download, hint: "Pulls every PostEx order in the chosen range — replaces the load-sheet and status-file uploads. Stores are detected from the order number. Choose All time to close any historic gap against the PostEx portal." },
   { key: "postex_track",    label: "Refresh status", Icon: Truck,    hint: "Re-checks delivery status for every parcel still in transit." },
   { key: "postex_payments", label: "Reconcile COD",  Icon: Wallet,   hint: "Reads PostEx payment records and marks delivered orders paid, with their CPR number." },
 ];
@@ -19,8 +19,55 @@ export default function CourierSync({ onDone }: { onDone: () => void }) {
   const [days, setDays] = useState(7);
   const [steps, setSteps] = useState<{ label: string; ok: boolean; text: string }[]>([]);
 
+  /** PostEx's pull takes a date range. A single request covering a year is slow
+   *  and easy for their API to refuse, so "All time" walks BACKWARDS in 60-day
+   *  windows and stops after two consecutive empty ones — two silences mean we
+   *  are past the first parcel rather than in a quiet patch.
+   *
+   *  This is what closes the gap against their portal. The dropdown used to stop
+   *  at 30 days, so any parcel older than that could only enter through a Smart
+   *  import load sheet — and one missed sheet left a permanent hole. On 24 Aug
+   *  we held 3,696 against PostEx's own 3,753. */
+  async function pullAllTime() {
+    if (!supabase) return;
+    setBusy("postex_pull"); setRes(null); setSteps([]);
+    const WINDOW = 60, MAX_WINDOWS = 12;          // ~2 years, then stop regardless
+    let fetched = 0, merged = 0, empty = 0, w = 0;
+    try {
+      for (; w < MAX_WINDOWS; w++) {
+        const to   = new Date(Date.now() - w * WINDOW * 864e5).toISOString().slice(0, 10);
+        const from = new Date(Date.now() - (w + 1) * WINDOW * 864e5).toISOString().slice(0, 10);
+        const { data, error } = await supabase.functions.invoke("postex-sync", {
+          body: { action: "postex_pull", fromDate: from, toDate: to },
+        });
+        if (error) throw error;
+        const d = data as Record<string, unknown>;
+        if (d?.error) throw new Error(String(d.error));
+
+        const f = Number(d.fetched ?? 0), m = Number(d.merged ?? 0);
+        fetched += f; merged += m;
+        setSteps((p) => [...p, {
+          label: `${from} → ${to}`, ok: true,
+          text: `${f.toLocaleString()} read · ${m.toLocaleString()} saved`,
+        }]);
+        empty = f === 0 ? empty + 1 : 0;
+        if (empty >= 2) break;
+      }
+      setRes({
+        ok: true,
+        msg: `${fetched.toLocaleString()} orders read · ${merged.toLocaleString()} saved`,
+        detail: `${w + 1} windows of ${WINDOW} days, oldest first parcel reached`,
+      });
+      onDone();
+    } catch (e) {
+      const m = String((e as Error)?.message ?? e);
+      setRes({ ok: false, msg: /401|unauthor/i.test(m) ? "You don't have permission to run the courier sync." : m });
+    } finally { setBusy(""); }
+  }
+
   async function run(action: string) {
     if (!supabase) return;
+    if (action === "postex_pull" && days === 0) return pullAllTime();
     setBusy(action); setRes(null);
     try {
       // the user's session token is sent automatically; no secret in the browser
@@ -180,7 +227,9 @@ export default function CourierSync({ onDone }: { onDone: () => void }) {
                     Last
                     <select value={days} onChange={(e) => setDays(Number(e.target.value))}
                       className="rounded-full border border-line bg-canvas px-2.5 py-1 text-[12px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-white">
-                      {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>{d} days</option>)}
+                      {[7, 14, 30, 60, 90, 180, 365, 0].map((d) => (
+                        <option key={d} value={d}>{d === 0 ? "All time" : `${d} days`}</option>
+                      ))}
                     </select>
                   </label>
                 )}
