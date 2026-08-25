@@ -32,6 +32,7 @@ type ReturnRow = {
   tracking_id: string; order_number: string | null; store_code: string | null;
   courier: string | null; cod_amount: number | null; stage: string | null;
   courier_reason: string | null; shopify_reason: string | null; shopify_note: string | null;
+  agent_note: string | null; order_tags: string[] | null;
   customer_name: string | null; city: string | null;
   return_date: string | null; return_received_at: string | null; received: boolean;
   return_claim_status: string | null; age_days: number | null;
@@ -249,11 +250,14 @@ export default function ReturnsPage() {
               // that wins. cancel_reason is only Shopify's fixed list
               // (customer / declined / fraud / inventory / other), and the
               // courier's wording is the last resort, not the first.
+              // What a human typed beats a dropdown, and a dropdown beats the
+              // courier's wording. "REFUSED TO RECEIVE" is the courier's excuse,
+              // not your agent's account of what happened.
               const reason = isReturns
-                ? (ret.shopify_note || ret.shopify_reason || ret.courier_reason || "—")
+                ? (ret.agent_note || ret.shopify_reason || ret.shopify_note || ret.courier_reason || "—")
                 : "";
               const reasonFrom = isReturns
-                ? (ret.shopify_note ? "agent" : ret.shopify_reason ? "Shopify" : ret.courier_reason ? "courier" : "")
+                ? (ret.agent_note ? "agent" : ret.shopify_reason ? "Shopify" : ret.shopify_note ? "customer" : ret.courier_reason ? "courier" : "")
                 : "";
               return (
                 <tr key={r.tracking_id} className="transition hover:bg-panel/60 dark:hover:bg-white/[0.04]">
@@ -280,6 +284,13 @@ export default function ReturnsPage() {
                         <td className="px-4 py-3 text-muted dark:text-[#a89f93]">
                           {reason}
                           {reasonFrom && <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{reasonFrom}</span>}
+                          {(ret.order_tags ?? []).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {ret.order_tags!.slice(0, 3).map((tg) => (
+                                <span key={tg} className="rounded-full bg-panel px-2 py-0.5 text-[10.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{tg}</span>
+                              ))}
+                            </div>
+                          )}
                         </td>
                       </>
                     : <>

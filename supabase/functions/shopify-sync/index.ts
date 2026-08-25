@@ -166,6 +166,7 @@ const ORDER_Q = `query($a:String,$q:String){
   orders(first:250, after:$a, query:$q, sortKey:CREATED_AT, reverse:true){
     edges{ node{
       id name createdAt updatedAt cancelledAt cancelReason
+      cancellation { staffNote }
       displayFulfillmentStatus displayFinancialStatus
       note tags
       totalPriceSet{ shopMoney{ amount } }
@@ -183,6 +184,7 @@ const ORDER_Q = `query($a:String,$q:String){
 type ShopOrder = {
   id?: string; name: string; createdAt: string; updatedAt?: string;
   cancelledAt: string | null; cancelReason?: string | null;
+  cancellation?: { staffNote?: string | null } | null;
   displayFulfillmentStatus: string; displayFinancialStatus?: string | null;
   note?: string | null; tags?: string[];
   totalPriceSet?: { shopMoney?: { amount?: string } };
@@ -300,8 +302,11 @@ Deno.serve(async (req) => {
           fulfillment_status: (o.displayFulfillmentStatus ?? "").toUpperCase() || null,
           cancelled_at: o.cancelledAt ?? null,
           cancel_reason: o.cancelReason ?? null,
-          // the agent types the real reason here — cancelReason is only
-          // Shopify's fixed list and explains nothing on its own
+          // THE REAL REASON. Proven from an order timeline: the sentence a human
+          // typed lives on the cancellation event, not on order.note — which
+          // holds CUSTOMER notes and is nearly always empty. Reading note alone
+          // is why the Returns page showed the courier's wording instead.
+          cancel_staff_note: o.cancellation?.staffNote ?? null,
           note: o.note ?? null,
           tags: (o.tags ?? []).length ? o.tags : null,
 

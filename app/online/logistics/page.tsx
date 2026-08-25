@@ -143,16 +143,28 @@ export default function LogisticsPage() {
      has. Refreshes triggered this way are silent — the numbers change, the
      spinner does not. */
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* THE BUG THIS REF FIXES — "click 30 days, see 7 days"
+     This handler used to close over `load` directly. Clicking a range button
+     changes `preset`, which rebuilds `load` — but the handler already bound to
+     the PREVIOUS one. Half a second later it fired the OLD load, which fetched
+     the OLD range and bumped the request token, discarding the correct 30-day
+     answer still in flight. Clicking again worked because by then the handler
+     had caught up. A stale closure, not a race in the query.
+     Holding the latest `load` in a ref means the timer always calls the current
+     one, whatever it was bound to at click time. */
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
   const refreshOnClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement | null;
     if (!t?.closest?.("button, select, [role='tab'], [role='option']")) return;
     if (clickTimer.current) clearTimeout(clickTimer.current);
     clickTimer.current = setTimeout(() => {
       if (Date.now() - lastLoadAt.current < 2500) return;   // something already refreshed
-      if (reqId.current > 0 && loading) return;             // one is in the air right now
-      load({ silent: true });
-    }, 500);
-  }, [load]);
+      loadRef.current({ silent: true });
+    }, 600);
+  }, []);
 
   useEffect(() => () => { if (clickTimer.current) clearTimeout(clickTimer.current); }, []);
 
