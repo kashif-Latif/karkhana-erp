@@ -230,6 +230,11 @@ Deno.serve(async (req) => {
     if (action === "track" || action === "backfill_return_leg") {
       const backfill = action === "backfill_return_leg";
 
+      // Every UPDATE fires a Realtime event to every open browser tab, so
+      // rewriting identical rows costs egress twice: once to the courier, once
+      // to every watching browser. Skip the write when nothing changed.
+      const priorStatus = new Map<string, string | null>();
+
       let ids: string[] = body.tracking_ids ?? [];
       if (!ids.length) {
         // Only parcels still moving — settled ones need no re-checking.
@@ -243,7 +248,7 @@ Deno.serve(async (req) => {
         const terminal = '("Delivered","Returned","Cancelled")';
 
         let q = db.from("online_logistics")
-          .select("tracking_id")
+          .select("tracking_id, raw_status")
           .eq("courier", "OwnEx").not("tracking_id", "is", null);
 
         if (backfill) {
@@ -265,6 +270,10 @@ Deno.serve(async (req) => {
           .order("updated_at", { ascending: true, nullsFirst: true })
           .limit(limit);
         ids = (data ?? []).map((r: { tracking_id: string }) => r.tracking_id);
+        // remember what we already hold, so an unchanged parcel is not rewritten
+        for (const r of (data ?? []) as { tracking_id: string; raw_status?: string | null }[]) {
+          priorStatus.set(r.tracking_id, r.raw_status ?? null);
+        }
       }
       if (!ids.length) return json({ ok: true, checked: 0, note: "Nothing due a refresh — every parcel in transit was checked recently." });
 
@@ -306,6 +315,9 @@ Deno.serve(async (req) => {
         nowShowing[status] = (nowShowing[status] ?? 0) + 1;
         events.push({ tracking_id: t.trackingId, courier: "OwnEx", raw_status: t.status ?? t.code ?? "" });
         if (dryRun) continue;
+
+        // unchanged status and direction already recorded — nothing to write
+        if (priorStatus.get(t.trackingId) === (t.status ?? null) && !legStart) { unchanged++; continue; }
 
         const patch: Record<string, unknown> = {
           delivery_status: status,

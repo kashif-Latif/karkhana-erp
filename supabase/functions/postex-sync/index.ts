@@ -228,8 +228,11 @@ Deno.serve(async (req) => {
     // TRACK — bulk-track everything still in transit
     // ---------------------------------------------------------------
     if (action === "postex_track") {
-      const { data: open } = await db.from("online_logistics")
-        .select("tracking_id").eq("courier", "PostEx")
+      const staleMinutes = Number(body.stale_minutes ?? 30);
+      const cutoff = new Date(Date.now() - staleMinutes * 60000).toISOString();
+
+      let openQ = db.from("online_logistics")
+        .select("tracking_id, delivery_status, raw_status").eq("courier", "PostEx")
         .not("tracking_id", "is", null)
         // Everything NOT finally settled.
         //
@@ -251,10 +254,21 @@ Deno.serve(async (req) => {
         // is what ownex-sync already does.
         .order("updated_at", { ascending: true, nullsFirst: true })
         .limit(body.limit ?? 250);
+      if (staleMinutes > 0) openQ = openQ.or(`updated_at.is.null,updated_at.lt.${cutoff}`);
+      const { data: open } = await openQ;
+
+      // Skip anything checked recently.
+      //
+      // Without this the job re-fetched all ~214 open parcels every 10 minutes
+      // — about 31,000 requests a day at ONE REQUEST PER PARCEL, since PostEx's
+      // bulk endpoint returns 405. That was the main driver behind 164 MB of
+      // egress in a single day against a 5 GB monthly allowance.
+      // A 30-minute window cuts it to a third and loses nothing: a parcel's
+      // status does not change three times an hour.
       const nums = (open ?? []).map((r: { tracking_id: string }) => r.tracking_id).filter(Boolean);
       if (!nums.length) return json({ ok: true, action, checked: 0, updated: 0, note: "nothing in transit" });
 
-      let updated = 0; let bulkWorked = false; const errors: string[] = [];
+      let updated = 0; let unchanged = 0; let bulkWorked = false; const errors: string[] = [];
 
       // Try the bulk endpoint once. If it answers, use it — it is far cheaper.
       // If it does not, fall through to one request per parcel rather than
@@ -268,8 +282,16 @@ Deno.serve(async (req) => {
         for (let i = 0; i < nums.length; i += 8) {
           const wave = nums.slice(i, i + 8);
           const results = await Promise.all(wave.map(async (tn) => ({ tn, ...(await pxTrackOne(tn, token)) })));
+          // What we already hold, so an unchanged parcel is not rewritten.
+          // Every UPDATE fires a Realtime event to every open browser tab, so
+          // rewriting 250 identical rows six times an hour was costing egress
+          // twice over — once to PostEx, once to every watching tab.
+          const prior = new Map((open ?? []).map((r: { tracking_id: string; raw_status: string | null }) =>
+            [r.tracking_id, r.raw_status]));
+
           for (const r of results) {
             if (!r.ok || !r.status) continue;
+            if (prior.get(r.tn) === r.status) { unchanged++; continue; }   // nothing new
             const { delivery_status, needs_review } = classify(r.status);
             const upd: Record<string, unknown> = {
               delivery_status, needs_review, raw_status: r.status,
@@ -286,7 +308,8 @@ Deno.serve(async (req) => {
           }
           await new Promise((r) => setTimeout(r, 150));
         }
-        return json({ ok: true, action, checked: nums.length, updated, method: "per-parcel", errors: errors.slice(0, 5) });
+        return json({ ok: true, action, checked: nums.length, updated, unchanged,
+                      method: "per-parcel", stale_minutes: staleMinutes, errors: errors.slice(0, 5) });
       }
 
       for (let i = 0; i < nums.length; i += 50) {          // bulk endpoint, 50 at a time
