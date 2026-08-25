@@ -316,9 +316,17 @@ Deno.serve(async (req) => {
           city: o.shippingAddress?.city || o.billingAddress?.city || "Unknown",
           address: o.shippingAddress?.address1 || null,
           amount: parseFloat(o.totalPriceSet?.shopMoney?.amount ?? "0") || 0,
+          // EXACT match, never a substring test.
+          //   /FULFILLED/.test("UNFULFILLED") === true
+          // because "UNFULFILLED" contains "FULFILLED". Every unfulfilled order
+          // was therefore filed as Dispatched, which is why the Orders page read
+          // 3,316 dispatched against 3 pending while the old system showed 1,290
+          // pending for the same window. The counts were not drifting — they
+          // were inverted.
           status: o.cancelledAt ? "Cancelled"
-            : /FULFILLED/.test(o.displayFulfillmentStatus ?? "") ? "Dispatched"
-            : "Pending",
+            : ["FULFILLED", "PARTIALLY_FULFILLED"].includes((o.displayFulfillmentStatus ?? "").toUpperCase())
+              ? "Dispatched"
+              : "Pending",
           shopify_sync: new Date().toISOString(),
         }));
 
