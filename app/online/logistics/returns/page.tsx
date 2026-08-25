@@ -250,15 +250,9 @@ export default function ReturnsPage() {
               // that wins. cancel_reason is only Shopify's fixed list
               // (customer / declined / fraud / inventory / other), and the
               // courier's wording is the last resort, not the first.
-              // What a human typed beats a dropdown, and a dropdown beats the
-              // courier's wording. "REFUSED TO RECEIVE" is the courier's excuse,
-              // not your agent's account of what happened.
-              const reason = isReturns
-                ? (ret.agent_note || ret.shopify_reason || ret.shopify_note || ret.courier_reason || "—")
-                : "";
-              const reasonFrom = isReturns
-                ? (ret.agent_note ? "agent" : ret.shopify_reason ? "Shopify" : ret.shopify_note ? "customer" : ret.courier_reason ? "courier" : "")
-                : "";
+              const r2 = isReturns ? whyItCameBack(ret) : { text: "", from: "" };
+              const reason = r2.text;
+              const reasonFrom = r2.from;
               return (
                 <tr key={r.tracking_id} className="transition hover:bg-panel/60 dark:hover:bg-white/[0.04]">
                   {isReturns && (
@@ -281,7 +275,7 @@ export default function ReturnsPage() {
                         <td className="px-4 py-3">
                           <span className="inline-block rounded-full bg-panel px-2.5 py-1 text-[11.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{ret.stage ?? "—"}</span>
                         </td>
-                        <td className="px-4 py-3 text-muted dark:text-[#a89f93]">
+                        <td className={`px-4 py-3 ${reasonFrom === "agent" || reasonFrom === "tag" ? "text-ink dark:text-[#f4f1ea]" : "text-hint dark:text-[#8a8175]"}`}>
                           {reason}
                           {reasonFrom && <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{reasonFrom}</span>}
                           {(ret.order_tags ?? []).length > 0 && (
@@ -314,6 +308,39 @@ export default function ReturnsPage() {
       )}
     </div>
   );
+}
+
+
+/* Tags that explain WHY a parcel came back, as opposed to tags that merely
+   record what the team did. "WhatsApp: Not a User" means the number is not on
+   WhatsApp; "Call Busy" means nobody answered; "WhatsApp: Payment Issue" means
+   the customer balked at paying. Those are reasons. "Order Confirmed" and
+   "Fulfillment Notified" are process steps and explain nothing. */
+const REASON_TAG = /^(whatsapp|call|wa)\b|not a user|payment issue|busy|no answer|unreachable|refus|fake|wrong/i;
+const PROCESS_TAG = /confirmed|notified|fulfill/i;
+
+/* Some notes are written by apps, not people — a shipping notification is not
+   an explanation, and showing it as one is worse than showing nothing. */
+const AUTOMATED_NOTE = /has been shipped|tracking\s*\d|dispatched via|courier assigned/i;
+
+/** Why did this parcel come back? Best available answer, and where it came from.
+ *
+ *  Order matters. A sentence a human typed beats a dropdown; a dropdown beats a
+ *  tag; a tag beats the courier's status wording. "OwnEx: Verifying Reason" is
+ *  the courier telling you it has not decided yet — it is the absence of a
+ *  reason, so it ranks last and is labelled as a status, not an explanation. */
+function whyItCameBack(r: ReturnRow): { text: string; from: string } {
+  if (r.agent_note) return { text: r.agent_note, from: "agent" };
+  if (r.shopify_reason) return { text: r.shopify_reason, from: "Shopify" };
+
+  const tags = (r.order_tags ?? []).filter((t) => REASON_TAG.test(t) && !PROCESS_TAG.test(t));
+  if (tags.length) return { text: tags.join(" · "), from: "tag" };
+
+  if (r.shopify_note && !AUTOMATED_NOTE.test(r.shopify_note)) {
+    return { text: r.shopify_note, from: "customer" };
+  }
+  if (r.courier_reason) return { text: r.courier_reason, from: "courier status" };
+  return { text: "no reason recorded", from: "" };
 }
 
 /* Confirming receipt is a deliberate act with a record attached: who took it in,
