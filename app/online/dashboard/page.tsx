@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLiveTables } from "@/lib/useLiveTables";
 import { ShoppingBag, Clock, Undo2, Wallet, TrendingUp, Truck, RefreshCw, MapPin } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import RangeBar from "@/components/RangeBar";
@@ -45,6 +46,13 @@ function Pie({ data }: { data: { label: string; value: number }[] }) {
   );
 }
 
+type DashSummary = {
+  total_orders: number; pending: number; returned_cancel: number;
+  delivered: number; in_transit: number;
+  order_value: number; avg_order: number; delivery_rate: number;
+  cod_received: number; cod_receivable: number; receivable_count: number;
+};
+
 export default function HubDashboard() {
   const [orders, setOrders] = useState<Row[]>([]);
   const [logi, setLogi] = useState<Row[]>([]);
@@ -53,41 +61,68 @@ export default function HubDashboard() {
   const [store, setStore] = useState("ALL");
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
+  const [summary, setSummary] = useState<DashSummary | null>(null);
 
-  const load = useCallback(async () => {
+  /* The headline numbers come from hub_dashboard_summary(), counted in the
+     database. Rows are still fetched, but ONLY for the pie chart and the
+     per-store bars — never for the totals.
+     PostgREST caps a response at 1,000 rows whatever .limit() asks, so counting
+     the array made "Total orders" read exactly 1,000 on every single range.
+     Third page with this fault: Logistics, Orders, and this one. */
+  const reqId = useRef(0);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
-    setLoading(true); setErr("");
+    const my = ++reqId.current;
+    if (!opts?.silent) setLoading(true);
+    setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
-    let oq = supabase.from("online_orders").select("order_number,store_code,order_date,amount,status,city").limit(5000);
+
+    let oq = supabase.from("online_orders").select("order_number,store_code,order_date,amount,status,city").limit(1000);
     if (from) oq = oq.gte("order_date", from);
     if (to) oq = oq.lte("order_date", to);
     if (store !== "ALL") oq = oq.eq("store_code", store);
-    let lq = supabase.from("online_logistics").select("order_number,store_code,courier,delivery_status,cod_amount,cpr_net_amount,payment_status").limit(5000);
+
+    let lq = supabase.from("online_logistics").select("order_number,store_code,courier,delivery_status,cod_amount,cpr_net_amount,payment_status").limit(1000);
     if (store !== "ALL") lq = lq.eq("store_code", store);
-    const [o, l] = await Promise.all([oq, lq]);
+
+    const [o, l, sum] = await Promise.all([
+      oq, lq,
+      supabase.rpc("hub_dashboard_summary", {
+        p_from: from, p_to: to, p_store: store === "ALL" ? null : store,
+      }),
+    ]);
+    if (my !== reqId.current) return;          // superseded by a newer request
     if (o.error) setErr(o.error.message);
-    setOrders((o.data as Row[]) ?? []); setLogi((l.data as Row[]) ?? []);
+    setOrders((o.data as Row[]) ?? []);
+    setLogi((l.data as Row[]) ?? []);
+    setSummary((sum.data as DashSummary[])?.[0] ?? null);
     setLoading(false);
   }, [preset, cf, ct, store]);
+
   useEffect(() => { load(); }, [load]);
+
+  /* Live: the couriers and Shopify both write straight to these tables, so the
+     dashboard repaints itself rather than waiting for someone to press Refresh. */
+  const { live } = useLiveTables(
+    ["online_orders", "online_logistics"],
+    useCallback(() => load({ silent: true }), [load]),
+  );
 
   const M = useMemo(() => {
     const logByOrder: Record<string, Row> = {};
     logi.forEach((l) => { logByOrder[`${l.store_code}|${l.order_number}`] = l; });
     const key = (o: Row) => `${o.store_code}|${o.order_number}`;
 
-    const total = orders.length;
-    const pending = orders.filter((o) => !logByOrder[key(o)] && !isCanc(o.status)).length;
-    const retCanc = orders.filter((o) => {
-      const l = logByOrder[key(o)];
-      return (l && String(l.delivery_status) === "Returned") || isCanc(o.status);
-    }).length;
-    const delivered = orders.filter((o) => String(logByOrder[key(o)]?.delivery_status) === "Delivered").length;
-    const transit = orders.filter((o) => String(logByOrder[key(o)]?.delivery_status) === "In Transit").length;
-    const totalAmt = orders.reduce((a, o) => a + num(o.amount), 0);
-    const avgAmt = total ? totalAmt / total : 0;
-    const shipped = delivered + retCanc;
-    const deliveryRate = shipped ? (delivered / shipped) * 100 : 0;
+    // counted in the database — never from `orders`, which is capped at 1,000
+    const total = Number(summary?.total_orders ?? 0);
+    const pending = Number(summary?.pending ?? 0);
+    const retCanc = Number(summary?.returned_cancel ?? 0);
+    const delivered = Number(summary?.delivered ?? 0);
+    const transit = Number(summary?.in_transit ?? 0);
+    const totalAmt = Number(summary?.order_value ?? 0);
+    const avgAmt = Number(summary?.avg_order ?? 0);
+    const deliveryRate = Number(summary?.delivery_rate ?? 0);
 
     // COD receivables from logistics
     const paid = logi.filter((l) => l.payment_status === "Paid" || l.payment_status === "Received");
@@ -136,9 +171,15 @@ export default function HubDashboard() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold tracking-tight text-ink sm:text-[22px] dark:text-[#f4f1ea]">Dashboard</h1>
-          <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">Orders, delivery performance &amp; COD across all three stores.</p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-muted dark:text-[#a89f93]">
+            Orders, delivery performance &amp; COD across all three stores.
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${live ? "bg-success-soft text-success dark:bg-white/[0.08]" : "bg-panel text-muted dark:bg-white/[0.06] dark:text-[#a89f93]"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-success" : "bg-muted"}`} />
+              {live ? "Live" : "Not live"}
+            </span>
+          </p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+        <button onClick={() => load()} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
       </div>

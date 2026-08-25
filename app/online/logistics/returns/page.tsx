@@ -24,8 +24,8 @@ type Section = "pending_returns" | "all_returns" | "delivered_unpaid";
 
 const TABS: { key: Section; label: string; hint: string }[] = [
   { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Oldest first: claims expire." },
+  { key: "delivered_unpaid", label: "Returns Delivered", hint: "Delivered to the customer, but the COD has not reached you. This is the receivable." },
   { key: "all_returns",      label: "All returns",       hint: "Every return on record, newest first." },
-  { key: "delivered_unpaid", label: "Pending delivered", hint: "Delivered, money not yet received. This is the receivable." },
 ];
 
 type ReturnRow = {
@@ -117,11 +117,11 @@ export default function ReturnsPage() {
     { key: "pending_returns" as Section, label: "Pending returns", Icon: Undo2, bg: "bg-amber-soft",
       n: find("pending_returns")?.n ?? 0, v: find("pending_returns")?.value ?? 0,
       sub: find("pending_returns")?.oldest_days ? `oldest ${find("pending_returns")?.oldest_days}d` : undefined },
-    { key: "all_returns" as Section, label: "All returns", Icon: PackageCheck, bg: "bg-periwinkle-soft",
-      n: find("all_returns")?.n ?? 0, v: find("all_returns")?.value ?? 0, sub: undefined },
-    { key: "delivered_unpaid" as Section, label: "Pending delivered", Icon: Wallet, bg: "bg-success-soft",
+    { key: "delivered_unpaid" as Section, label: "Returns Delivered", Icon: Wallet, bg: "bg-success-soft",
       n: find("delivered_unpaid")?.n ?? 0, v: find("delivered_unpaid")?.value ?? 0,
       sub: find("delivered_unpaid")?.oldest_days ? `oldest ${find("delivered_unpaid")?.oldest_days}d` : undefined },
+    { key: "all_returns" as Section, label: "All returns", Icon: PackageCheck, bg: "bg-periwinkle-soft",
+      n: find("all_returns")?.n ?? 0, v: find("all_returns")?.value ?? 0, sub: undefined },
   ];
 
   const filtered = useMemo(() => {
