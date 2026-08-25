@@ -23,7 +23,7 @@ import { useLiveTables } from "@/lib/useLiveTables";
 type Section = "pending_returns" | "all_returns" | "delivered_unpaid";
 
 const TABS: { key: Section; label: string; hint: string }[] = [
-  { key: "pending_returns",  label: "Pending returns",   hint: "Courier says it is coming back or is back — nobody here has confirmed holding it. Oldest first: claims expire." },
+  { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Oldest first: claims expire." },
   { key: "all_returns",      label: "All returns",       hint: "Every return on record, newest first." },
   { key: "delivered_unpaid", label: "Pending delivered", hint: "Delivered, money not yet received. This is the receivable." },
 ];
@@ -33,6 +33,7 @@ type ReturnRow = {
   courier: string | null; cod_amount: number | null; stage: string | null;
   courier_reason: string | null; shopify_reason: string | null; shopify_note: string | null;
   agent_note: string | null; order_tags: string[] | null;
+  order_cancelled_at: string | null; needs_chasing: boolean;
   customer_name: string | null; city: string | null;
   return_date: string | null; return_received_at: string | null; received: boolean;
   return_claim_status: string | null; age_days: number | null;
@@ -84,7 +85,9 @@ export default function ReturnsPage() {
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })
       .limit(PAGE);
-    if (tab === "pending_returns") rq = rq.eq("received", false);
+    // the same flag hub_returns_sections() counts, so the card and the list can
+    // never disagree — a return acknowledged by cancelling in Shopify drops out
+    if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
     if (from) rq = rq.gte(dateCol, from);
     if (to) rq = rq.lte(dateCol, to);
     if (store !== "ALL") rq = rq.eq("store_code", store);

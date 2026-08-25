@@ -102,10 +102,28 @@ async function gqlFor(store: string) {
           body: JSON.stringify({ query, variables }),
         });
         const j = await r.json().catch(() => null);
-        // Shopify throttles hard on large pulls — back off and retry
-        if (j?.errors?.some((e: { message?: string }) => /throttl/i.test(e.message ?? ""))) {
+
+        // Shopify's `errors` is NOT always an array. On auth failure, a missing
+        // scope, or an unsupported API version it returns a STRING:
+        //   {"errors":"[API] Invalid API key or access token"}
+        // Calling .some() on that throws, and the throw hid the very message
+        // that explains what went wrong. Normalise before inspecting.
+        const errs = j?.errors;
+        const errText = typeof errs === "string" ? errs
+          : Array.isArray(errs) ? errs.map((e: { message?: string }) => e?.message ?? String(e)).join(" | ")
+          : errs ? JSON.stringify(errs)
+          : "";
+
+        // throttling is the only error worth retrying — everything else is a
+        // real answer and must be reported, not slept through
+        if (/throttl/i.test(errText)) {
           await new Promise((res) => setTimeout(res, 3000));
           continue;
+        }
+
+        // an HTTP-level rejection never carries data; say what Shopify said
+        if (!r.ok || (errText && !j?.data)) {
+          return { __error: `HTTP ${r.status}: ${errText || "no message"}` };
         }
         return j;
       }
@@ -226,7 +244,9 @@ async function fetchOrders(call: (q: string, v?: unknown) => Promise<Record<stri
     // arrives beats a complete one that times out
     if (Date.now() - started > budgetMs) return { rows: out, truncated: true, stopped: "time budget" };
     const res = await call(ORDER_Q, { a: after, q: filter }) as
-      { data?: { orders?: { edges: { node: ShopOrder }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } }, errors?: unknown };
+      { data?: { orders?: { edges: { node: ShopOrder }[]; pageInfo: { hasNextPage: boolean; endCursor: string } } };
+        errors?: unknown; __error?: string };
+    if (res?.__error) return { rows: out, error: res.__error };
     const conn = res?.data?.orders;
     if (!conn) return { rows: out, error: res?.errors ? JSON.stringify(res.errors).slice(0, 300) : "no data returned" };
     for (const e of conn.edges) out.push(e.node);
@@ -285,9 +305,11 @@ Deno.serve(async (req) => {
         const g = await gqlFor(st);
         let shop = null, note = "";
         if (!("error" in g)) {
-          const res = await g.call(`{ shop { name } }`) as { data?: { shop?: { name: string } }, errors?: unknown };
+          const res = await g.call(`{ shop { name } }`) as
+            { data?: { shop?: { name: string } }; errors?: unknown; __error?: string };
           shop = res?.data?.shop?.name ?? null;
-          if (!shop) note = JSON.stringify(res?.errors ?? res).slice(0, 200);
+          // report Shopify's own words — that is the whole point of test_auth
+          if (!shop) note = res?.__error ?? JSON.stringify(res?.errors ?? res).slice(0, 300);
         }
         report.push({ store: st, ok: !!shop, domain, how: (a as { how: string }).how, shop, note: note || undefined });
       }
