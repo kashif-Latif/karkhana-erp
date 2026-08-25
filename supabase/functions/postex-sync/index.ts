@@ -241,6 +241,15 @@ Deno.serve(async (req) => {
         //     the same fault ownex-sync had before migration 0059
         // Delivered / Returned / Cancelled are terminal and stay excluded.
         .not("delivery_status", "in", '("Delivered","Returned","Cancelled")')
+        // Least recently checked first.
+        //
+        // Without an ORDER BY, Postgres returns whatever rows are cheapest to
+        // read — in practice the same ones every run. Once the open set grows
+        // past the limit, the tail would never be checked at all: a parcel could
+        // sit unrefreshed indefinitely while its neighbours were polled 144
+        // times a day. Ordering by updated_at makes the whole set rotate, which
+        // is what ownex-sync already does.
+        .order("updated_at", { ascending: true, nullsFirst: true })
         .limit(body.limit ?? 250);
       const nums = (open ?? []).map((r: { tracking_id: string }) => r.tracking_id).filter(Boolean);
       if (!nums.length) return json({ ok: true, action, checked: 0, updated: 0, note: "nothing in transit" });
