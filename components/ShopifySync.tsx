@@ -58,47 +58,67 @@ export default function ShopifySync({ onDone }: { onDone: () => void }) {
   }
 
   /** Full history cannot be pulled in one request — Shopify paginates and the
-   *  function has a time budget. So we walk backwards a month at a time and
-   *  stop after three consecutive empty windows, which means we are past the
-   *  first order. Safe to re-run: everything matches on natural keys. */
+   *  function has a time budget — so we walk backwards a month at a time.
+   *
+   *  WHAT WAS WRONG BEFORE
+   *    60 months x 3 stores x 2 actions, all sequential at up to 90s each, is
+   *    360 calls and potentially hours. It looked frozen because it effectively
+   *    was. And the per-store lines all printed the SAME number: `found` summed
+   *    every store and both actions, so "3,300 orders" was the combined total
+   *    repeated three times, not Little Minors' count.
+   *
+   *  NOW
+   *    Stores run in parallel within a window (three calls at once, not nine in
+   *    a row), each store keeps its own count, the walk is capped at 24 months,
+   *    and it stops once two consecutive windows are empty for every store.
+   *
+   *  Safe to re-run: orders match on store + order number, parcels on tracking
+   *  number, so nothing is duplicated. */
   async function backfill() {
     if (!supabase) return;
     setBusy("backfill"); setLines([]);
     const start = new Date();
+    const MAX_MONTHS = 24;
     let empties = 0, windows = 0;
+    const totals: Record<string, number> = { LM: 0, TS: 0, TRZ: 0 };
 
-    for (let i = 0; i < 60 && empties < 3; i++) {
+    for (let i = 0; i < MAX_MONTHS && empties < 2; i++) {
       const end = new Date(start); end.setMonth(end.getMonth() - i);
       const from = new Date(start); from.setMonth(from.getMonth() - (i + 1));
       const s1 = from.toISOString().slice(0, 10), s2 = end.toISOString().slice(0, 10);
-      let found = 0;
 
-      for (const store of STORES) {
+      // three stores at once — the slow part is Shopify, not us
+      const perStore = await Promise.all(STORES.map(async (store) => {
+        let n = 0;
         for (const action of ["pull_orders", "pull_fulfillments"]) {
           try {
-            const { data, error } = await supabase.functions.invoke("shopify-sync", {
-              body: { action, store, start_date: s1, end_date: s2, pages: 20, max_seconds: 90, dry_run: false },
+            const { data, error } = await supabase!.functions.invoke("shopify-sync", {
+              body: { action, store, start_date: s1, end_date: s2, pages: 20, max_seconds: 60, dry_run: false },
             });
             if (error) throw error;
             const r = (data as { summary?: Record<string, unknown>[] })?.summary?.[0] ?? {};
-            found += Number(r.fetched ?? r.orders ?? 0);
-          } catch { /* one window failing must not stop the walk */ }
+            // only pull_orders reports orders; pull_fulfillments reports parcels
+            if (action === "pull_orders") n += Number(r.fetched ?? 0);
+          } catch { /* one store failing must not stop the walk */ }
         }
-      }
+        return { store, n };
+      }));
 
       windows++;
-      empties = found === 0 ? empties + 1 : 0;
-      // every store IS walked inside this window. The progress line used to be
-      // hardcoded to "LM" and the finish line to "TS", so TRZ never received a
-      // line and sat on "waiting" forever while it was in fact being synced.
-      setLines(STORES.map((st) => ({
-        store: st, ok: true, text: `${s1} → ${s2} · ${found.toLocaleString()} orders`,
+      const windowTotal = perStore.reduce((a, x) => a + x.n, 0);
+      empties = windowTotal === 0 ? empties + 1 : 0;
+      for (const x of perStore) totals[x.store] += x.n;
+
+      setLines(perStore.map((x) => ({
+        store: x.store, ok: true,
+        text: `${s1} → ${s2} · ${x.n.toLocaleString()} orders  (running total ${totals[x.store].toLocaleString()})`,
       })));
     }
 
     setBusy("");
     setLines(STORES.map((st) => ({
-      store: st, ok: true, text: `Finished — ${windows} month(s) covered.`,
+      store: st, ok: true,
+      text: `Finished — ${totals[st].toLocaleString()} orders across ${windows} month(s).`,
     })));
     onDone();
   }
