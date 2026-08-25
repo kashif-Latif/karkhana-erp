@@ -83,14 +83,37 @@ async function readPdf(file: File): Promise<PdfRead> {
   const rows: Row[] = [];
   for (const line of lines) {
     const track = line.match(/\b(\d{11,14})\b/);
-    const ref = line.match(/#\s?([A-Za-z]{0,4}\d+)/);
-    if (!track || !ref) continue;
+    if (!track) continue;                      // no tracking number, no parcel
+
+    /* The order reference used to be REQUIRED to start with "#", and a line
+       without one was dropped in silence. That threw away exactly the rows that
+       matter most: parcels booked straight in the courier portal with no
+       Shopify order behind them. On load sheet LDS-814752587 it produced 20
+       rows out of 21 — the missing one was "MZM", Mr. Muzzammil, booked by hand.
+       Those parcels cannot arrive any other way: OwnEx has no listing endpoint,
+       so Karkhana only learns of a parcel when Shopify reports a fulfilment.
+       No Shopify order means the load sheet is the ONLY route in.
+
+       So: the tracking number is what makes a row real. Prefer a "#" reference
+       when there is one, otherwise take the token immediately after the
+       tracking number, which is where the sheet puts it. */
+    const hashRef = line.match(/#\s?([A-Za-z]{0,4}\d+)/);
+    let ref: string;
+    if (hashRef) {
+      ref = "#" + hashRef[1];
+    } else {
+      const after = line.slice(line.indexOf(track[1]) + track[1].length).trim();
+      const token = after.split(/\s+/)[0] ?? "";
+      // a date or a money figure is not an order reference
+      ref = /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(token) || /^Rs/i.test(token)
+        ? "" : token;
+    }
     const amount = line.match(/Rs\.?\s*([\d,]+(?:\.\d+)?)/i);
     const date = line.match(/\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/);
     const city = line.match(/\b(LHE|KHI|ISB|RWP|FSD|MUL|PEW|QTA|GUJ|SIA|SKT)\b/);
     rows.push({
       "Tracking No": track[1],
-      "Order Ref": "#" + ref[1],
+      "Order Ref": ref,
       "Booking Date": date?.[1] ?? "",
       "Delivery City": city?.[1] ?? "",
       "Amount": amount ? amount[1].replace(/,/g, "") : "",
