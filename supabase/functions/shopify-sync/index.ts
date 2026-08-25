@@ -118,6 +118,23 @@ async function gqlFor(store: string) {
 /*  Mapping helpers                                                    */
 /* ------------------------------------------------------------------ */
 
+/** The business day as YOUR SHOP sees it.
+ *
+ *  Shopify returns created_at in UTC. Slicing the first ten characters files an
+ *  order placed at 02:00 in Karachi under YESTERDAY, because 02:00 PKT is 21:00
+ *  UTC the previous day. Every window — 7, 30, 60 days — was therefore off by
+ *  whatever volume arrives between midnight and 5am local, which is why the
+ *  counts never quite matched Shopify's own dashboard.
+ *
+ *  en-CA formats as YYYY-MM-DD, which is what the date column wants. */
+const SHOP_TZ = "Asia/Karachi";
+function shopDay(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-CA", { timeZone: SHOP_TZ });
+}
+
 /** GraphQL returns "gid://shopify/Order/12345"; the webhooks send the bare
  *  number. Store the number, or the two can never be matched — which is why
  *  fulfillments/create and refunds/create had no order to attach to. */
@@ -310,7 +327,7 @@ Deno.serve(async (req) => {
           note: o.note ?? null,
           tags: (o.tags ?? []).length ? o.tags : null,
 
-          order_date: o.createdAt?.slice(0, 10) ?? null,
+          order_date: shopDay(o.createdAt),
           customer_name: o.shippingAddress?.name || "Unknown",
           phone: o.shippingAddress?.phone || o.billingAddress?.phone || "0000000000",
           city: o.shippingAddress?.city || o.billingAddress?.city || "Unknown",

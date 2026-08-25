@@ -47,6 +47,18 @@ const env = (k: string) =>
 const STORES = ["LM", "TS", "TRZ"];
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+/** The business day as the shop sees it. Shopify sends UTC; slicing the first
+ *  ten characters files a 02:00 Karachi order under yesterday, which is why our
+ *  daily counts never matched Shopify's dashboard. Must stay identical to the
+ *  same helper in shopify-sync, or push and poll would disagree. */
+const SHOP_TZ = "Asia/Karachi";
+function shopDay(iso?: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-CA", { timeZone: SHOP_TZ });
+}
 const ts  = (v: unknown) => { const s = String(v ?? "").trim(); return s ? s : null; };
 
 /** Which store sent this? The domain header is only a hint — Shopify sends the
@@ -257,7 +269,7 @@ Deno.serve(async (req) => {
       shopify_order_id: shopifyOrderId,
       shopify_created_at: ts(p.created_at),
       shopify_updated_at: ts(p.updated_at),
-      order_date: (p.created_at ?? "").slice(0, 10) || null,
+      order_date: shopDay(p.created_at),
       customer_name: p.shipping_address?.name || "Unknown",
       phone: p.shipping_address?.phone || p.billing_address?.phone || "0000000000",
       city: p.shipping_address?.city || p.billing_address?.city || "Unknown",
