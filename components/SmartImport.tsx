@@ -82,7 +82,16 @@ async function readPdf(file: File): Promise<PdfRead> {
   // a shipment line always carries both a tracking number and an order reference
   const rows: Row[] = [];
   for (const line of lines) {
-    const track = line.match(/\b(\d{11,14})\b/);
+    /* A tracking number is 12–14 digits. Pakistani mobile numbers are 11 and
+       begin 03 — "Mr. Muzzammil (03002408408)" was being read as a parcel,
+       which is how a 21-row sheet came out as 22. OwnEx numbers start 3120100…,
+       PostEx 2620502…, so neither is ever 11 digits or starts with 03.
+       Take the FIRST candidate on the line: the sheet puts the tracking number
+       before the customer's phone. */
+    const track = (line.match(/\b\d{11,14}\b/g) ?? [])
+      .filter((n) => n.length >= 12 && !n.startsWith("03"))
+      .slice(0, 1)
+      .map((n) => [n, n] as [string, string])[0];
     if (!track) continue;                      // no tracking number, no parcel
 
     /* The order reference used to be REQUIRED to start with "#", and a line
