@@ -109,9 +109,14 @@ as $function$
   )
   -- Ordinal column then ORDER BY on it: ORDER BY over a bare UNION ALL with an
   -- expression is rejected by Postgres.
+  --
+  -- The FIRST branch names every column. A union takes its column names from
+  -- branch one alone, so an unaliased count(*) there leaves the outer query
+  -- with nothing called `n` to select — which parses cleanly and only fails
+  -- when run. pglast checks syntax, not name resolution; it cannot catch this.
   select source, n from (
     select 1 as ord, 'agent sentence'::text as source,
-           count(*) filter (where agent_real) from r
+           count(*) filter (where agent_real) as n from r
     union all
     select 2, 'courier reason'::text,
            count(*) filter (where not agent_real and courier_reason_text is not null) from r

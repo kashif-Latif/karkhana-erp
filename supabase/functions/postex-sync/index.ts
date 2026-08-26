@@ -268,21 +268,44 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message, at: i }, 500);
         merged += (data ?? []).length;
       }
-      // Second pass: the reasons. One UPDATE each, only for parcels that have
-      // one, so nothing that already holds a reason can be nulled by this run.
-      let reasoned = 0;
-      for (const rr of reasonRows) {
-        const { data } = await db.from("online_logistics")
-          .update({ courier_reason_text: rr.courier_reason_text })
-          .eq("tracking_id", rr.tracking_id).eq("courier", "PostEx").select("id");
-        reasoned += (data ?? []).length;
+      /* Second pass: the reasons.
+   
+         RING-FENCED ON PURPOSE. postex_pull is the job that keeps Orders and
+         Logistics populated, and it worked before this change. Nothing added
+         here is allowed to slow it down or take it with it if it fails:
+   
+           - CAPPED. One UPDATE per parcel is a sequential round trip, and an
+             unbounded loop could run past the function's time limit and fail a
+             pull that had already merged its rows successfully.
+           - WRAPPED. A throw here is swallowed and reported, never propagated.
+             A missing reason is a cosmetic gap on the Returns page; a failed
+             pull is missing orders.
+   
+         In practice this loop is empty: no PostEx status in this database
+         carries the "Reason - " marker, so postexReason() returns null for all
+         of them. The guards are for the day PostEx changes that, not for now. */
+      const REASON_CAP = 200;
+      let reasoned = 0, reasonSkipped = Math.max(0, reasonRows.length - REASON_CAP);
+      let reasonError: string | undefined;
+      try {
+        for (const rr of reasonRows.slice(0, REASON_CAP)) {
+          const { data } = await db.from("online_logistics")
+            .update({ courier_reason_text: rr.courier_reason_text })
+            .eq("tracking_id", rr.tracking_id).eq("courier", "PostEx").select("id");
+          reasoned += (data ?? []).length;
+        }
+      } catch (e) {
+        reasonError = String(e instanceof Error ? e.message : e).slice(0, 200);
       }
 
       await db.from("online_courier_events").insert(
         rows.slice(0, 500).map((r) => ({ courier: "PostEx", tracking_id: r.tracking_id, raw_status: r.raw_status, payload: { source: "pull" } }))
       );
       return json({ ok: true, action, from, to, called_via: res.via,
-                    fetched: rows.length, merged, courier_reasons_captured: reasoned });
+                    fetched: rows.length, merged,
+                    courier_reasons_captured: reasoned,
+                    courier_reasons_skipped: reasonSkipped || undefined,
+                    courier_reason_error: reasonError });
     }
 
     // ---------------------------------------------------------------
