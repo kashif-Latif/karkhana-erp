@@ -216,6 +216,62 @@ const ORDER_Q = `query($a:String,$q:String){
   }
 }`;
 
+/* The probe query for `inspect_reasons`. Validated against the live 2026-01
+   Admin schema before it was written here, not assumed.
+
+   Scopes it needs: read_orders AND read_returns. If read_returns is missing,
+   Shopify answers with ACCESS_DENIED on the `returns` field and the action
+   reports that verbatim instead of quietly showing nothing.
+
+   `message` is on the Event interface, so it is selected once rather than per
+   type; only `rawMessage` needs the CommentEvent fragment. rawMessage is the
+   text as typed — `message` comes back as formatted HTML. */
+const PROBE_Q = `query($q:String!){
+  orders(first:10, query:$q){
+    edges{ node{
+      id name cancelledAt cancelReason
+      cancellation { staffNote }
+      note tags displayFulfillmentStatus
+      events(first:30, sortKey:CREATED_AT, reverse:true){
+        edges{ node{ __typename createdAt message ... on CommentEvent { rawMessage } } }
+      }
+      returns(first:5){
+        edges{ node{
+          status totalQuantity
+          returnLineItems(first:10){
+            edges{ node{ ... on ReturnLineItem { returnReasonNote customerNote } } }
+          }
+        } }
+      }
+      refunds(first:5){ id note createdAt }
+      metafields(first:20){ edges{ node{ namespace key value } } }
+    } }
+  }
+}`;
+
+type ProbeOrder = {
+  name: string; cancelledAt: string | null; cancelReason?: string | null;
+  cancellation?: { staffNote?: string | null } | null;
+  note?: string | null; tags?: string[]; displayFulfillmentStatus?: string;
+  events?: { edges?: { node: { __typename: string; createdAt: string; message?: string; rawMessage?: string } }[] };
+  returns?: { edges?: { node: { status?: string; totalQuantity?: number;
+    returnLineItems?: { edges?: { node: { returnReasonNote?: string | null; customerNote?: string | null } }[] } } }[] };
+  refunds?: { id: string; note?: string | null; createdAt?: string }[];
+  metafields?: { edges?: { node: { namespace: string; key: string; value: string } }[] };
+};
+
+/** Shopify's `message` is formatted HTML. An agent's sentence wrapped in markup
+ *  is not readable in a table, and entities like &amp; must not reach the page
+ *  as literal text. */
+function strip(html: string): string {
+  return String(html ?? "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
 type ShopOrder = {
   id?: string; name: string; createdAt: string; updatedAt?: string;
   cancelledAt: string | null; cancelReason?: string | null;
@@ -314,6 +370,147 @@ Deno.serve(async (req) => {
         report.push({ store: st, ok: !!shop, domain, how: (a as { how: string }).how, shop, note: note || undefined });
       }
       return json({ ok: true, api_version: API_VERSION, report });
+    }
+
+    /* ================= inspect_reasons =================
+       READ-ONLY. Writes nothing, changes nothing.
+
+       WHY THIS EXISTS INSTEAD OF A FIX
+         The Returns page shows tags because the sync only ever ASKED Shopify
+         for four things: cancellation.staffNote, cancelReason, note and tags.
+         Three of those are noise and the fourth only exists on a cancelled
+         order. The sentence an agent types — "delivery boy was too late" —
+         is in Shopify, we have simply never requested it.
+
+         There are FOUR places it could be, and which one your agents use is a
+         fact about how they work, not something to be deduced:
+
+           1. events -> CommentEvent.rawMessage
+              A timeline comment. Shopify's own words: "a comment that staff
+              members add to the timeline... to document internal notes."
+              This is the most likely one.
+           2. returns -> returnLineItems.returnReasonNote / .customerNote
+              Only populated if the team uses Shopify's Returns feature rather
+              than just cancelling. Needs the read_returns scope.
+           3. refunds -> note
+              Where a reason often ends up when a refund is issued.
+           4. metafields
+              Where a third-party COD/confirmation app would put it.
+
+         Guessing a format cost three rounds on the OwnEx load sheet. So this
+         action dumps ALL FOUR for real orders and reports which are populated.
+         You read the output, point at the field holding the real sentence, and
+         only then does anything get wired.
+
+       USE
+         { "action": "inspect_reasons", "store": "LM",
+           "order_numbers": ["#LM15082", "#LM15090"] }
+
+         Or omit order_numbers and it picks recent orders by itself. Give it
+         orders you KNOW have a reason typed on them — an empty result from an
+         order nobody annotated proves nothing. */
+    if (action === "inspect_reasons") {
+      const names: string[] = body.order_numbers ?? body.orders ?? [];
+      const report: Record<string, unknown>[] = [];
+
+      for (const st of stores) {
+        const g = await gqlFor(st);
+        if ("error" in g) { report.push({ store: st, ok: false, ...g }); continue; }
+
+        // Named orders if given, otherwise whatever is most recent. `status:any`
+        // matters: without it Shopify hides cancelled orders, which are exactly
+        // the ones carrying a reason.
+        const q = names.length
+          ? names.map((n) => `name:${JSON.stringify(String(n).replace(/^#/, ""))}`).join(" OR ") + " status:any"
+          : "status:any";
+
+        const res = await g.call(PROBE_Q, { q }) as {
+          data?: { orders?: { edges?: { node: ProbeOrder }[] } };
+          errors?: unknown; __error?: string;
+        };
+
+        if (!res?.data?.orders) {
+          // Report Shopify's own words. A missing read_returns scope shows up
+          // here as an ACCESS_DENIED on the `returns` field, and that is worth
+          // seeing plainly rather than as an empty result.
+          report.push({ store: st, ok: false,
+                        shopify_said: res?.__error ?? JSON.stringify(res?.errors ?? res).slice(0, 600) });
+          continue;
+        }
+
+        const orders = (res.data.orders.edges ?? []).slice(0, names.length || 10).map((e) => {
+          const o = e.node;
+          const comments = (o.events?.edges ?? [])
+            .filter((x) => x.node.__typename === "CommentEvent")
+            .map((x) => ({ at: x.node.createdAt, text: strip(x.node.rawMessage ?? x.node.message ?? "") }))
+            .filter((c) => c.text);
+          const otherEvents = (o.events?.edges ?? [])
+            .filter((x) => x.node.__typename !== "CommentEvent")
+            .slice(0, 8)
+            .map((x) => ({ type: x.node.__typename, at: x.node.createdAt, text: strip(x.node.message ?? "") }));
+
+          const returnNotes: Record<string, unknown>[] = [];
+          for (const r of o.returns?.edges ?? []) {
+            for (const li of r.node.returnLineItems?.edges ?? []) {
+              if (li.node.returnReasonNote || li.node.customerNote) {
+                returnNotes.push({ status: r.node.status,
+                                   reason_note: li.node.returnReasonNote || null,
+                                   customer_note: li.node.customerNote || null });
+              }
+            }
+          }
+
+          return {
+            order: o.name,
+            fulfillment: o.displayFulfillmentStatus,
+            cancelled: !!o.cancelledAt,
+
+            // --- what we read TODAY ---
+            now_reading: {
+              cancel_staff_note: o.cancellation?.staffNote ?? null,
+              cancel_reason: o.cancelReason ?? null,
+              note: o.note ?? null,
+              tags: o.tags ?? [],
+            },
+
+            // --- what we have NEVER read ---
+            never_read: {
+              timeline_comments: comments,
+              return_notes: returnNotes,
+              refund_notes: (o.refunds ?? []).map((r) => strip(r.note ?? "")).filter(Boolean),
+              metafields: (o.metafields?.edges ?? [])
+                .map((x) => ({ key: `${x.node.namespace}.${x.node.key}`, value: String(x.node.value ?? "").slice(0, 200) }))
+                .filter((m) => m.value),
+            },
+
+            other_events: otherEvents,
+          };
+        });
+
+        // The whole point: which source is actually populated, counted.
+        const tally = { timeline_comments: 0, return_notes: 0, refund_notes: 0, metafields: 0,
+                        cancel_staff_note: 0, note: 0, tags_only: 0 };
+        for (const o of orders) {
+          const n = o.never_read;
+          if (n.timeline_comments.length) tally.timeline_comments++;
+          if (n.return_notes.length) tally.return_notes++;
+          if (n.refund_notes.length) tally.refund_notes++;
+          if (n.metafields.length) tally.metafields++;
+          if (o.now_reading.cancel_staff_note) tally.cancel_staff_note++;
+          if (o.now_reading.note) tally.note++;
+          if (!n.timeline_comments.length && !n.return_notes.length && !n.refund_notes.length
+              && !o.now_reading.cancel_staff_note && !o.now_reading.note
+              && (o.now_reading.tags ?? []).length) tally.tags_only++;
+        }
+
+        report.push({ store: st, ok: true, examined: orders.length, populated_in: tally, orders });
+      }
+
+      return json({
+        ok: true, action, api_version: API_VERSION, wrote_nothing: true,
+        read_this: "Look at populated_in. Whichever count is high is where your agents actually type. Then tell me which one and I will wire exactly that — nothing else.",
+        report,
+      });
     }
 
     /* ================= pull_orders ================= */

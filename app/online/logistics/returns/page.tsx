@@ -31,7 +31,8 @@ const TABS: { key: Section; label: string; hint: string }[] = [
 type ReturnRow = {
   tracking_id: string; order_number: string | null; store_code: string | null;
   courier: string | null; cod_amount: number | null; stage: string | null;
-  courier_reason: string | null; shopify_reason: string | null; shopify_note: string | null;
+  courier_reason: string | null; courier_reason_text: string | null;
+  shopify_reason: string | null; shopify_note: string | null;
   agent_note: string | null; order_tags: string[] | null;
   order_cancelled_at: string | null; needs_chasing: boolean;
   customer_name: string | null; city: string | null;
@@ -249,10 +250,10 @@ export default function ReturnsPage() {
             {!loading && filtered.map((r) => {
               const ret = r as ReturnRow;
               const up = r as UnpaidRow;
-              // The agent types the real reason into Shopify's order Note, so
-              // that wins. cancel_reason is only Shopify's fixed list
-              // (customer / declined / fraud / inventory / other), and the
-              // courier's wording is the last resort, not the first.
+              // Priority lives in whyItCameBack(): agent note, then the
+              // courier's real finding (courier_reason_text), then Shopify's
+              // fixed list, then tags. The courier's STATUS wording stays last —
+              // "Verifying Reason" is not a reason.
               const r2 = isReturns ? whyItCameBack(ret) : { text: "", from: "" };
               const reason = r2.text;
               const reasonFrom = r2.from;
@@ -278,7 +279,7 @@ export default function ReturnsPage() {
                         <td className="px-4 py-3">
                           <span className="inline-block rounded-full bg-panel px-2.5 py-1 text-[11.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{ret.stage ?? "—"}</span>
                         </td>
-                        <td className={`px-4 py-3 ${reasonFrom === "agent" || reasonFrom === "tag" ? "text-ink dark:text-[#f4f1ea]" : "text-hint dark:text-[#8a8175]"}`}>
+                        <td className={`px-4 py-3 ${reasonFrom === "agent" || reasonFrom === "courier" || reasonFrom === "tag" ? "text-ink dark:text-[#f4f1ea]" : "text-hint dark:text-[#8a8175]"}`}>
                           {reason}
                           {reasonFrom && <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{reasonFrom}</span>}
                           {(ret.order_tags ?? []).length > 0 && (
@@ -328,12 +329,22 @@ const AUTOMATED_NOTE = /has been shipped|tracking\s*\d|dispatched via|courier as
 
 /** Why did this parcel come back? Best available answer, and where it came from.
  *
- *  Order matters. A sentence a human typed beats a dropdown; a dropdown beats a
- *  tag; a tag beats the courier's status wording. "OwnEx: Verifying Reason" is
- *  the courier telling you it has not decided yet — it is the absence of a
- *  reason, so it ranks last and is labelled as a status, not an explanation. */
+ *  THE ORDER, AND WHY IT IS THIS ORDER
+ *    1. agent note      a sentence a human typed — "stock not available"
+ *    2. courier reason  the courier's own finding — "UNTRACEABLE ADDRESS"
+ *    3. Shopify reason  a fixed dropdown value, context rather than cause
+ *    4. tags            how it was handled, not why it failed
+ *    5. customer note   occasionally useful, usually empty
+ *    6. courier STATUS  "Verifying Reason" — the absence of a reason
+ *
+ *  Rungs 2 and 6 are different facts and the distinction is the whole point of
+ *  migration 0076. "Verifying Reason" is the courier saying it has not decided
+ *  yet; "UNTRACEABLE ADDRESS" is what it decided. The second used to be
+ *  discarded by the syncs, which is why tags — noise — were doing the work of an
+ *  explanation. Now that the real reason arrives, it outranks them. */
 function whyItCameBack(r: ReturnRow): { text: string; from: string } {
   if (r.agent_note) return { text: r.agent_note, from: "agent" };
+  if (r.courier_reason_text) return { text: r.courier_reason_text, from: "courier" };
   if (r.shopify_reason) return { text: r.shopify_reason, from: "Shopify" };
 
   const tags = (r.order_tags ?? []).filter((t) => REASON_TAG.test(t) && !PROCESS_TAG.test(t));

@@ -10,6 +10,20 @@ import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
 type Tab = "payments" | "cpr" | "returns";
 type Row = Record<string, unknown>;
 
+/** One row, straight from hub_finance_summary(). Counted in the database. */
+type Summary = {
+  pending_value: number; pending_count: number; oldest_pending_days: number;
+  received_gross: number; received_net: number; received_count: number;
+  gross_cod: number; courier_fees: number; net_expected: number;
+};
+/** PostEx and OwnEx kept apart deliberately: OwnEx has no payment API, so its
+ *  share of the receivable can only move by import or by hand. A blended figure
+ *  hides which half is automatable. */
+type CourierRow = {
+  courier: string; pending_value: number; pending_count: number;
+  oldest_pending_days: number; received_gross: number; courier_fees: number;
+};
+
 const STORES = [
   { code: "ALL", label: "All stores" },
   { code: "LM", label: "Little Minors" },
@@ -20,7 +34,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "payments", label: "Payments" },
   { key: "cpr", label: "CPR" },
 ];
-const money = (n: unknown) => (n == null ? "—" : "Rs " + (Number(n) || 0).toLocaleString("en-PK"));
+const money = (n: unknown) => (n == null ? "—" : "Rs " + Math.round(Number(n) || 0).toLocaleString("en-PK"));
 const sum = (rows: Row[], k: string) => rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
 
 function badge(txt: string, kind: "ok" | "warn" | "bad" | "mute") {
@@ -38,60 +52,105 @@ export default function FinancePage() {
   const [tab, setTab] = useState<Tab>("payments");
   const [store, setStore] = useState("ALL");
   const [rows, setRows] = useState<Row[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [byCourier, setByCourier] = useState<CourierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
+  /* THE CARDS COME FROM THE DATABASE, THE TABLE IS A PAGE OF ROWS.
+     Two separate bugs were fixed here — see migration 0077.
+
+     1. Counting a PostgREST response in the browser understates any total past
+        1,000 rows, however large .limit() is. Fourth page with this fault.
+
+     2. Worse: the Payments tab filtered on payment_date, which is NULL on every
+        UNPAID parcel, and NULL fails every comparison. The default range is
+        "30 days", so the pending rows were being deleted from the query before
+        the cap was even reached. v_finance_payments.finance_date dates a paid
+        row by when the money arrived and an unpaid one by when it became owed,
+        so a range filter can no longer hide a receivable. */
   const load = useCallback(async (which: Tab) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
-    const dcol = which === "payments" ? "payment_date" : which === "cpr" ? "cpr_date" : "return_date";
+
+    if (which === "payments") {
+      const { data: sm, error: se } = await supabase.rpc("hub_finance_summary", {
+        p_from: from, p_to: to, p_store: store, p_courier: null,
+      });
+      if (se) setErr(se.message);
+      setSummary(((sm as Summary[]) ?? [])[0] ?? null);
+
+      const { data: bc } = await supabase.rpc("hub_finance_by_courier", {
+        p_from: from, p_to: to, p_store: store,
+      });
+      setByCourier((bc as CourierRow[]) ?? []);
+    } else {
+      setSummary(null); setByCourier([]);
+    }
+
+    const dcol = which === "payments" ? "finance_date" : "cpr_date";
     let q =
       which === "payments"
-        ? supabase.from("online_logistics").select("id,order_number,store_code,courier,cod_amount,cpr_net_amount,payment_status,payment_date").order("payment_date", { ascending: false, nullsFirst: false }).limit(1000)
-        : which === "cpr"
-        ? supabase.from("online_cpr").select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status").order("cpr_date", { ascending: false, nullsFirst: false }).limit(1000)
-        : supabase.from("online_returns").select("id,order_number,tracking_id,courier,store_code,return_date,received,reason").order("return_date", { ascending: false, nullsFirst: false }).limit(1000);
+        ? supabase.from("v_finance_payments")
+            .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days")
+            // Unpaid first, oldest debt at the top — that is the chase list.
+            .order("is_paid", { ascending: true })
+            .order("finance_date", { ascending: false, nullsFirst: false })
+            .limit(1000)
+        : supabase.from("online_cpr")
+            .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status")
+            .order("cpr_date", { ascending: false, nullsFirst: false }).limit(1000);
     if (from) q = q.gte(dcol, from);
     if (to) q = q.lte(dcol, to);
     const { data, error } = await q;
     if (error) setErr(error.message);
     setRows((data as Row[]) ?? []);
     setLoading(false);
-  }, [preset, cf, ct]);
+  }, [preset, cf, ct, store]);
   useEffect(() => { load(tab); }, [tab, load]);
 
+  // The table is filtered in the browser only because it is explicitly a page
+  // of rows, never a total. Every total on this page comes from the RPC above.
   const rowsF = useMemo(() => (store === "ALL" ? rows : rows.filter((r) => r.store_code === store)), [rows, store]);
 
   const cards = useMemo(() => {
     if (tab === "payments") {
-      const pending = rowsF.filter((r) => !isPaid(r.payment_status));
-      const paid = rowsF.filter((r) => isPaid(r.payment_status));
+      const s = summary;
       return [
-        { label: "Pending payment", value: money(sum(pending, "cod_amount")), Icon: Clock, bg: "bg-amber-soft" },
-        { label: "Received", value: money(sum(paid, "cpr_net_amount") || sum(paid, "cod_amount")), Icon: CheckCircle2, bg: "bg-success-soft" },
-        { label: "Pending count", value: pending.length.toLocaleString(), Icon: Wallet, bg: "bg-periwinkle-soft" },
-        { label: "Received count", value: paid.length.toLocaleString(), Icon: Wallet, bg: "bg-salmon-soft" },
+        { label: "Pending payment", value: money(s?.pending_value), Icon: Clock, bg: "bg-amber-soft",
+          note: s ? `${Number(s.pending_count).toLocaleString()} parcels · oldest ${Number(s.oldest_pending_days)} days` : "" },
+        { label: "Received", value: money(s?.received_net), Icon: CheckCircle2, bg: "bg-success-soft",
+          note: s ? `${Number(s.received_count).toLocaleString()} parcels` : "" },
+        // Revenue is GROSS COD — what the customer handed over. The courier's
+        // cut is a cost, shown next to it rather than folded into it.
+        { label: "Gross COD", value: money(s?.gross_cod), Icon: Wallet, bg: "bg-periwinkle-soft",
+          note: "what customers paid" },
+        { label: "Courier charges", value: money(s?.courier_fees), Icon: Wallet, bg: "bg-salmon-soft",
+          note: s ? `net ${money(s.net_expected)}` : "" },
       ];
     }
     if (tab === "cpr") {
+      // These stay browser-side on purpose: a CPR batch is one row per
+      // settlement file, so the set is small and cannot approach the 1,000 cap.
+      // If it ever can, it gets its own function like everything else.
       return [
-        { label: "CPR batches", value: rowsF.length.toLocaleString(), Icon: FileText, bg: "bg-periwinkle-soft" },
-        { label: "Total amount", value: money(sum(rowsF, "amount")), Icon: Wallet, bg: "bg-success-soft" },
-        { label: "Orders covered", value: rowsF.reduce((t, r) => t + (Number(r.orders_count) || 0), 0).toLocaleString(), Icon: FileText, bg: "bg-amber-soft" },
-        { label: "Open", value: rowsF.filter((r) => r.status !== "Paid" && r.status !== "Cleared").length.toLocaleString(), Icon: Clock, bg: "bg-salmon-soft" },
+        { label: "CPR batches", value: rowsF.length.toLocaleString(), Icon: FileText, bg: "bg-periwinkle-soft", note: "" },
+        { label: "Total amount", value: money(sum(rowsF, "amount")), Icon: Wallet, bg: "bg-success-soft", note: "" },
+        { label: "Orders covered", value: rowsF.reduce((t, r) => t + (Number(r.orders_count) || 0), 0).toLocaleString(), Icon: FileText, bg: "bg-amber-soft", note: "" },
+        { label: "Open", value: rowsF.filter((r) => r.status !== "Paid" && r.status !== "Cleared").length.toLocaleString(), Icon: Clock, bg: "bg-salmon-soft", note: "" },
       ];
     }
     return [
-      { label: "Returns", value: rowsF.length.toLocaleString(), Icon: Undo2, bg: "bg-periwinkle-soft" },
-      { label: "Received back", value: rowsF.filter((r) => r.received).length.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft" },
-      { label: "Awaiting", value: rowsF.filter((r) => !r.received).length.toLocaleString(), Icon: Clock, bg: "bg-amber-soft" },
-      { label: "—", value: "", Icon: Undo2, bg: "bg-salmon-soft" },
+      { label: "Returns", value: rowsF.length.toLocaleString(), Icon: Undo2, bg: "bg-periwinkle-soft", note: "" },
+      { label: "Received back", value: rowsF.filter((r) => r.received).length.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft", note: "" },
+      { label: "Awaiting", value: rowsF.filter((r) => !r.received).length.toLocaleString(), Icon: Clock, bg: "bg-amber-soft", note: "" },
+      { label: "—", value: "", Icon: Undo2, bg: "bg-salmon-soft", note: "" },
     ];
-  }, [tab, rowsF]);
+  }, [tab, rowsF, summary]);
 
   return (
     <div className="px-4 py-6 sm:px-6 md:px-10 md:py-8">
@@ -125,14 +184,30 @@ export default function FinancePage() {
 
       {tab === "returns" ? <div className="mt-5"><ReturnsPanel store={store} from={rangeDates(preset, cf, ct)[0]} to={rangeDates(preset, cf, ct)[1]} /></div> : <>
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {cards.map(({ label, value, Icon, bg }, i) => (
+        {cards.map(({ label, value, Icon, bg, note }, i) => (
           <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
             <div className="mt-3 text-[20px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{loading ? "—" : value}</div>
             <div className="text-[12px] font-medium text-muted dark:text-[#a89f93]">{label}</div>
+            {note && !loading && <div className="mt-0.5 text-[11px] text-hint dark:text-[#8a8175]">{note}</div>}
           </div>
         ))}
       </div>
+
+      {/* Who owes what. PostEx settles through an API; OwnEx has none, so its
+          line is the one that can only ever move by import or by hand. */}
+      {tab === "payments" && byCourier.length > 0 && !loading && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {byCourier.map((c) => (
+            <div key={c.courier} className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-[12px] text-muted dark:border-white/10 dark:bg-white/[0.05] dark:text-[#a89f93]">
+              <span className="font-semibold text-ink dark:text-[#f4f1ea]">{c.courier}</span>
+              {" · "}{money(c.pending_value)} pending
+              {" · "}{Number(c.pending_count).toLocaleString()} parcels
+              {Number(c.oldest_pending_days) > 0 && <> · oldest {Number(c.oldest_pending_days)}d</>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
         <div className="overflow-x-auto">

@@ -52,6 +52,47 @@ function classify(raw: string): { delivery_status: string; needs_review: boolean
   return { delivery_status: "In Transit", needs_review: true };   // truly unknown -> flag, never guess
 }
 
+/* ---------------------------------------------------------------------------
+   THE COURIER'S REASON, PULLED OUT OF THE STATUS STRING   (migration 0076)
+
+   PostEx does not send a separate reason field on the tracking response. It
+   welds the reason onto the status:
+
+       "Reason - REFUSED TO RECEIVE"
+       "Reason - CUSTOMER NOT AVAILABLE"
+
+   We stored that whole string, prefix and all, into rts_reason — so the Returns
+   page could only show "PostEx: Reason - REFUSED TO RECEIVE", which reads like
+   machine output and got ignored. What belongs in front of the team is
+   "REFUSED TO RECEIVE".
+
+   The "Reason - " marker is REQUIRED. Without it, "Returned" and
+   "Failed Attempt" would be promoted into the reason column, and a status
+   masquerading as an explanation is worse than an empty cell.
+
+   A couple of detail fields are checked too, in case they ever appear — but
+   nothing is invented if they do not. --------------------------------------- */
+const REASON_MARKER = /reason\s*[-–:]\s*(.+)$/i;
+const EMPTY_REASON = /^(n\/?a|none|null|-+|verifying reason|reason|pending|no reason)$/i;
+
+function cleanReason(v: unknown): string {
+  const s = String(v ?? "").trim().replace(/\s+/g, " ");
+  if (!s || s.length < 3 || EMPTY_REASON.test(s)) return "";
+  return s.slice(0, 200);
+}
+
+function postexReason(raw: string, detail?: Record<string, unknown> | null): string | null {
+  const m = REASON_MARKER.exec(String(raw ?? ""));
+  const fromStatus = cleanReason(m?.[1]);
+  if (fromStatus) return fromStatus;
+
+  for (const k of ["reason", "reasonDescription", "returnReason", "remarks", "statusReason"]) {
+    const v = cleanReason(detail?.[k]);
+    if (v && v.toLowerCase() !== String(raw ?? "").toLowerCase()) return v;
+  }
+  return null;
+}
+
 const num = (v: unknown) => { const n = Number(v); return isNaN(n) ? null : n; };
 
 /** One PostEx account serves all three stores, so the API can't tell them apart.
@@ -186,6 +227,7 @@ Deno.serve(async (req) => {
 
       const list = (res.body as { dist?: unknown[] })?.dist ?? [];
       const rows: Record<string, unknown>[] = [];
+      const reasonRows: { tracking_id: string; courier_reason_text: string }[] = [];
 
       for (const item of list as Record<string, unknown>[]) {
         const t = (item.trackingResponse ?? item) as Record<string, unknown>;
@@ -194,6 +236,14 @@ Deno.serve(async (req) => {
         const ref = String(t.orderRefNumber ?? "").trim();
         const raw = String(t.transactionStatus ?? "");
         const { delivery_status, needs_review } = classify(raw);
+        // Collected, but NOT added to the upsert payload below.
+        //
+        // PostgREST decides the column list from the FIRST object in the array,
+        // so a ragged payload either errors or silently nulls the column on
+        // every row that omitted it — which would wipe reasons recorded earlier.
+        // Uniform rows for the upsert; the reasons go in as a separate pass.
+        const reason = postexReason(raw, t);
+        if (reason) reasonRows.push({ tracking_id: tracking, courier_reason_text: reason });
         rows.push({
           tracking_id: tracking,
           order_number: ref || null,
@@ -218,10 +268,21 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message, at: i }, 500);
         merged += (data ?? []).length;
       }
+      // Second pass: the reasons. One UPDATE each, only for parcels that have
+      // one, so nothing that already holds a reason can be nulled by this run.
+      let reasoned = 0;
+      for (const rr of reasonRows) {
+        const { data } = await db.from("online_logistics")
+          .update({ courier_reason_text: rr.courier_reason_text })
+          .eq("tracking_id", rr.tracking_id).eq("courier", "PostEx").select("id");
+        reasoned += (data ?? []).length;
+      }
+
       await db.from("online_courier_events").insert(
         rows.slice(0, 500).map((r) => ({ courier: "PostEx", tracking_id: r.tracking_id, raw_status: r.raw_status, payload: { source: "pull" } }))
       );
-      return json({ ok: true, action, from, to, called_via: res.via, fetched: rows.length, merged });
+      return json({ ok: true, action, from, to, called_via: res.via,
+                    fetched: rows.length, merged, courier_reasons_captured: reasoned });
     }
 
     // ---------------------------------------------------------------
@@ -232,7 +293,7 @@ Deno.serve(async (req) => {
       const cutoff = new Date(Date.now() - staleMinutes * 60000).toISOString();
 
       let openQ = db.from("online_logistics")
-        .select("tracking_id, delivery_status, raw_status").eq("courier", "PostEx")
+        .select("tracking_id, delivery_status, raw_status, courier_reason_text").eq("courier", "PostEx")
         .not("tracking_id", "is", null)
         // Everything NOT finally settled.
         //
@@ -269,6 +330,7 @@ Deno.serve(async (req) => {
       if (!nums.length) return json({ ok: true, action, checked: 0, updated: 0, note: "nothing in transit" });
 
       let updated = 0; let unchanged = 0; let bulkWorked = false; const errors: string[] = [];
+      let reasonsFound = 0;
 
       // Try the bulk endpoint once. If it answers, use it — it is far cheaper.
       // If it does not, fall through to one request per parcel rather than
@@ -288,10 +350,19 @@ Deno.serve(async (req) => {
           // twice over — once to PostEx, once to every watching tab.
           const prior = new Map((open ?? []).map((r: { tracking_id: string; raw_status: string | null }) =>
             [r.tracking_id, r.raw_status]));
+          // What reason we already hold. A parcel whose status has not moved but
+          // whose reason column is still empty DOES need writing — otherwise the
+          // shortcut below would keep every existing "Reason - ..." parcel blank
+          // forever, since its status never changes again.
+          const priorReason = new Map((open ?? []).map(
+            (r: { tracking_id: string; courier_reason_text: string | null }) =>
+              [r.tracking_id, r.courier_reason_text]));
 
           for (const r of results) {
             if (!r.ok || !r.status) continue;
-            if (prior.get(r.tn) === r.status) { unchanged++; continue; }   // nothing new
+            const reason = postexReason(r.status, r.detail as Record<string, unknown> | null);
+            const reasonIsNew = !!reason && reason !== priorReason.get(r.tn);
+            if (prior.get(r.tn) === r.status && !reasonIsNew) { unchanged++; continue; }   // nothing new
             const { delivery_status, needs_review } = classify(r.status);
             const upd: Record<string, unknown> = {
               delivery_status, needs_review, raw_status: r.status,
@@ -302,6 +373,10 @@ Deno.serve(async (req) => {
               upd.delivery_date = day((r.detail as Record<string, unknown>)?.orderDeliveryDate) ?? new Date().toISOString().slice(0, 10);
             if (delivery_status === "Returned") { upd.rts = "Yes"; upd.rts_reason = `PostEx: ${r.status}`; }
             else if (/refus|attempt/i.test(r.status)) { upd.rts_reason = `PostEx: ${r.status}`; }
+            // rts_reason stays a status echo. The reason itself gets its own
+            // column, unprefixed, so the Returns page has something readable
+            // rather than machine output. Only written when we have one.
+            if (reason) { upd.courier_reason_text = reason; reasonsFound++; }
             const { data } = await db.from("online_logistics").update(upd).eq("tracking_id", r.tn).select("id");
             updated += (data ?? []).length;
             await db.from("online_courier_events").insert({ courier: "PostEx", tracking_id: r.tn, raw_status: r.status, payload: { source: "track-single" } });
@@ -309,7 +384,9 @@ Deno.serve(async (req) => {
           await new Promise((r) => setTimeout(r, 150));
         }
         return json({ ok: true, action, checked: nums.length, updated, unchanged,
-                      method: "per-parcel", stale_minutes: staleMinutes, errors: errors.slice(0, 5) });
+                      method: "per-parcel", stale_minutes: staleMinutes,
+                      courier_reasons_captured: reasonsFound,
+                      errors: errors.slice(0, 5) });
       }
 
       for (let i = 0; i < nums.length; i += 50) {          // bulk endpoint, 50 at a time
@@ -328,13 +405,16 @@ Deno.serve(async (req) => {
             upd.delivery_date = day(t.orderDeliveryDate) ?? new Date().toISOString().slice(0, 10);
           if (delivery_status === "Returned") { upd.rts = "Yes"; upd.rts_reason = `PostEx: ${raw}`; }
           else if (/refus|attempt/i.test(raw)) { upd.rts_reason = `PostEx: ${raw}`; }
+          const reason = postexReason(raw, t);
+          if (reason) { upd.courier_reason_text = reason; reasonsFound++; }
           const { data } = await db.from("online_logistics").update(upd).eq("tracking_id", tn).select("id");
           updated += (data ?? []).length;
           await db.from("online_courier_events").insert({ courier: "PostEx", tracking_id: tn, raw_status: raw, payload: { source: "track" } });
         }
         await new Promise((r) => setTimeout(r, 200));
       }
-      return json({ ok: true, action, checked: nums.length, updated, method: "bulk", errors: errors.slice(0, 10) });
+      return json({ ok: true, action, checked: nums.length, updated, method: "bulk",
+                    courier_reasons_captured: reasonsFound, errors: errors.slice(0, 10) });
     }
 
     // ---------------------------------------------------------------

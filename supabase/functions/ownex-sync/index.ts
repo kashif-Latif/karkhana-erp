@@ -41,8 +41,28 @@
 //   return_leg_started_at (migration 0059). Direction becomes a recorded fact
 //   instead of something re-guessed from whatever code happens to be current.
 //
+// THE REASON WAS ALWAYS THERE — WE WERE DISCARDING IT   (migration 0076)
+//   Every history entry carries a `description` alongside its status:
+//
+//       {"status":"Verifying Reason","code":"debrief",
+//        "description":"UNTRACEABLE ADDRESS"}
+//
+//   This function read that array for direction detection, kept "Verifying
+//   Reason" in raw_status and threw the description away. "Verifying Reason" is
+//   the courier saying it has not decided yet — the ABSENCE of a reason. The
+//   description beside it is the reason, and it now lands in
+//   online_logistics.courier_reason_text.
+//
+//   Only codes that explain something are read: debrief, reason, reattempt and
+//   the return stages. Movement codes carry station names in `description`, and
+//   "Lahore Hub" is not a reason a parcel came back.
+//
+//   The column is never nulled. A parcel that moves again after a debrief must
+//   not lose the finding — a reason once given is not un-given.
+//
 // ACTIONS
-//   discover_codes      sample parcels, report every status code seen, write nothing
+//   discover_codes      sample parcels, report every status code AND every
+//                       reason wording seen, write nothing
 //   track               refresh parcels still in motion  (the scheduled job)
 //   backfill_return_leg one-off: stamp direction on parcels already misfiled
 
@@ -59,10 +79,20 @@ const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: 
 const TRACK_URL = (id: string) =>
   `https://shipper.ownexpress.pk/api/v1/public/booking/status/${encodeURIComponent(id)}`;
 
-type Hist = { code: string; status: string; date: string };
+/* `description` is the field this function used to drop on the floor. In the
+   history array it is where the courier writes what actually went wrong:
+
+     {"status":"Verifying Reason","code":"debrief",
+      "description":"UNTRACEABLE ADDRESS"}
+
+   "Verifying Reason" is the status — the courier saying it has not decided.
+   "UNTRACEABLE ADDRESS" is the reason. We kept the first and discarded the
+   second, which is why the Returns page had nothing better than tags to show. */
+type Hist = { code: string; status: string; date: string; description?: string };
 type Tracked = {
   trackingId: string; ok: boolean;
   code?: string; status?: string; date?: string; route?: string;
+  description?: string;
   history?: Hist[]; error?: string;
 };
 
@@ -85,8 +115,10 @@ async function trackOne(id: string): Promise<Tracked> {
       status: String(cs.status ?? ""),
       date: cs.date ?? undefined,
       route: from && to ? `${from} -> ${to}` : from || undefined,
-      history: (d.history ?? []).map((h: { code?: string; status?: string; date?: string }) => ({
+      description: cs.description ? String(cs.description) : undefined,
+      history: (d.history ?? []).map((h: { code?: string; status?: string; date?: string; description?: string }) => ({
         code: String(h.code ?? "").toLowerCase(), status: String(h.status ?? ""), date: h.date ?? "",
+        description: h.description ? String(h.description) : undefined,
       })),
     };
   } catch (e) {
@@ -150,6 +182,52 @@ function returnLegStart(history?: Hist[]): string | null {
   return hit?.date || null;
 }
 
+/* ---------------------------------------------------------------------------
+   THE COURIER'S REASON
+
+   Codes that carry an explanation. `debrief` is the important one — it is the
+   entry that holds "UNTRACEABLE ADDRESS" — but a return stage can carry one too.
+   Movement codes (in-transit, arrived, transit-received) describe geography, not
+   cause, and their descriptions are station names. Reading those would put
+   "Lahore Hub" in front of the team as a reason for the parcel coming back.
+--------------------------------------------------------------------------- */
+const REASON_CODES = new Set([
+  "debrief", "reason", "reattempt",
+  "return_requested", "return-pbag", "return-de-manifested", "returned",
+]);
+
+/* Descriptions that are not explanations. The courier does write these, and
+   showing them is worse than showing nothing, because a placeholder in the
+   reason column reads as an answer. */
+const EMPTY_REASON = /^(n\/?a|none|null|-+|verifying reason|reason|pending|no reason)$/i;
+
+function cleanReason(v: unknown): string {
+  const s = String(v ?? "").trim().replace(/\s+/g, " ");
+  if (!s || s.length < 3 || EMPTY_REASON.test(s)) return "";
+  return s.slice(0, 200);
+}
+
+/** The courier's own explanation for this parcel, or null if it has not given
+ *  one. Never invents; an absent reason stays absent. */
+function courierReason(t: Tracked): string | null {
+  // Newest first. The history array's order is the courier's, not ours, so it
+  // is sorted rather than trusted — the most recent finding is the live one.
+  const hist = [...(t.history ?? [])].sort((a, b) =>
+    String(b.date ?? "").localeCompare(String(a.date ?? "")));
+
+  for (const h of hist) {
+    if (REASON_CODES.has(h.code)) {
+      const r = cleanReason(h.description);
+      if (r) return r;
+    }
+  }
+  // The current status may carry one the history has not caught up with.
+  const cur = cleanReason(t.description);
+  if (cur && cur.toLowerCase() !== String(t.status ?? "").toLowerCase()) return cur;
+
+  return null;
+}
+
 /** small waves, so we stay polite to a public endpoint */
 async function inWaves(ids: string[], size: number, deadline: number) {
   const out: Tracked[] = [];
@@ -196,23 +274,34 @@ Deno.serve(async (req) => {
       }
       const results = await inWaves(ids, wave, deadline);
 
-      const codes: Record<string, { seen: number; label: string }> = {};
+      const codes: Record<string, { seen: number; label: string; reasons: Record<string, number> }> = {};
       let failed = 0;
       for (const t of results) {
         if (!t.ok) { failed++; continue; }
-        const all: { code: string; status: string }[] = [
-          { code: t.code ?? "", status: t.status ?? "" },
+        const all: { code: string; status: string; description?: string }[] = [
+          { code: t.code ?? "", status: t.status ?? "", description: t.description },
           ...(t.history ?? []),
         ];
         for (const h of all) {
           if (!h.code) continue;
-          codes[h.code] = codes[h.code] ?? { seen: 0, label: h.status };
+          codes[h.code] = codes[h.code] ?? { seen: 0, label: h.status, reasons: {} };
           codes[h.code].seen++;
+          // The descriptions, grouped by the code that carried them. This is
+          // read-only evidence: run it and you can see "UNTRACEABLE ADDRESS"
+          // sitting under `debrief` before anything is written anywhere.
+          const r = cleanReason(h.description);
+          if (r) codes[h.code].reasons[r] = (codes[h.code].reasons[r] ?? 0) + 1;
         }
       }
       const table = Object.entries(codes)
         .sort((a, b) => b[1].seen - a[1].seen)
-        .map(([code, v]) => ({ code, label: v.label, seen: v.seen, maps_to: mapCode(code).status, certain: mapCode(code).certain }));
+        .map(([code, v]) => ({
+          code, label: v.label, seen: v.seen,
+          maps_to: mapCode(code).status, certain: mapCode(code).certain,
+          carries_reason: REASON_CODES.has(code),
+          reasons: Object.entries(v.reasons).sort((a, b) => b[1] - a[1]).slice(0, 12)
+                         .map(([text, n]) => ({ text, n })),
+        }));
       const unmapped = table.filter((r) => !r.certain).map((r) => r.code);
 
       return json({
@@ -234,6 +323,11 @@ Deno.serve(async (req) => {
       // rewriting identical rows costs egress twice: once to the courier, once
       // to every watching browser. Skip the write when nothing changed.
       const priorStatus = new Map<string, string | null>();
+      // ...and what reason we already hold. Without this, the "nothing changed"
+      // shortcut below would skip the write on a parcel whose status is steady
+      // but whose reason has only just arrived — which is most of them, since a
+      // debrief entry appears while the code stays put.
+      const priorReason = new Map<string, string | null>();
 
       let ids: string[] = body.tracking_ids ?? [];
       if (!ids.length) {
@@ -248,7 +342,7 @@ Deno.serve(async (req) => {
         const terminal = '("Delivered","Returned","Cancelled")';
 
         let q = db.from("online_logistics")
-          .select("tracking_id, raw_status")
+          .select("tracking_id, raw_status, courier_reason_text")
           .eq("courier", "OwnEx").not("tracking_id", "is", null);
 
         if (backfill) {
@@ -271,8 +365,10 @@ Deno.serve(async (req) => {
           .limit(limit);
         ids = (data ?? []).map((r: { tracking_id: string }) => r.tracking_id);
         // remember what we already hold, so an unchanged parcel is not rewritten
-        for (const r of (data ?? []) as { tracking_id: string; raw_status?: string | null }[]) {
+        for (const r of (data ?? []) as
+             { tracking_id: string; raw_status?: string | null; courier_reason_text?: string | null }[]) {
           priorStatus.set(r.tracking_id, r.raw_status ?? null);
+          priorReason.set(r.tracking_id, r.courier_reason_text ?? null);
         }
       }
       if (!ids.length) return json({ ok: true, checked: 0, note: "Nothing due a refresh — every parcel in transit was checked recently." });
@@ -282,6 +378,8 @@ Deno.serve(async (req) => {
 
       let updated = 0, unchanged = 0, flagged = 0, failed = 0, attempts = 0;
       let returnLegFound = 0, directionCorrected = 0, rescued = 0;
+      let reasonsFound = 0, reasonsNew = 0;
+      const reasonSamples: Record<string, unknown>[] = [];
       const nowShowing: Record<string, number> = {};
       const corrections: Record<string, unknown>[] = [];
       const events: Record<string, unknown>[] = [];
@@ -310,14 +408,26 @@ Deno.serve(async (req) => {
         }
         if (legStart && status === "Delivered") rescued++;
 
+        // ---- the courier's own explanation, if it has given one ----------
+        const reason = courierReason(t);
+        if (reason) {
+          reasonsFound++;
+          if (reasonSamples.length < 20) reasonSamples.push({ tracking_id: t.trackingId, reason, status: t.status });
+        }
+        // Only NEW information counts as a change worth writing.
+        const reasonIsNew = !!reason && reason !== priorReason.get(t.trackingId);
+        if (reasonIsNew) reasonsNew++;
+
         if (!certain) flagged++;
         if (attempt) attempts++;
         nowShowing[status] = (nowShowing[status] ?? 0) + 1;
         events.push({ tracking_id: t.trackingId, courier: "OwnEx", raw_status: t.status ?? t.code ?? "" });
         if (dryRun) continue;
 
-        // unchanged status and direction already recorded — nothing to write
-        if (priorStatus.get(t.trackingId) === (t.status ?? null) && !legStart) { unchanged++; continue; }
+        // unchanged status, direction already recorded, no new reason — nothing to write
+        if (priorStatus.get(t.trackingId) === (t.status ?? null) && !legStart && !reasonIsNew) {
+          unchanged++; continue;
+        }
 
         const patch: Record<string, unknown> = {
           delivery_status: status,
@@ -336,6 +446,11 @@ Deno.serve(async (req) => {
           patch.return_leg_started_at = legStart;
           patch.return_leg_source = "history";
         }
+
+        // Only ever written when we HAVE one. A later movement that carries no
+        // description must not erase the finding that came before it — a reason
+        // once given is not un-given.
+        if (reason) patch.courier_reason_text = reason;
 
         if (status === "Delivered" && t.date) patch.delivery_date = String(t.date).slice(0, 10);
         if (!certain) patch.review_status = `unmapped OwnEx code: ${t.code}`;
@@ -364,6 +479,11 @@ Deno.serve(async (req) => {
         on_return_leg: returnLegFound,
         direction_corrected: directionCorrected,
         rescued_after_return_started: rescued,
+        // The point of this run: how many parcels the courier has actually
+        // explained, and how many of those explanations are new to us.
+        courier_reasons_seen: reasonsFound,
+        courier_reasons_new: reasonsNew,
+        reason_samples: reasonSamples,
         corrections: corrections.slice(0, 50),
         now_showing: nowShowing,
         stopped_early: results.length < ids.length ? "time budget — run again to continue" : undefined,
