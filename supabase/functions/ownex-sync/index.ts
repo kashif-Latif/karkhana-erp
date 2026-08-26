@@ -199,11 +199,34 @@ const REASON_CODES = new Set([
 /* Descriptions that are not explanations. The courier does write these, and
    showing them is worse than showing nothing, because a placeholder in the
    reason column reads as an answer. */
-const EMPTY_REASON = /^(n\/?a|none|null|-+|verifying reason|reason|pending|no reason)$/i;
+const EMPTY_REASON = /^(n\/?a|none|null|-+|verif(y|ie)(ing|d) reason|reason|pending|no reason)$/i;
+
+/* A ROUTE IS NOT A REASON.
+   OwnEx puts the leg — "Lahore <i class="ri-arrow-right-line"></i> Karachi" —
+   into the same `description` field it uses for findings. An earlier version of
+   this function let 20 of those through into the reason column, complete with
+   the HTML. Two guards, because either alone would have missed it:
+     the markup (an <i> icon tag is never part of a written reason)
+     the shape (CITY -> CITY, with any arrow the courier chooses to use) */
+const LOOKS_LIKE_ROUTE = /^[^<>]{2,30}\s*(->|-->|→|=>|»)\s*[^<>]{2,30}$/;
+
+/* The courier prefixes its own findings: "Verified Reason CNA" is the code CNA
+   with a label in front of it. Strip the label, keep the finding. */
+const REASON_LABEL = /^\s*verif(y|ie)(ing|d)\s+reason\s*[:\-–]?\s*/i;
 
 function cleanReason(v: unknown): string {
-  const s = String(v ?? "").trim().replace(/\s+/g, " ");
+  let s = String(v ?? "");
+  // Markup first: a description carrying an <i> icon is a route, not a finding.
+  // Detect it BEFORE stripping tags, or "Lahore <i/> Karachi" becomes the
+  // innocent-looking "Lahore Karachi" and sails through every later test.
+  const hadMarkup = /<[^>]+>/.test(s);
+  s = s.replace(/<[^>]+>/g, " ")
+       .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ")
+       .replace(/\s+/g, " ").trim();
+  if (hadMarkup) return "";
+  s = s.replace(REASON_LABEL, "").trim();
   if (!s || s.length < 3 || EMPTY_REASON.test(s)) return "";
+  if (LOOKS_LIKE_ROUTE.test(s)) return "";
   return s.slice(0, 200);
 }
 
@@ -221,10 +244,13 @@ function courierReason(t: Tracked): string | null {
       if (r) return r;
     }
   }
-  // The current status may carry one the history has not caught up with.
-  const cur = cleanReason(t.description);
-  if (cur && cur.toLowerCase() !== String(t.status ?? "").toLowerCase()) return cur;
-
+  /* NO FALLBACK TO t.description.
+     It was here, and it is what put "Lahore -> Karachi" into 20 reason cells.
+     currentStatus.description is the leg the parcel is on — a movement, not a
+     cause — and only a history entry whose CODE says it explains something can
+     be trusted to explain something. cleanReason() would now reject that
+     particular string anyway, but a guard behind a source that is wrong by
+     nature is the wrong place to defend. Read the right field instead. */
   return null;
 }
 
