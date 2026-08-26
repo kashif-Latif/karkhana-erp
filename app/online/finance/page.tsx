@@ -6,6 +6,7 @@ import ReturnsPanel from "@/components/ReturnsPanel";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates } from "@/lib/dateRange";
 import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
+import CprImport from "@/components/CprImport";
 
 type Tab = "payments" | "cpr" | "returns";
 type Row = Record<string, unknown>;
@@ -164,6 +165,10 @@ export default function FinancePage() {
             className="rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
             {STORES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
+          {/* Settlement import lives on the CPR tab, where the batches it
+              creates are listed. Showing it on Payments would invite dropping
+              an invoice onto a screen that cannot display the result. */}
+          {tab === "cpr" && <CprImport onDone={() => load(tab)} />}
           <AddFinanceRow tab={tab} onDone={() => load(tab)} />
           <button onClick={() => load(tab)} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
