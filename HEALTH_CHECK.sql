@@ -1,5 +1,5 @@
 -- ===========================================================================
--- KARKHANA — HUB DEPARTMENT HEALTH CHECK   (rev 26 Aug 2026)
+-- KARKHANA — HUB DEPARTMENT HEALTH CHECK   (rev 3 · 26 Aug 2026)
 --
 -- Paste the whole thing and run. One result set. Read the `verdict` column:
 --   OK      nothing to do
@@ -32,24 +32,59 @@
 with
 
 -- 1. Are the scheduled jobs reaching their functions AT ALL?
+--
+--    WHAT THE ok/failed SPLIT DOES *NOT* MEAN.
+--    The previous revision printed "72 ok / 216 failed" and called it a
+--    failure rate. It is not. pg_net DELETES rows from net._http_response
+--    after a 6-hour TTL, so any call older than that has no status left to
+--    read and scores as failed. Six hours out of twenty-four is 25%, which is
+--    exactly the ratio all three functions showed. Nothing was wrong.
+--
+--    So the only trustworthy signal here is the MOST RECENT call, which is
+--    still inside the TTL window. `retained` is shown so the number is never
+--    mistaken for a failure count again — cross-check against cron itself:
+--        select jobname, status, start_time from cron.job_run_details
+--         order by start_time desc limit 40;
 sync as (
   select 'sync · ' || fn as check,
-         case when last_status between 200 and 299 then 'OK' else 'FAIL' end as verdict,
-         'last ' || to_char(last_called, 'HH24:MI') || ' · ' ||
-         coalesce(ok_24h, 0) || ' ok / ' || coalesce(failed_24h, 0) || ' failed in 24h' as detail
+         case when last_called < now() - interval '2 hours' then 'FAIL'
+              when last_status between 200 and 299 then 'OK'
+              else 'FAIL' end as verdict,
+         'last call ' || to_char(last_called, 'HH24:MI') || ' → HTTP ' ||
+         coalesce(last_status::text, 'no response retained') ||
+         ' · ' || coalesce(ok_24h, 0) || ' of ' ||
+         (coalesce(ok_24h,0) + coalesce(failed_24h,0)) ||
+         ' responses still retained (pg_net keeps 6h — NOT a failure count)' as detail
     from v_sync_health_summary
 ),
 
--- 2. Is PostEx status actually being refreshed, or just called?
---    `oldest` is the parcel that has gone longest without a check. If it drifts
---    past an hour the rotation has stalled.
+-- 2 & 3. How long since each open parcel last CHANGED.
+--
+--    THE PREVIOUS REVISION READ THIS COLUMN WRONG. It called updated_at "when we
+--    last checked" and failed anything over an hour — reporting FAIL on a
+--    healthy system polling every five minutes.
+--
+--    updated_at changes when a row is WRITTEN. Both syncs deliberately skip the
+--    write when a status has not moved; that is the whole point of the dedup
+--    work in 0063, which stopped a Realtime event storm on every poll. So a
+--    parcel sitting In Transit for a day shows a day-old updated_at having been
+--    polled 288 times.
+--
+--    There is no "last checked" column and adding one would mean writing every
+--    row on every poll — reintroducing exactly the churn 0063 removed. So this
+--    now measures what the column can honestly answer: how long since the
+--    parcel MOVED. Use check 1 for whether the sync is running.
 postex as (
-  select 'PostEx · open parcels refreshing' as check,
-         case when max(age) < interval '1 hour'  then 'OK'
-              when max(age) < interval '6 hours' then 'WATCH'
+  select 'PostEx · open parcels moving' as check,
+         -- A parcel that has not MOVED in 14 days is stuck and worth chasing.
+         -- Anything shorter is normal: plenty of parcels sit for days.
+         case when count(*) filter (where age > interval '14 days') = 0 then 'OK'
+              when count(*) filter (where age > interval '30 days') = 0 then 'WATCH'
               else 'FAIL' end as verdict,
-         count(*) || ' open · oldest checked ' ||
-         coalesce(round(extract(epoch from max(age)) / 3600.0, 1)::text || 'h', '—') || ' ago' as detail
+         count(*) || ' open · ' ||
+         count(*) filter (where age > interval '14 days') || ' unmoved 14d+ · ' ||
+         'oldest CHANGE ' ||
+         coalesce(round(extract(epoch from max(age)) / 86400.0, 1)::text || 'd', '—') || ' ago' as detail
     from (select now() - updated_at as age
             from online_logistics
            where courier = 'PostEx'
@@ -57,12 +92,16 @@ postex as (
 ),
 
 ownex as (
-  select 'OwnEx · open parcels refreshing' as check,
-         case when max(age) < interval '1 hour'  then 'OK'
-              when max(age) < interval '6 hours' then 'WATCH'
+  select 'OwnEx · open parcels moving' as check,
+         -- A parcel that has not MOVED in 14 days is stuck and worth chasing.
+         -- Anything shorter is normal: plenty of parcels sit for days.
+         case when count(*) filter (where age > interval '14 days') = 0 then 'OK'
+              when count(*) filter (where age > interval '30 days') = 0 then 'WATCH'
               else 'FAIL' end as verdict,
-         count(*) || ' open · oldest checked ' ||
-         coalesce(round(extract(epoch from max(age)) / 3600.0, 1)::text || 'h', '—') || ' ago' as detail
+         count(*) || ' open · ' ||
+         count(*) filter (where age > interval '14 days') || ' unmoved 14d+ · ' ||
+         'oldest CHANGE ' ||
+         coalesce(round(extract(epoch from max(age)) / 86400.0, 1)::text || 'd', '—') || ' ago' as detail
     from (select now() - updated_at as age
             from online_logistics
            where courier = 'OwnEx'
@@ -84,39 +123,40 @@ hooks as (
 
 -- 4. Do returns actually explain themselves?
 --
---    THE OLD TEST WAS TOO GENEROUS. It counted a return as explained if it had
---    "an agent note OR a tag", and tags are noise — "Order Confirmed" explains
---    nothing about why a parcel came back. It passed on rows that told you
---    nothing.
+--    THE PREVIOUS TWO REVISIONS BOTH SCORED THIS WRONG, in opposite directions.
+--    The first accepted a tag as an explanation. The second accepted any agent
+--    note — and reported "2,378 of 2,672 explained", 89%, on a page whose owner
+--    was telling us it showed him nothing useful. He was right. Ten samples,
+--    all ten identical:
 --
---    A REAL reason is one of two things:
---      * a sentence a human typed          (cancel_staff_note)
---      * the courier's own finding         (courier_reason_text — "UNTRACEABLE
---        ADDRESS", "REFUSED TO RECEIVE")
+--        order #8557 · agent_note "RTS" · tags "Call Confirmed · PostEx"
 --
---    Not the courier's STATUS. "Verifying Reason" is the courier saying it has
---    not decided yet: the absence of a reason, which is why raw_status does not
---    count here.
+--    "RTS" restates the status. A test that passes on that is worse than no
+--    test: it hid the exact complaint it existed to measure.
 --
---    Expect this to read worse than it used to, and to improve over the days
---    after ownex-sync and postex-sync are redeployed.
+--    is_real_note() (0078) now demands a sentence — two words or more, and not
+--    a status code. Expect this number to COLLAPSE. That is the correction
+--    landing, not a regression.
 reasons as (
   select 'Returns · have a REAL reason' as check,
-         case when count(*) = 0 then 'OK'
-              when count(*) filter (where has_real) * 100 / greatest(count(*),1) >= 60 then 'OK'
-              when count(*) filter (where has_real) * 100 / greatest(count(*),1) >= 25 then 'WATCH'
+         case when total = 0 then 'OK'
+              when explained * 100 / greatest(total,1) >= 60 then 'OK'
+              when explained * 100 / greatest(total,1) >= 25 then 'WATCH'
               else 'FAIL' end as verdict,
-         count(*) filter (where has_real) || ' of ' || count(*) ||
-         ' explained · ' ||
-         count(*) filter (where agent_note is not null)        || ' by agent, ' ||
-         count(*) filter (where agent_note is null
-                            and courier_reason_text is not null) || ' by courier, ' ||
-         count(*) filter (where not has_real
-                            and coalesce(array_length(order_tags,1),0) > 0) ||
-         ' tag-only (does not count)' as detail
-    from (select agent_note, courier_reason_text, order_tags,
-                 (agent_note is not null or courier_reason_text is not null) as has_real
-            from v_returns_all) t
+         explained || ' of ' || total || ' explained · ' ||
+         sentences || ' agent sentence, ' || couriers || ' courier reason, ' ||
+         codes || ' agent CODE only (does not count)' as detail
+    from (
+      select count(*)                                                    as total,
+             count(*) filter (where is_real_note(agent_note)
+                                 or courier_reason_text is not null)     as explained,
+             count(*) filter (where is_real_note(agent_note))            as sentences,
+             count(*) filter (where not is_real_note(agent_note)
+                                 and courier_reason_text is not null)    as couriers,
+             count(*) filter (where agent_note is not null
+                                 and not is_real_note(agent_note))       as codes
+        from v_returns_all
+    ) t
 ),
 
 -- 5. Delivered parcels with no order behind them. Each one is COD that cannot
@@ -188,17 +228,44 @@ size as (
 --     The Finance page had two faults at once: the 1,000-row cap, and a date
 --     filter on payment_date that is NULL on every unpaid parcel and therefore
 --     removed the pending rows entirely. This figure has neither.
+-- 11. THE MONEY — but split, because the headline figure is not one number.
+--
+--     All-time it reads Rs 14.8M across 6,878 parcels. By age it is two
+--     completely different things:
+--
+--        0-30 days   Rs 1.33M   <- real, chase this
+--        over 90d    Rs 13.2M   ALL PostEx, zero OwnEx
+--
+--     PostEx settles weekly. 3,342 parcels unpaid for over a year is not debt,
+--     it is settlement we never imported — online_cpr has 0 rows. Handing the
+--     team Rs 14.8M as a chase list wastes their week on parcels that were paid
+--     for long ago. The old page showed Rs 1.43M and was accidentally right,
+--     for the wrong reason.
 money as (
-  select 'MONEY · COD delivered but unpaid' as check,
+  select 'MONEY · unpaid, last 30 days (chase this)' as check,
          case when pending_count = 0 then 'OK' else 'WATCH' end as verdict,
          'Rs ' || to_char(pending_value, 'FM999,999,999') ||
-         ' across ' || pending_count || ' parcels · oldest ' ||
-         oldest_pending_days || ' days' as detail
-    from hub_finance_summary(null, null, 'ALL', null)
+         ' across ' || pending_count || ' parcels' as detail
+    from hub_finance_summary(current_date - 30, current_date, 'ALL', null)
 ),
 
--- 12. Gross, cost, net — the three figures Finance shows, side by side, so the
---     revenue question always has a number attached to it.
+older as (
+  select 'MONEY · unpaid over 90 days (likely unimported CPR)' as check,
+         case when count(*) = 0 then 'OK' else 'WATCH' end as verdict,
+         'Rs ' || to_char(coalesce(sum(cod_amount),0), 'FM999,999,999') ||
+         ' across ' || count(*) || ' parcels · not a chase list until the ' ||
+         'settlement files are imported' as detail
+    from v_finance_payments
+   where not is_paid and age_days > 90
+),
+
+-- 12. Gross, cost, net.
+--
+--     TREAT `net` AS PROVISIONAL. Charges of Rs 685,459 against Rs 27.1M gross
+--     is 2.5%, while OwnEx alone is known to have taken Rs 531,727. courier_fee
+--     is only populated on parcels a payments sync has touched, so net is gross
+--     minus THE FEES WE HAPPEN TO KNOW ABOUT — not the real net. It becomes
+--     true when the CPR import lands, and not before.
 margin as (
   select 'MONEY · gross vs courier charges' as check,
          'OK' as verdict,
@@ -220,4 +287,5 @@ union all select * from tz
 union all select * from nosync
 union all select * from size
 union all select * from money
+union all select * from older
 union all select * from margin;
