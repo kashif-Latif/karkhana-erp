@@ -99,7 +99,7 @@ export default function FinancePage() {
     let q =
       which === "payments"
         ? supabase.from("v_finance_payments")
-            .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days")
+            .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days")
             // Unpaid first, oldest debt at the top — that is the chase list.
             .order("is_paid", { ascending: true })
             .order("finance_date", { ascending: false, nullsFirst: false })
@@ -224,8 +224,14 @@ export default function FinancePage() {
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]">
                 {tab === "payments" && <>
-                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Courier</th>
-                  <th className="px-4 py-3 text-right font-semibold">COD</th><th className="px-4 py-3 text-right font-semibold">Net</th><th className="px-4 py-3 font-semibold">Paid on</th><th className="px-4 py-3 font-semibold">Status</th>
+                  {/* Store dropped: the order number already carries it —
+                      #LM15237, #TS2761, #TRZ1760 — so the column repeated
+                      itself in narrower form. */}
+                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Courier</th>
+                  <th className="px-4 py-3 text-right font-semibold">COD</th>
+                  <th className="px-4 py-3 text-right font-semibold">Charges</th>
+                  <th className="px-4 py-3 text-right font-semibold">Net received</th>
+                  <th className="px-4 py-3 font-semibold">Paid on</th><th className="px-4 py-3 font-semibold">Status</th>
                 </>}
                 {tab === "cpr" && <>
                   <th className="px-4 py-3 font-semibold">CPR #</th><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 font-semibold">Store</th>
@@ -249,9 +255,19 @@ export default function FinancePage() {
                   <tr key={i} onClick={() => (tab === "cpr" ? setCprRow(r) : setEditRow(r))} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.store_code ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.courier ?? "—")}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{money(r.cod_amount)}</td>
+                      {/* What the courier kept: its fee plus the tax withheld.
+                          Shown in brackets, the way both couriers' own receipts
+                          show a deduction. */}
+                      <td className="px-4 py-3 text-right tabular-nums text-muted dark:text-[#a89f93]">
+                        {(Number(r.courier_fee) || 0) + (Number(r.courier_tax) || 0)
+                          ? "(" + Math.round((Number(r.courier_fee) || 0) + (Number(r.courier_tax) || 0)).toLocaleString("en-PK") + ")"
+                          : "—"}
+                      </td>
+                      {/* Net is only known once a settlement has been imported.
+                          A dash here means no CPR has covered this parcel yet —
+                          not that the amount is zero. */}
                       <td className="px-4 py-3 text-right font-semibold tabular-nums">{money(r.cpr_net_amount)}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.payment_date ?? "—")}</td>
                       <td className="px-4 py-3">{badge(String(r.payment_status ?? "Pending"), isPaid(r.payment_status) ? "ok" : "warn")}</td>

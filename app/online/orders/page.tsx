@@ -64,7 +64,13 @@ export default function OrdersPage() {
     const [from, to] = rangeDates(preset, cf, ct);
     let q2 = supabase.from("online_orders")
       .select("id,order_number,store_code,order_date,customer_name,phone,city,amount,status")
-      .order("order_date", { ascending: false, nullsFirst: false }).limit(1000);
+      // Newest first, and genuinely so. order_date alone is a DATE, so a day's
+      // worth of orders all tie and come back in whatever order the planner
+      // felt like — which is why the newest order was not reliably at the top.
+      // shopify_created_at breaks the tie by the actual minute it was placed.
+      .order("order_date", { ascending: false, nullsFirst: false })
+      .order("shopify_created_at", { ascending: false, nullsFirst: false })
+      .limit(1000);
     if (from) q2 = q2.gte("order_date", from);
     if (to) q2 = q2.lte("order_date", to);
     if (store !== "ALL") q2 = q2.eq("store_code", store);

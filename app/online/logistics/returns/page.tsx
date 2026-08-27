@@ -13,19 +13,17 @@ import { useLiveTables } from "@/lib/useLiveTables";
 
    Three sections, because three different questions get asked:
 
-     All returns        the historical record            newest first
      Pending returns    nobody here has confirmed the box  OLDEST first
      Pending delivered  delivered, money not in           newest first
 
    Pending returns is deliberately oldest-first: couriers stop honouring claims
    after a while, so the row most likely to cost money is the one at the top. */
 
-type Section = "pending_returns" | "all_returns" | "delivered_unpaid";
+type Section = "pending_returns" | "delivered_unpaid";
 
 const TABS: { key: Section; label: string; hint: string }[] = [
-  { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Oldest first: claims expire." },
+  { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Newest first; the AGE column flags the ones going stale." },
   { key: "delivered_unpaid", label: "Returns Delivered", hint: "Delivered to the customer, but the COD has not reached you. This is the receivable." },
-  { key: "all_returns",      label: "All returns",       hint: "Every return on record, newest first." },
 ];
 
 type ReturnRow = {
@@ -80,8 +78,11 @@ export default function ReturnsPage() {
 
     const view = tab === "delivered_unpaid" ? "v_delivered_unpaid" : "v_returns_all";
     const dateCol = tab === "delivered_unpaid" ? "delivery_date" : "return_date";
-    // pending returns oldest first — the top row is the one about to expire
-    const ascending = tab === "pending_returns";
+    // Newest first on every tab. Pending returns used to be oldest-first so the
+    // about-to-expire claim sat at the top; Zeeshan wants the most recent return
+    // first, and the AGE column still shows the old ones in red, so nothing is
+    // hidden — it just is not the thing the list is organised around.
+    const ascending = false;
 
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })
@@ -121,8 +122,6 @@ export default function ReturnsPage() {
     { key: "delivered_unpaid" as Section, label: "Returns Delivered", Icon: Wallet, bg: "bg-success-soft",
       n: find("delivered_unpaid")?.n ?? 0, v: find("delivered_unpaid")?.value ?? 0,
       sub: find("delivered_unpaid")?.oldest_days ? `oldest ${find("delivered_unpaid")?.oldest_days}d` : undefined },
-    { key: "all_returns" as Section, label: "All returns", Icon: PackageCheck, bg: "bg-periwinkle-soft",
-      n: find("all_returns")?.n ?? 0, v: find("all_returns")?.value ?? 0, sub: undefined },
   ];
 
   const filtered = useMemo(() => {
