@@ -21,7 +21,7 @@
  *   rather than a rounding difference to bury.
  */
 import { useEffect, useState } from "react";
-import { X, Loader2, AlertTriangle, Check, Undo2 } from "lucide-react";
+import { X, Loader2, AlertTriangle, Check, Undo2, CheckCircle2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 type Row = Record<string, unknown>;
@@ -30,6 +30,7 @@ type Parcel = {
   delivery_status: string | null; cod_amount: number | null;
   cpr_net_amount: number | null; courier_fee: number | null;
   courier_tax: number | null; payment_status: string | null;
+  return_received_at: string | null;
 };
 
 const n = (v: unknown) => Number(v) || 0;
@@ -91,7 +92,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     (async () => {
       if (!isSupabaseConfigured || !supabase || !cpr) { setLoading(false); return; }
       const { data } = await supabase.from("online_logistics")
-        .select("tracking_id,order_number,store_code,delivery_status,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status")
+        .select("tracking_id,order_number,store_code,delivery_status,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,return_received_at")
         .eq("cpr_number", cpr)
         .order("delivery_status", { ascending: true })
         .limit(1000);
@@ -99,6 +100,64 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
       setLoading(false);
     })();
   }, [cpr]);
+
+  /* ------------------------------------------------------------------------
+     RECONCILING THE SETTLEMENT AGAINST OUR OWN RECORD.
+
+     After an import every parcel in a CPR falls into one of four states, and
+     only two of them need a person:
+
+       agreed      courier paid, we say Delivered and Paid. Nothing to do.
+       closed      courier billed a return, and the return is already closed
+                   here — either received, or the agent cancelled it in
+                   Shopify. Nothing to do.
+       open return courier billed a return we have not closed. THIS is the one
+                   that needs asking: is the box actually in your hands?
+       still paid  courier billed a return but we still show it Paid. A
+                   contradiction — the money was never collected.
+
+     The question that matters is "did you physically receive it", because that
+     is the only thing nobody but a person can know. Answering NO is not a
+     failure state: it leaves the parcel in Pending returns where it keeps being
+     chased, which is exactly right until the box turns up.
+
+     When it does turn up, the agent cancels the order in Shopify as they
+     already do, and v_returns_all drops it out of chasing on its own — that
+     rule has been in place since 0073 and nothing here changes it.
+  ------------------------------------------------------------------------ */
+  const isRet = (p: Parcel) => p.delivery_status === "Returned" || p.delivery_status === "RTS";
+  const isPaid = (p: Parcel) => (p.payment_status ?? "") === "Paid" || (p.payment_status ?? "") === "Received";
+  const agreed     = parcels.filter((p) => !isRet(p) && isPaid(p));
+  const closedRet  = parcels.filter((p) => isRet(p) && !isPaid(p) && p.return_received_at);
+  const openRet    = parcels.filter((p) => isRet(p) && !isPaid(p) && !p.return_received_at);
+  const stillPaid  = parcels.filter((p) => isRet(p) && isPaid(p));
+
+  async function bulk(list: Parcel[], action: "received" | "chase" | "unpay") {
+    if (!supabase || !list.length) return;
+    setBusy("bulk"); setErr("");
+    const ids = list.map((p) => p.tracking_id);
+    try {
+      if (action === "unpay") {
+        await supabase.from("online_payment_corrections").insert(
+          list.map((p) => ({
+            tracking_id: p.tracking_id, courier: String(row.courier ?? ""),
+            delivery_status: p.delivery_status, old_payment_status: p.payment_status,
+            old_cpr_number: cpr, cod_amount: p.cod_amount, cpr_net_amount: p.cpr_net_amount,
+            reason: "manual: settlement says returned, cleared payment from CPR detail",
+          })));
+      }
+      const patch =
+        action === "received" ? { return_received_at: new Date().toISOString() }
+        : action === "chase"  ? { return_received_at: null }
+        : { payment_status: null, payment_date: null, delivery_status: "Returned" };
+      const { error } = await supabase.from("online_logistics")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .in("tracking_id", ids);
+      if (error) throw new Error(error.message);
+      setParcels((xs) => xs.map((x) => ids.includes(x.tracking_id) ? { ...x, ...patch } as Parcel : x));
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(""); }
+  }
 
   const unmatched = Array.isArray(row.unmatched) ? (row.unmatched as string[]) : [];
   const netTotal = row.net_total ?? row.amount;
@@ -198,6 +257,70 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
             </div>
           </div>
         </div>
+
+        {!loading && parcels.length > 0 && (
+          <div className="mt-4 rounded-card border border-line p-3.5 dark:border-white/10">
+            <div className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">Reconcile against Shopify</div>
+
+            <div className="mt-2 space-y-2 text-[12.5px]">
+              {(agreed.length > 0 || closedRet.length > 0) && (
+                <div className="flex items-start gap-2 text-muted dark:text-[#a89f93]">
+                  <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                  <span>
+                    <b className="text-ink dark:text-[#f4f1ea]">{(agreed.length + closedRet.length).toLocaleString()}</b> already agree —
+                    {agreed.length > 0 && <> {agreed.length} paid and delivered</>}
+                    {agreed.length > 0 && closedRet.length > 0 && ","}
+                    {closedRet.length > 0 && <> {closedRet.length} returns already closed</>}. Nothing to do.
+                  </span>
+                </div>
+              )}
+
+              {/* The only question a person can answer. Saying no is a real
+                  answer, not a failure — it keeps the parcel being chased. */}
+              {openRet.length > 0 && (
+                <div className="rounded-card border border-amber-300 bg-amber-50 p-2.5 text-amber-900">
+                  <div className="font-semibold">
+                    {openRet.length} return{openRet.length === 1 ? "" : "s"} the courier billed you for, not closed here.
+                  </div>
+                  <div className="mt-0.5">Do you physically have {openRet.length === 1 ? "it" : "them"}?</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button disabled={!!busy} onClick={() => bulk(openRet, "received")}
+                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
+                      Yes — received, close {openRet.length === 1 ? "it" : "them"}
+                    </button>
+                    <button disabled={!!busy} onClick={() => bulk(openRet, "chase")}
+                            className="rounded-full border border-amber-400 px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50">
+                      No — keep chasing
+                    </button>
+                  </div>
+                  <div className="mt-1.5 text-[11.5px]">
+                    Keep chasing leaves them in Pending returns. When the box arrives your agent
+                    cancels the order in Shopify as usual and it closes itself.
+                  </div>
+                </div>
+              )}
+
+              {stillPaid.length > 0 && (
+                <div className="rounded-card border border-red-300 bg-red-50 p-2.5 text-red-800">
+                  <div className="font-semibold">
+                    {stillPaid.length} marked Paid, but this settlement says returned.
+                  </div>
+                  <div className="mt-0.5">
+                    A returned COD parcel collected no cash, so the payment is wrong —
+                    {" "}{money(stillPaid.reduce((t, p) => t + n(p.cod_amount), 0))} counted as revenue that never arrived.
+                  </div>
+                  <button disabled={!!busy} onClick={() => bulk(stillPaid, "unpay")}
+                          className="mt-2 rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
+                    Clear the payment on {stillPaid.length}
+                  </button>
+                </div>
+              )}
+            </div>
+            {busy === "bulk" && (
+              <div className="mt-2 flex items-center gap-2 text-[12px] text-muted"><Loader2 size={13} className="animate-spin" /> Writing…</div>
+            )}
+          </div>
+        )}
 
         {err && (
           <div className="mt-3 flex gap-2 rounded-card border border-red-300 bg-red-50 p-2.5 text-[12px] text-red-800">
