@@ -21,7 +21,7 @@
  *   rather than a rounding difference to bury.
  */
 import { useEffect, useState } from "react";
-import { X, Loader2, AlertTriangle } from "lucide-react";
+import { X, Loader2, AlertTriangle, Check, Undo2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 type Row = Record<string, unknown>;
@@ -42,7 +42,50 @@ const less = (v: unknown) => (n(v) ? "(" + n(v).toLocaleString("en-PK", { minimu
 export default function CprDetail({ row, onClose }: { row: Row; onClose: () => void }) {
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
   const cpr = String(row.cpr_number ?? "");
+
+  /* PER-PARCEL CORRECTION.
+   *
+   *  The courier and Shopify disagree more often than anyone would like: PostEx
+   *  hands a parcel back, and nobody on the team closes the order in Shopify.
+   *  The settlement file is then right and our record is wrong, on one parcel,
+   *  and there was no way to say so without editing the database by hand.
+   *
+   *  "Mark paid"      the courier settled it — set Delivered and Paid
+   *  "Mark returned"  it came back — restore Returned and REMOVE the payment,
+   *                   because a returned COD parcel collected no cash
+   *
+   *  Marking returned is the one that moves money off the books, so the old
+   *  values go into online_payment_corrections first — the same audit table
+   *  0084 used, so a mistake here is one query to undo. */
+  async function correct(p: Parcel, to: "paid" | "returned") {
+    if (!supabase) return;
+    setBusy(p.tracking_id); setErr("");
+    try {
+      if (to === "returned") {
+        await supabase.from("online_payment_corrections").insert({
+          tracking_id: p.tracking_id, courier: String(row.courier ?? ""),
+          delivery_status: p.delivery_status, old_payment_status: p.payment_status,
+          old_cpr_number: cpr, cod_amount: p.cod_amount, cpr_net_amount: p.cpr_net_amount,
+          reason: "manual: marked as returned from the CPR detail",
+        });
+      }
+      const patch = to === "paid"
+        ? { delivery_status: "Delivered", payment_status: "Paid",
+            payment_date: String(row.cpr_date ?? new Date().toISOString().slice(0, 10)) }
+        : { delivery_status: "Returned", payment_status: null, payment_date: null };
+      const { error } = await supabase.from("online_logistics")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("tracking_id", p.tracking_id);
+      if (error) throw new Error(error.message);
+      setParcels((xs) => xs.map((x) => x.tracking_id === p.tracking_id
+        ? { ...x, ...patch, payment_status: to === "paid" ? "Paid" : null } as Parcel : x));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(""); }
+  }
 
   useEffect(() => {
     (async () => {
@@ -156,6 +199,12 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
           </div>
         </div>
 
+        {err && (
+          <div className="mt-3 flex gap-2 rounded-card border border-red-300 bg-red-50 p-2.5 text-[12px] text-red-800">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{err}</span>
+          </div>
+        )}
+
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">
             Parcels in this settlement {parcels.length > 0 && <span className="font-normal text-muted">({parcels.length.toLocaleString()})</span>}
@@ -175,6 +224,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                     <th className="px-3 py-2 text-right font-semibold">COD</th>
                     <th className="px-3 py-2 text-right font-semibold">Charges</th>
                     <th className="px-3 py-2 text-right font-semibold">Net</th>
+                    <th className="px-3 py-2 text-right font-semibold">Fix</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line dark:divide-white/[0.05]">
@@ -188,12 +238,30 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                         <td className="px-3 py-1.5 text-right tabular-nums">{money(p.cod_amount)}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums text-muted dark:text-[#a89f93]">{less(n(p.courier_fee) + n(p.courier_tax))}</td>
                         <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${returned ? "text-danger" : ""}`}>{money(p.cpr_net_amount)}</td>
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                          {busy === p.tracking_id ? <Loader2 size={13} className="inline animate-spin text-muted" /> : (
+                            returned
+                              ? <button onClick={() => correct(p, "paid")}
+                                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink hover:bg-panel dark:border-white/15 dark:text-white dark:hover:bg-white/10">
+                                  <Check size={11} /> Mark paid
+                                </button>
+                              : <button onClick={() => correct(p, "returned")}
+                                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-muted hover:bg-panel dark:border-white/15 dark:text-[#a89f93] dark:hover:bg-white/10">
+                                  <Undo2 size={11} /> Mark returned
+                                </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             )}
+          </div>
+          <div className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">
+            Use <b>Fix</b> when the courier and Shopify disagree — a parcel PostEx settled but
+            nobody closed in Shopify, or one marked paid that actually came back. Marking a
+            parcel returned removes its payment and records the old values, so it can be undone.
           </div>
         </div>
       </div>

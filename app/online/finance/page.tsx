@@ -53,6 +53,11 @@ const isPaid = (s: unknown) => s === "Paid" || s === "Received";
 export default function FinancePage() {
   const [tab, setTab] = useState<Tab>("payments");
   const [store, setStore] = useState("ALL");
+  /* Whose settlements am I looking at?
+     PostEx and OwnEx bill on completely different terms — PostEx deducts
+     withholding per parcel, OwnEx charges a fuel surcharge at invoice level —
+     so a mixed list is rarely what anyone wants to read. */
+  const [courier, setCourier] = useState("All couriers");
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [cprRow, setCprRow] = useState<Row | null>(null);
@@ -82,7 +87,8 @@ export default function FinancePage() {
 
     if (which === "payments") {
       const { data: sm, error: se } = await supabase.rpc("hub_finance_summary", {
-        p_from: from, p_to: to, p_store: store, p_courier: null,
+        p_from: from, p_to: to, p_store: store,
+        p_courier: courier === "All couriers" ? null : courier,
       });
       if (se) setErr(se.message);
       setSummary(((sm as Summary[]) ?? [])[0] ?? null);
@@ -109,11 +115,12 @@ export default function FinancePage() {
             .order("cpr_date", { ascending: false, nullsFirst: false }).limit(1000);
     if (from) q = q.gte(dcol, from);
     if (to) q = q.lte(dcol, to);
+    if (courier !== "All couriers") q = q.eq("courier", courier);
     const { data, error } = await q;
     if (error) setErr(error.message);
     setRows((data as Row[]) ?? []);
     setLoading(false);
-  }, [preset, cf, ct, store]);
+  }, [preset, cf, ct, store, courier]);
   useEffect(() => { load(tab); }, [tab, load]);
 
   // The table is filtered in the browser only because it is explicitly a page
@@ -162,7 +169,13 @@ export default function FinancePage() {
           <h1 className="text-[20px] font-extrabold sm:text-[22px] tracking-tight text-ink dark:text-[#f4f1ea]">Finance</h1>
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">CPR reconciliation, and pending &amp; received payments. Returns moved to Logistics.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {(tab === "payments" || tab === "cpr") && (
+            <select value={courier} onChange={(e) => setCourier(e.target.value)}
+                    className="rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
+              <option>All couriers</option><option>PostEx</option><option>OwnEx</option>
+            </select>
+          )}
           <select value={store} onChange={(e) => setStore(e.target.value)}
             className="rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
             {STORES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
