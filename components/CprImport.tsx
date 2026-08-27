@@ -262,40 +262,84 @@ function parsePostExCpr(flat: string): Batch[] {
   return out;
 }
 
-/* OwnEx invoice — one per file, different shape entirely. Its per-row net can
-   never foot to its Grand Total because the fuel surcharge is charged at
-   invoice level, so COD is what gets guarded. */
-function parseOwnExInvoice(flat: string, lines: string[]): Batch[] {
-  const dm = /Delivered\s+(\d+)\s+([\d,]+\.\d{2})/i.exec(flat);
-  const ref = /INVOICE NUMBER\s*:?\s*(\S+)/i.exec(flat)?.[1] ?? "";
-  const dt  = /INVOICE DATE\s*:?\s*([\d/]+)/i.exec(flat)?.[1];
+/* ---------------------------------------------------------------------------
+   OwnEx invoice. One per file, and a different shape from a PostEx CPR.
+
+   ANCHORED ON THE TRACKING NUMBER, NOT THE ROW LAYOUT.
+   The first version matched "Sr, OrderRef, Tracking" and required OrderRef to
+   be a single word. OwnEx lets agents type anything into that field, and they
+   do — "Intzar ali", "Nosha Owais", "TS1668BILAL NASIR", "1026 Incomplete
+   Warning", "tayyaba". Every one of those rows silently vanished, which is why
+   INV-20250013 read 118 parcels against a declared 119.
+
+   The 12-digit tracking number is the only thing on the line that cannot be
+   typed wrong, so it is the only thing anchored on.
+
+   FIRST six money columns, not the last:
+       COD · Upfront · Reserved · Charges · Tax · Net Total
+   The invoice's grand-total line sits after the final parcel with no separator,
+   so slice(-6) picked up the totals on that one row and threw the COD sum out
+   by exactly that row's value on five of eight invoices.
+
+   Weights (0.5, 1, 5) and dates never match the two-decimal money pattern, so
+   they cannot be mistaken for columns.
+
+   Verified against all eight real invoices: 1,175 parcels, every count and
+   every rupee against the invoice's own declaration.
+
+   The fuel surcharge is charged at INVOICE level, not per row, so per-row net
+   can never foot to the Grand Total. COD is what gets guarded — it does. */
+function parseOwnExInvoice(flat: string): Batch[] {
+  const ref = /INVOICE NUMBER:?\s*(\S+)/i.exec(flat)?.[1] ?? "";
+  const dt  = /INVOICE DATE:?\s*([\d/]+)/i.exec(flat)?.[1];
   let date = new Date().toISOString().slice(0, 10);
   if (dt) { const x = new Date(dt); if (!isNaN(x.getTime())) date = x.toISOString().slice(0, 10); }
 
+  const declDel  = /Delivered\s+(\d+)\s+([\d,]+\.\d{2})/i.exec(flat);
+  const declShip = /Shipping Charges\s+(\d+)\s+([\d,]+\.\d{2})/i.exec(flat);
+  const fuel     = /Fuel Surcharge\s+\d+\s+([\d,]+\.\d{2})/i.exec(flat);
+  const grand    = /Grand Total\s*Rs\.?\s*(-?[\d,]+\.\d{2})/i.exec(flat);
+
   const rows: CprRow[] = [];
-  for (const ln of lines) {
-    const m = /^\s*\d+\s+(\S+)\s+(\d{9,})\s+(.*)$/.exec(ln);
-    if (!m) continue;
-    const rest = m[3];
-    const status = /\b(Delivered|Returned|Return|Cancelled|Lost)\b/i.exec(rest)?.[1];
-    if (!status) continue;
-    const ns = rest.match(/-?[\d,]+\.\d{2}/g) ?? [];
-    if (ns.length < 6) continue;
-    const [cod, , , charges, tax, net] = ns.slice(-6).map((x) => Number(x.replace(/,/g, "")));
-    rows.push({ tracking_id: m[2], status, cod: n2(cod), net: n2(Math.abs(net)),
-                fee: n2(charges), tax: n2(tax), paid_on: date });
+  const re = /(\d{12})\s+(.*?)(?=\d{12}\s|Developed by Own Express|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(flat))) {
+    const rest = m[2];
+    const st = /\b(Delivered|Returned|Return)\b/i.exec(rest);
+    if (!st) continue;
+    const ns = rest.match(/-?[\d,]+\.\d{2}/g);
+    if (!ns || ns.length < 6) continue;
+    const v = ns.slice(0, 6).map((x) => Number(x.replace(/,/g, "")));
+    rows.push({ tracking_id: m[1], status: st[1],
+                cod: n2(v[0]), fee: n2(v[3]), tax: n2(v[4]),
+                net: n2(Math.abs(v[5])), paid_on: date });
   }
-  const codSum = n2(rows.reduce((t, r) => t + r.cod, 0));
-  const declaredCount = dm ? Number(dm[1]) : undefined;
+
+  const delivered = rows.filter((r) => isDelivered(r.status));
+  const codDelivered = n2(delivered.reduce((t, r) => t + r.cod, 0));
+  const declaredCount = declShip ? Number(declShip[1]) : undefined;
+  const declaredCod = declDel ? unParen(declDel[2]) : undefined;
+
   let problem: string | undefined;
   if (!rows.length) problem = "no parcel rows could be read";
   else if (declaredCount && rows.length !== declaredCount)
     problem = `read ${rows.length} parcels, the invoice says ${declaredCount}`;
-  else if (dm && Math.abs(codSum - Number(dm[2].replace(/,/g, ""))) > 1)
-    problem = `COD totals ${codSum}, the invoice says ${dm[2]}`;
+  else if (declaredCod !== undefined && Math.abs(codDelivered - declaredCod) > 1)
+    problem = `delivered COD totals ${codDelivered}, the invoice says ${declaredCod}`;
 
-  return [{ ref, date, rows, courier: "OwnEx", declaredCount,
-            declaredNet: undefined, computedNet: codSum, problem }];
+  return [{
+    ref, date, rows, courier: "OwnEx", declaredCount,
+    declaredNet: grand ? Math.abs(unParen(grand[1])) : undefined,
+    computedNet: n2(delivered.reduce((t, r) => t + r.net, 0)),
+    problem,
+    summary: (declDel && declShip) ? {
+      gross: declaredCod ?? 0,
+      shipping: unParen(declShip[2]),
+      gst: fuel ? unParen(fuel[1]) : 0,        // OwnEx calls it a fuel surcharge
+      wh_income: 0, wh_sales: 0,
+      net: grand ? Math.abs(unParen(grand[1])) : 0,
+    } : undefined,
+  }];
 }
 
 async function readPdf(file: File): Promise<Parsed> {
@@ -305,9 +349,7 @@ async function readPdf(file: File): Promise<Parsed> {
     return { batches, source: "pdf",
              note: `${batches.filter((b) => b.ref !== "__dupes__").length} settlement${batches.filter((b) => b.ref !== "__dupes__").length === 1 ? "" : "s"} found in this file. Each is checked against its own summary before anything is written; any that disagrees is skipped and named.` };
   }
-  // OwnEx needs line structure for its fixed-column table
-  const lines = flat.split(/(?=\s\d+\s+#?\S+\s+\d{9,})/);
-  return { batches: parseOwnExInvoice(flat, lines), source: "pdf",
+  return { batches: parseOwnExInvoice(flat), source: "pdf",
            note: "The fuel surcharge on an OwnEx invoice is applied at invoice level, not per row, so per-row net will not foot to the Grand Total. The check runs on COD, which does." };
 }
 
@@ -419,33 +461,56 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
 
         {parsed && (
           <>
-            <div className="mb-3 rounded-card border border-line bg-panel p-3 text-[13px]">
-              <div className="font-semibold text-ink">
-                {all.length.toLocaleString()} settlement{all.length === 1 ? "" : "s"} read
+            {/* WHAT THIS FILE CONTAINS, BEFORE ANYTHING IS WRITTEN.
+                Every figure below is read from the file itself and checked
+                against the file's own declared totals. Nothing is written until
+                a dry run has passed, and the commit button stays dead until
+                then. Laid out as a grid so it stays readable on a phone. */}
+            <div className="mb-3 rounded-card border border-line bg-panel p-3 dark:border-white/10 dark:bg-white/[0.04]">
+              <div className="flex flex-wrap items-baseline justify-between gap-1">
+                <span className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">
+                  {all.length.toLocaleString()} settlement{all.length === 1 ? "" : "s"} read
+                </span>
+                {all.length === 1 && all[0].ref && (
+                  <span className="font-mono text-[12px] text-muted dark:text-[#a89f93]">{all[0].ref} · {all[0].date}</span>
+                )}
               </div>
-              <div className="mt-1 text-muted">
-                {totals.parcels.toLocaleString()} parcels · <b>{totals.delivered.toLocaleString()}</b> delivered
-                {totals.returned > 0 && <> · <b>{totals.returned.toLocaleString()}</b> returned</>}
-                {" · net "}{money(totals.net)}
+
+              <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+                <div>
+                  <div className="text-[15px] font-bold tabular-nums text-ink dark:text-[#f4f1ea]">{totals.parcels.toLocaleString()}</div>
+                  <div className="text-[11px] text-muted dark:text-[#a89f93]">parcels in file</div>
+                </div>
+                <div>
+                  <div className="text-[15px] font-bold tabular-nums text-emerald-700">{totals.delivered.toLocaleString()}</div>
+                  <div className="text-[11px] text-muted dark:text-[#a89f93]">delivered — will be paid</div>
+                </div>
+                <div>
+                  <div className="text-[15px] font-bold tabular-nums text-danger">{totals.returned.toLocaleString()}</div>
+                  <div className="text-[11px] text-muted dark:text-[#a89f93]">returned — charged, not paid</div>
+                </div>
+                <div>
+                  <div className="text-[15px] font-bold tabular-nums text-ink dark:text-[#f4f1ea]">{money(totals.net)}</div>
+                  <div className="text-[11px] text-muted dark:text-[#a89f93]">net the courier paid</div>
+                </div>
               </div>
-              {totals.returnCost < 0 && (
-                <div className="mt-1.5 text-[12px] text-muted">
-                  Returns cost you <b>{money(Math.abs(totals.returnCost))}</b> across these settlements —
-                  the courier bills the shipping on a delivery that failed. Those parcels stay
-                  returned and stay unpaid; only the charge is recorded.
+
+              {totals.returnCost !== 0 && (
+                <div className="mt-2 text-[12px] text-muted dark:text-[#a89f93]">
+                  Returns cost you <b className="text-danger">{money(Math.abs(totals.returnCost))}</b> —
+                  the courier bills the shipping on a delivery that failed. Those parcels
+                  keep their status and stay unpaid; only the charge is recorded.
                 </div>
               )}
               {dupeNote && (
-                <div className="mt-1.5 text-[12px] text-muted">
-                  {dupeNote} — the same receipt was included more than once when this file was
-                  merged. Counted once here, and the database would refuse the second copy anyway.
+                <div className="mt-1.5 text-[12px] text-muted dark:text-[#a89f93]">
+                  {dupeNote} — the same receipt was included more than once when this file
+                  was merged. Counted once here.
                 </div>
               )}
-              {parsed.note && <div className="mt-1.5 text-[12px] text-hint">{parsed.note}</div>}
+              {parsed.note && <div className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">{parsed.note}</div>}
             </div>
 
-            {/* A settlement whose own summary contradicts its rows is never
-                imported. Naming it is more useful than a count of failures. */}
             {bad.length > 0 && (
               <div className="mb-3 rounded-card border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-900">
                 <div className="flex items-center gap-1.5 font-semibold">
