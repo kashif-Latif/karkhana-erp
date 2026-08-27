@@ -55,6 +55,10 @@ type Batch = {
   declaredCount?: number;          // the file's own parcel count
   declaredNet?: number;            // the file's own net, computed from its summary
   computedNet?: number;            // the same figure summed from the rows
+  /* The receipt's own working, stored so the page can show the calculation the
+     way the courier does instead of one unexplained number. */
+  summary?: { gross: number; shipping: number; gst: number;
+              wh_income: number; wh_sales: number; net: number };
   courier: "PostEx" | "OwnEx";
   problem?: string;                // set when the file contradicts itself
 };
@@ -246,7 +250,12 @@ function parsePostExCpr(flat: string): Batch[] {
 
     out.push({ ref, date: `${d[3]}-${d[2]}-${d[1]}`, rows, courier: "PostEx",
                declaredCount: ship ? Number(ship[1]) : undefined,
-               declaredNet, computedNet, problem });
+               declaredNet, computedNet, problem,
+               summary: (ship && gst && whi && whs && tot) ? {
+                 gross: unParen(tot[1]), shipping: unParen(ship[2]), gst: unParen(gst[1]),
+                 wh_income: unParen(whi[1]), wh_sales: unParen(whs[1]),
+                 net: declaredNet ?? 0,
+               } : undefined });
   }
   if (duplicates) out.push({ ref: "__dupes__", date: "", rows: [], courier: "PostEx",
                              problem: `${duplicates} duplicate receipt${duplicates === 1 ? "" : "s"} in this file, ignored` });
@@ -374,6 +383,10 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
         p_declared_total: many ? null : (dTotal ? Number(dTotal) : null),
         p_rows: b.rows,
         p_dry_run: dry,
+        // The receipt's own figures. Without these the stored amount is only
+        // the subset we could match, which is what made our list disagree with
+        // the portal on CPR-V5DYF677330 (11,619.34 vs 8,267).
+        p_summary: b.summary ?? null,
       });
       if (error) { acc.push({ ref: b.ref, ok: false, report: { error: error.message } }); }
       else acc.push({ ref: b.ref, ok: (data as { ok?: boolean })?.ok === true, report: data as Record<string, unknown> });

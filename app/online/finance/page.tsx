@@ -7,6 +7,7 @@ import RangeBar from "@/components/RangeBar";
 import { rangeDates } from "@/lib/dateRange";
 import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
 import CprImport from "@/components/CprImport";
+import CprDetail from "@/components/CprDetail";
 
 type Tab = "payments" | "cpr" | "returns";
 type Row = Record<string, unknown>;
@@ -54,6 +55,7 @@ export default function FinancePage() {
   const [store, setStore] = useState("ALL");
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [cprRow, setCprRow] = useState<Row | null>(null);
   const [byCourier, setByCourier] = useState<CourierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -103,7 +105,7 @@ export default function FinancePage() {
             .order("finance_date", { ascending: false, nullsFirst: false })
             .limit(1000)
         : supabase.from("online_cpr")
-            .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status")
+            .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status,gross_total,shipping_charges,gst,wh_income_tax,wh_sales_tax,net_total,delivered_count,returned_count,returns_cost,matched_count,matched_total,unmatched")
             .order("cpr_date", { ascending: false, nullsFirst: false }).limit(1000);
     if (from) q = q.gte(dcol, from);
     if (to) q = q.lte(dcol, to);
@@ -201,6 +203,8 @@ export default function FinancePage() {
 
       {/* Who owes what. PostEx settles through an API; OwnEx has none, so its
           line is the one that can only ever move by import or by hand. */}
+      {cprRow && <CprDetail row={cprRow} onClose={() => setCprRow(null)} />}
+
       {tab === "payments" && byCourier.length > 0 && !loading && (
         <div className="mt-3 flex flex-wrap gap-2">
           {byCourier.map((c) => (
@@ -225,20 +229,24 @@ export default function FinancePage() {
                 </>}
                 {tab === "cpr" && <>
                   <th className="px-4 py-3 font-semibold">CPR #</th><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 font-semibold">Store</th>
-                  <th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 text-right font-semibold">Amount</th><th className="px-4 py-3 text-right font-semibold">Orders</th><th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold">Date</th>
+                  <th className="px-4 py-3 text-right font-semibold">Net paid</th>
+                  <th className="px-4 py-3 text-right font-semibold">Delivered</th>
+                  <th className="px-4 py-3 text-right font-semibold">Returned</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
                 </>}
               </tr>
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={7} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
+                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
               ) : err ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
+                <tr><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
               ) : rowsF.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
+                <tr><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
                 rowsF.map((r, i) => (
-                  <tr key={i} onClick={() => setEditRow(r)} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
+                  <tr key={i} onClick={() => (tab === "cpr" ? setCprRow(r) : setEditRow(r))} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.store_code ?? "—")}</td>
@@ -253,8 +261,9 @@ export default function FinancePage() {
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.courier ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.store_code ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.cpr_date ?? "—")}</td>
-                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{money(r.amount)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{String(r.orders_count ?? 0)}</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{money(r.net_total ?? r.amount)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{String(r.delivered_count ?? r.orders_count ?? 0)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted dark:text-[#a89f93]">{String(r.returned_count ?? 0)}</td>
                       <td className="px-4 py-3">{badge(String(r.status ?? "Pending"), r.status === "Paid" || r.status === "Cleared" ? "ok" : "warn")}</td>
                     </>}
                   </tr>
@@ -266,7 +275,7 @@ export default function FinancePage() {
       </div>
 
       {!loading && !err && rowsF.length > 0 && (
-        <p className="mt-3 text-center text-[12px] text-hint dark:text-[#8a8175]">Tip: click any row to {tab === "payments" ? "mark it paid" : tab === "cpr" ? "update the batch" : "mark it received"}.</p>
+        <p className="mt-3 text-center text-[12px] text-hint dark:text-[#8a8175]">Tip: click any row to {tab === "payments" ? "mark it paid" : tab === "cpr" ? "see how the courier calculated it" : "mark it received"}.</p>
       )}
 
       <EditFinanceRow tab={tab} row={editRow} onClose={() => setEditRow(null)} onDone={() => load(tab)} />
