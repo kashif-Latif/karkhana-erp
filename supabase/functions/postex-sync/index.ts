@@ -298,9 +298,13 @@ Deno.serve(async (req) => {
         reasonError = String(e instanceof Error ? e.message : e).slice(0, 200);
       }
 
-      await db.from("online_courier_events").insert(
-        rows.slice(0, 500).map((r) => ({ courier: "PostEx", tracking_id: r.tracking_id, raw_status: r.raw_status, payload: { source: "pull" } }))
-      );
+      /* NO EVENT LOG FROM THE PULL.
+         This used to insert up to 500 rows on every run — 96 runs a day — for
+         parcels whose status is already stored on the parcel itself, with
+         updated_at to say when. It recorded nothing that could not be read from
+         online_logistics, and it was one of the two things filling the free
+         tier. The tracking paths below still log, because those fire on an
+         actual status change. */
       return json({ ok: true, action, from, to, called_via: res.via,
                     fetched: rows.length, merged,
                     courier_reasons_captured: reasoned,

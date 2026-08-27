@@ -254,14 +254,31 @@ export default function FinancePage() {
 
       {tab === "payments" && byCourier.length > 0 && !loading && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {byCourier.map((c) => (
-            <div key={c.courier} className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-[12px] text-muted dark:border-white/10 dark:bg-white/[0.05] dark:text-[#a89f93]">
-              <span className="font-semibold text-ink dark:text-[#f4f1ea]">{c.courier}</span>
-              {" · "}{money(c.pending_value)} pending
-              {" · "}{Number(c.pending_count).toLocaleString()} parcels
-              {Number(c.oldest_pending_days) > 0 && <> · oldest {Number(c.oldest_pending_days)}d</>}
-            </div>
-          ))}
+          {/* Each chip shows the figure for whichever CARD is selected. Showing
+              "pending" while the Received card was active answered a question
+              nobody had asked. Clicking a chip also sets the courier filter, so
+              the number and the list underneath always agree. */}
+          {byCourier.map((c) => {
+            const on = courier === c.courier;
+            const shown =
+              pick === "received" ? { v: money(c.received_gross), w: "received" }
+              : pick === "charges" ? { v: money(c.courier_fees), w: "in charges" }
+              : { v: money(c.pending_value), w: "pending" };
+            return (
+              <button key={c.courier} type="button"
+                onClick={() => setCourier(on ? "All couriers" : c.courier)}
+                className={`rounded-full border px-3.5 py-1.5 text-[12px] transition ${
+                  on ? "border-ink bg-ink text-white dark:border-white dark:bg-white dark:text-[#141414]"
+                     : "border-line bg-surface text-muted hover:bg-panel dark:border-white/10 dark:bg-white/[0.05] dark:text-[#a89f93]"}`}>
+                <span className={`font-semibold ${on ? "" : "text-ink dark:text-[#f4f1ea]"}`}>{c.courier}</span>
+                {" · "}{shown.v} {shown.w}
+                {pick !== "received" && pick !== "charges" && <>
+                  {" · "}{Number(c.pending_count).toLocaleString()} parcels
+                  {Number(c.oldest_pending_days) > 0 && <> · oldest {Number(c.oldest_pending_days)}d</>}
+                </>}
+              </button>
+            );
+          })}
         </div>
       )}
 

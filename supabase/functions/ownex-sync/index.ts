@@ -447,13 +447,23 @@ Deno.serve(async (req) => {
         if (!certain) flagged++;
         if (attempt) attempts++;
         nowShowing[status] = (nowShowing[status] ?? 0) + 1;
-        events.push({ tracking_id: t.trackingId, courier: "OwnEx", raw_status: t.status ?? t.code ?? "" });
         if (dryRun) continue;
 
         // unchanged status, direction already recorded, no new reason — nothing to write
         if (priorStatus.get(t.trackingId) === (t.status ?? null) && !legStart && !reasonIsNew) {
           unchanged++; continue;
         }
+
+        /* THE EVENT IS LOGGED HERE, NOT ABOVE.
+           It used to be pushed before this check, so a parcel that had not moved
+           still wrote an event on every poll — every five minutes, forever. That
+           is 63% of online_courier_events (44,137 of 70,325 rows) saying nothing
+           that was not already known, and it is the reason the database grew
+           10-20 MB a day against an expected 1-2.
+
+           An event log is a record of CHANGE. A parcel sitting in transit is not
+           an event, it is the absence of one. */
+        events.push({ tracking_id: t.trackingId, courier: "OwnEx", raw_status: t.status ?? t.code ?? "" });
 
         const patch: Record<string, unknown> = {
           delivery_status: status,
