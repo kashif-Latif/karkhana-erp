@@ -187,6 +187,19 @@ const unParen = (s?: string) => {
 function parsePostExCpr(flat: string): Batch[] {
   const parts = flat.split(/(?=CPR Number CPR-)/).filter((p) => /^CPR Number CPR-/.test(p));
   const out: Batch[] = [];
+  /* THE SAME CPR CAN APPEAR TWICE IN ONE FILE.
+     A merged export of a year's settlements is assembled by hand, and two of
+     the 95 blocks in the real one were the same receipt included twice.
+
+     The unique index on (courier, cpr_number) already stops the DATABASE
+     double-counting. But the summary on screen is computed here, and an earlier
+     version added both copies — reporting 8,724 parcels and Rs 11,646,120.01
+     when the truth was 8,547 and Rs 11,326,378.51. Correct import, wrong number
+     in front of the person deciding whether to trust it.
+
+     First occurrence wins; the rest are counted and named. */
+  const seen = new Set<string>();
+  let duplicates = 0;
 
   for (const p of parts) {
     const ref  = /CPR Number (CPR-[A-Z0-9]+)/.exec(p)?.[1];
@@ -197,6 +210,8 @@ function parsePostExCpr(flat: string): Batch[] {
     const whs  = /WH Sales Tax \(2%\) \(([\d.,]+)\)/.exec(p);
     const tot  = /Total ([\d,]+\.\d{2})/.exec(p);
     if (!ref || !d) continue;
+    if (seen.has(ref)) { duplicates++; continue; }
+    seen.add(ref);
 
     const rows: CprRow[] = [];
     const re = /(\d{14})\s+(.*?)(?=\d{14}\s|Developed by PostEx|$)/g;
@@ -233,6 +248,8 @@ function parsePostExCpr(flat: string): Batch[] {
                declaredCount: ship ? Number(ship[1]) : undefined,
                declaredNet, computedNet, problem });
   }
+  if (duplicates) out.push({ ref: "__dupes__", date: "", rows: [], courier: "PostEx",
+                             problem: `${duplicates} duplicate receipt${duplicates === 1 ? "" : "s"} in this file, ignored` });
   return out;
 }
 
@@ -277,7 +294,7 @@ async function readPdf(file: File): Promise<Parsed> {
   if (/CPR Number CPR-/.test(flat)) {
     const batches = parsePostExCpr(flat);
     return { batches, source: "pdf",
-             note: `${batches.length} settlement${batches.length === 1 ? "" : "s"} found in this file. Each is checked against its own summary before anything is written; any that disagrees is skipped and named.` };
+             note: `${batches.filter((b) => b.ref !== "__dupes__").length} settlement${batches.filter((b) => b.ref !== "__dupes__").length === 1 ? "" : "s"} found in this file. Each is checked against its own summary before anything is written; any that disagrees is skipped and named.` };
   }
   // OwnEx needs line structure for its fixed-column table
   const lines = flat.split(/(?=\s\d+\s+#?\S+\s+\d{9,})/);
@@ -304,9 +321,11 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
   const [checked, setChecked] = useState(false);
   const [committed, setCommitted] = useState(false);
 
-  const good = (parsed?.batches ?? []).filter((b) => !b.problem);
-  const bad = (parsed?.batches ?? []).filter((b) => b.problem);
-  const many = (parsed?.batches.length ?? 0) > 1;
+  const all = (parsed?.batches ?? []).filter((b) => b.ref !== "__dupes__");
+  const dupeNote = (parsed?.batches ?? []).find((b) => b.ref === "__dupes__")?.problem;
+  const good = all.filter((b) => !b.problem);
+  const bad = all.filter((b) => b.problem);
+  const many = all.length > 1;
   const totals = good.reduce((a, b) => ({
     parcels: a.parcels + b.rows.length,
     delivered: a.delivered + b.rows.filter((r) => isDelivered(r.status)).length,
@@ -319,12 +338,13 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
     setErr(""); setResults([]); setChecked(false); setCommitted(false); setBusy(true); setProgress("Reading…");
     try {
       const p = /\.pdf$/i.test(file.name) ? await readPdf(file) : await readSheet(file);
-      if (!p.batches.length) throw new Error("No settlement could be read from this file.");
+      if (!p.batches.filter((x) => x.ref !== "__dupes__").length) throw new Error("No settlement could be read from this file.");
       setParsed(p);
-      setCourier(p.batches[0].courier);
-      if (p.batches.length === 1) {
-        setRef(p.batches[0].ref); setDate(p.batches[0].date);
-        if (p.batches[0].declaredCount) setDCount(String(p.batches[0].declaredCount));
+      setCourier(p.batches.find((x) => x.ref !== "__dupes__")!.courier);
+      const real = p.batches.filter((x) => x.ref !== "__dupes__");
+      if (real.length === 1) {
+        setRef(real[0].ref); setDate(real[0].date);
+        if (real[0].declaredCount) setDCount(String(real[0].declaredCount));
       }
       setOpen(true);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setOpen(true); }
@@ -339,7 +359,7 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
     if (!parsed || !supabase) return;
     setBusy(true); setErr(""); setResults([]);
     const acc: Result[] = [];
-    const list = many ? good : parsed.batches;
+    const list = many ? good : all;
 
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
@@ -388,7 +408,7 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
           <>
             <div className="mb-3 rounded-card border border-line bg-panel p-3 text-[13px]">
               <div className="font-semibold text-ink">
-                {parsed.batches.length.toLocaleString()} settlement{parsed.batches.length === 1 ? "" : "s"} read
+                {all.length.toLocaleString()} settlement{all.length === 1 ? "" : "s"} read
               </div>
               <div className="mt-1 text-muted">
                 {totals.parcels.toLocaleString()} parcels · <b>{totals.delivered.toLocaleString()}</b> delivered
@@ -400,6 +420,12 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
                   Returns cost you <b>{money(Math.abs(totals.returnCost))}</b> across these settlements —
                   the courier bills the shipping on a delivery that failed. Those parcels stay
                   returned and stay unpaid; only the charge is recorded.
+                </div>
+              )}
+              {dupeNote && (
+                <div className="mt-1.5 text-[12px] text-muted">
+                  {dupeNote} — the same receipt was included more than once when this file was
+                  merged. Counted once here, and the database would refuse the second copy anyway.
                 </div>
               )}
               {parsed.note && <div className="mt-1.5 text-[12px] text-hint">{parsed.note}</div>}
