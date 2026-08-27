@@ -37,6 +37,36 @@ function statusClass(s: string) {
   }
 }
 
+/* PAID ONLINE vs CASH ON DELIVERY.
+ *
+ *   Shopify's financial_status is already synced into online_orders by both the
+ *   webhook and the hourly sync — the page simply never asked for it.
+ *
+ *   PAID means the customer paid on the website before the parcel moved. That
+ *   money is already yours; it is not a COD receivable and never appears in a
+ *   courier settlement.
+ *
+ *   PENDING is the normal state of a COD order and stays that way until the
+ *   courier collects and settles. It is not a problem, so it is shown quietly
+ *   rather than in a warning colour.
+ *
+ *   REFUNDED / VOIDED matter because the order still exists and still shows a
+ *   value, but the money went back. Those are called out.
+ */
+function payLabel(v: unknown) {
+  const s = String(v ?? "").toUpperCase();
+  const chip = (text: string, cls: string) => (
+    <span className={`inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${cls}`}>{text}</span>
+  );
+  if (s === "PAID")                      return chip("Paid online", "bg-success-soft text-emerald-800");
+  if (s === "PARTIALLY_PAID")            return chip("Part paid",   "bg-amber-soft text-amber-900");
+  if (s === "REFUNDED")                  return chip("Refunded",    "bg-salmon-soft text-red-800");
+  if (s === "PARTIALLY_REFUNDED")        return chip("Part refund", "bg-salmon-soft text-red-800");
+  if (s === "VOIDED")                    return chip("Voided",      "bg-salmon-soft text-red-800");
+  if (s === "PENDING" || s === "")       return <span className="text-[12px] text-muted dark:text-[#a89f93]">COD</span>;
+  return <span className="text-[12px] text-muted dark:text-[#a89f93]">{s.replace(/_/g, " ").toLowerCase()}</span>;
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +93,7 @@ export default function OrdersPage() {
     setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
     let q2 = supabase.from("online_orders")
-      .select("id,order_number,store_code,order_date,customer_name,phone,city,amount,status")
+      .select("id,order_number,store_code,order_date,customer_name,phone,city,amount,status,financial_status")
       // Newest first, and genuinely so. order_date alone is a DATE, so a day's
       // worth of orders all tie and come back in whatever order the planner
       // felt like — which is why the newest order was not reliably at the top.
@@ -189,17 +219,17 @@ export default function OrdersPage() {
           <table className="w-full min-w-[640px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]">
-                {view === "list" ? <><th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Customer</th><th className="px-4 py-3 font-semibold">City</th><th className="px-4 py-3 text-right font-semibold">Amount</th><th className="px-4 py-3 font-semibold">Status</th></>
+                {view === "list" ? <><th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Customer</th><th className="px-4 py-3 font-semibold">City</th><th className="px-4 py-3 text-right font-semibold">Amount</th><th className="px-4 py-3 font-semibold">Payment</th><th className="px-4 py-3 font-semibold">Status</th></>
                 : <><th className="px-4 py-3 font-semibold">{view === "cities" ? "City" : view === "status" ? "Status" : "Store"}</th><th className="px-4 py-3 text-right font-semibold">Orders</th><th className="px-4 py-3 text-right font-semibold">Value</th><th className="hidden px-4 py-3 font-semibold sm:table-cell">Share</th></>}
               </tr>
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={7} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
+                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={view === "list" ? 8 : 4} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
               ) : err ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load orders: {err}</td></tr>
+                <tr><td colSpan={view === "list" ? 8 : 4} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load orders: {err}</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">{orders.length === 0 ? "No orders in this period — fills once the Shopify sync is live." : "Nothing matches these filters."}</td></tr>
+                <tr><td colSpan={view === "list" ? 8 : 4} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">{orders.length === 0 ? "No orders in this period — fills once the Shopify sync is live." : "Nothing matches these filters."}</td></tr>
               ) : view === "list" ? (
                 filtered.slice(0, 500).map((o, i) => (
                   <tr key={i} className="text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
@@ -209,6 +239,7 @@ export default function OrdersPage() {
                     <td className="px-4 py-3">{String(o.customer_name ?? "—")}</td>
                     <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(o.city ?? "—")}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">{rs(num(o.amount))}</td>
+                    <td className="px-4 py-3">{payLabel(o.financial_status)}</td>
                     <td className="px-4 py-3"><span className={`inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${statusClass(String(o.status))}`}>{String(o.status ?? "—")}</span></td>
                   </tr>
                 ))

@@ -249,13 +249,9 @@ export default function ReturnsPage() {
             {!loading && filtered.map((r) => {
               const ret = r as ReturnRow;
               const up = r as UnpaidRow;
-              // Priority lives in whyItCameBack(): agent note, then the
-              // courier's real finding (courier_reason_text), then Shopify's
-              // fixed list, then tags. The courier's STATUS wording stays last —
-              // "Verifying Reason" is not a reason.
-              const r2 = isReturns ? whyItCameBack(ret) : { text: "", from: "" };
-              const reason = r2.text;
-              const reasonFrom = r2.from;
+              // EVERY reason, not one winner. Agent, courier and customer often
+              // disagree, and the disagreement is usually the useful part.
+              const reasons = isReturns ? allReasons(ret) : [];
               return (
                 <tr key={r.tracking_id} className="transition hover:bg-panel/60 dark:hover:bg-white/[0.04]">
                   {isReturns && (
@@ -278,16 +274,19 @@ export default function ReturnsPage() {
                         <td className="px-4 py-3">
                           <span className="inline-block rounded-full bg-panel px-2.5 py-1 text-[11.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{ret.stage ?? "—"}</span>
                         </td>
-                        <td className={`px-4 py-3 ${reasonFrom === "agent" || reasonFrom === "courier" || reasonFrom === "tag" ? "text-ink dark:text-[#f4f1ea]" : "text-hint dark:text-[#8a8175]"}`}>
-                          {reason}
-                          {reasonFrom && <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{reasonFrom}</span>}
-                          {(ret.order_tags ?? []).length > 0 && (
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {ret.order_tags!.slice(0, 3).map((tg) => (
-                                <span key={tg} className="rounded-full bg-panel px-2 py-0.5 text-[10.5px] font-semibold text-muted dark:bg-white/[0.08] dark:text-[#a89f93]">{tg}</span>
-                              ))}
-                            </div>
-                          )}
+                        <td className="px-4 py-3 align-top">
+                          {reasons.length === 0
+                            ? <span className="text-hint dark:text-[#8a8175]">no reason recorded</span>
+                            : (
+                              <div className="space-y-0.5">
+                                {reasons.map((x, k) => (
+                                  <div key={k} className="flex flex-wrap items-baseline gap-1.5">
+                                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-hint dark:text-[#8a8175]">{x.from}</span>
+                                    <span className={`text-[12.5px] ${x.tone}`}>{x.text}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                         </td>
                       </>
                     : <>
@@ -326,34 +325,53 @@ const PROCESS_TAG = /confirmed|notified|fulfill/i;
    an explanation, and showing it as one is worse than showing nothing. */
 const AUTOMATED_NOTE = /has been shipped|tracking\s*\d|dispatched via|courier assigned/i;
 
-/** Why did this parcel come back? Best available answer, and where it came from.
+/** Every reason this parcel has, not just the winning one.
  *
- *  THE ORDER, AND WHY IT IS THIS ORDER
- *    1. agent note      a sentence a human typed — "stock not available"
- *    2. courier reason  the courier's own finding — "UNTRACEABLE ADDRESS"
- *    3. Shopify reason  a fixed dropdown value, context rather than cause
- *    4. tags            how it was handled, not why it failed
- *    5. customer note   occasionally useful, usually empty
- *    6. courier STATUS  "Verifying Reason" — the absence of a reason
+ *  THE OLD BEHAVIOUR PICKED ONE AND THREW THE REST AWAY.
+ *  That was wrong for this business. A return usually has more than one side to
+ *  it and they do not always agree:
  *
- *  Rungs 2 and 6 are different facts and the distinction is the whole point of
- *  migration 0076. "Verifying Reason" is the courier saying it has not decided
- *  yet; "UNTRACEABLE ADDRESS" is what it decided. The second used to be
- *  discarded by the syncs, which is why tags — noise — were doing the work of an
- *  explanation. Now that the real reason arrives, it outranks them. */
-function whyItCameBack(r: ReturnRow): { text: string; from: string } {
-  if (r.agent_note) return { text: r.agent_note, from: "agent" };
-  if (r.courier_reason_text) return { text: r.courier_reason_text, from: "courier" };
-  if (r.shopify_reason) return { text: r.shopify_reason, from: "Shopify" };
+ *      agent    "customer refused, wants replacement"
+ *      courier  "REFUSED TO RECEIVE"
+ *      customer "size was too small"
+ *
+ *  Three different people saying three different things, and the disagreement
+ *  is often the useful part — a courier saying REFUSED against a customer
+ *  saying they never got a call is a courier problem, not a customer one.
+ *  Collapsing that into one line hid it.
+ *
+ *  ORDER OF DISPLAY, most authoritative first:
+ *      1. agent      a sentence one of your people typed
+ *      2. courier    PostEx or OwnEx's own finding
+ *      3. Shopify    the fixed cancel-reason dropdown
+ *      4. customer   the order note, when a person wrote it
+ *      5. tags       how it was handled — kept last, it is process not cause
+ *
+ *  The courier's STATUS ("Verifying Reason") is still excluded. That is the
+ *  courier saying it has not decided; it is the absence of a reason and putting
+ *  it here would pad the column with noise. It only appears when there is
+ *  genuinely nothing else. */
+type Reason = { from: string; text: string; tone: string };
+
+function allReasons(r: ReturnRow): Reason[] {
+  const out: Reason[] = [];
+  if (r.agent_note?.trim())
+    out.push({ from: "agent", text: r.agent_note.trim(), tone: "text-ink dark:text-[#f4f1ea]" });
+  if (r.courier_reason_text?.trim())
+    out.push({ from: "courier", text: r.courier_reason_text.trim(), tone: "text-ink dark:text-[#f4f1ea]" });
+  if (r.shopify_reason?.trim())
+    out.push({ from: "Shopify", text: r.shopify_reason.trim(), tone: "text-muted dark:text-[#a89f93]" });
+  if (r.shopify_note?.trim() && !AUTOMATED_NOTE.test(r.shopify_note))
+    out.push({ from: "customer", text: r.shopify_note.trim(), tone: "text-muted dark:text-[#a89f93]" });
 
   const tags = (r.order_tags ?? []).filter((t) => REASON_TAG.test(t) && !PROCESS_TAG.test(t));
-  if (tags.length) return { text: tags.join(" · "), from: "tag" };
+  if (tags.length)
+    out.push({ from: "tag", text: tags.join(" · "), tone: "text-muted dark:text-[#a89f93]" });
 
-  if (r.shopify_note && !AUTOMATED_NOTE.test(r.shopify_note)) {
-    return { text: r.shopify_note, from: "customer" };
-  }
-  if (r.courier_reason) return { text: r.courier_reason, from: "courier status" };
-  return { text: "no reason recorded", from: "" };
+  // Only when nothing real exists at all.
+  if (!out.length && r.courier_reason?.trim())
+    out.push({ from: "courier status", text: r.courier_reason.trim(), tone: "text-hint dark:text-[#8a8175]" });
+  return out;
 }
 
 /* Confirming receipt is a deliberate act with a record attached: who took it in,
