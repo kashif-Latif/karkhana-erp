@@ -79,7 +79,14 @@ export default function LogisticsPage() {
   const reqId = useRef(0);
   const lastLoadAt = useRef(0);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  /* `figuresOnly` is what a live update uses.
+     The cards, the chart and the courier split are database aggregates — small,
+     cheap, and the numbers people actually watch. The 1,000-row table is the
+     expensive part of this page and the part that changes least: a courier sync
+     moves a handful of statuses, not the list.
+     So a realtime refresh brings the FIGURES up to date and leaves the list
+     alone; Refresh, or any filter change, pulls the rows. Live numbers, cheap. */
+  const load = useCallback(async (opts?: { silent?: boolean; figuresOnly?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     const myReq = ++reqId.current;
     if (!opts?.silent) setLoading(true);
@@ -87,7 +94,12 @@ export default function LogisticsPage() {
     const [from, to] = rangeDates(preset, cf, ct);
     let q2 = supabase.from("online_logistics")
       .select("id,order_number,store_code,courier,tracking_id,dispatch_date,delivery_status,delivery_date,cod_amount,cpr_net_amount,courier_fee,payment_status,rts,rts_reason")
-      .order("dispatch_date", { ascending: false, nullsFirst: false }).limit(5000);
+      .order("dispatch_date", { ascending: false, nullsFirst: false })
+      /* 1000, not 5000. PostgREST caps a response at 1000 rows however large
+         the limit, so asking for 5000 fetched 1000 and quietly implied the page
+         held five times more than it did. Every TOTAL on this page comes from
+         hub_logistics_summary and is unaffected; this is the visible list. */
+      .limit(1000);
     if (from) q2 = q2.gte("dispatch_date", from);
     if (to) q2 = q2.lte("dispatch_date", to);
     if (store !== "ALL") q2 = q2.eq("store_code", store);
@@ -102,7 +114,7 @@ export default function LogisticsPage() {
       p_courier: courier === "All couriers" ? null : courier,
     };
     const [rowsRes, sumRes, trendRes, courierRes, statusRes] = await Promise.all([
-      q2,
+      opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : q2,
       supabase.rpc("hub_logistics_summary", args),
       supabase.rpc("hub_logistics_trend", { ...args, p_days: 14 }),
       supabase.rpc("hub_logistics_by_courier", { p_from: args.p_from, p_to: args.p_to, p_store: args.p_store }),
@@ -113,7 +125,8 @@ export default function LogisticsPage() {
     if (myReq !== reqId.current) return;
 
     if (rowsRes.error) setErr(rowsRes.error.message);
-    setRows((rowsRes.data as Logi[]) ?? []);
+    // figuresOnly leaves the existing table in place rather than blanking it
+    if (!opts?.figuresOnly) setRows((rowsRes.data as Logi[]) ?? []);
     setSummary((sumRes.data as Summary[])?.[0] ?? null);
     setTrendRows((trendRes.data as { day: string; delivered: number }[]) ?? []);
     // when one courier is selected the comparison is meaningless — show that
@@ -129,9 +142,11 @@ export default function LogisticsPage() {
   /* Live. The couriers push (PostEx webhook) or are polled (OwnEx), both of
      which write straight to online_logistics — this repaints the page when they
      do, so nobody has to press Refresh to find out a parcel was delivered. */
+  /* online_orders was in this list and is never read on this page, so every
+     Shopify webhook triggered a full logistics refetch for nothing. */
   const { live, lastChange } = useLiveTables(
-    ["online_logistics", "online_orders"],
-    useCallback(() => load({ silent: true }), [load]),
+    ["online_logistics"],
+    useCallback(() => load({ silent: true, figuresOnly: true }), [load]),
   );
 
   /* Any click on a control in this section refreshes the data — but only if

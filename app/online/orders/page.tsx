@@ -122,7 +122,8 @@ export default function OrdersPage() {
   /* Shopify pushes order, payment and fulfilment changes to shopify-webhook,
      which writes to online_orders. This is what turns that write into something
      visible without a manual refresh. */
-  useLiveTables(["online_orders", "online_logistics"], useCallback(() => load({ silent: true }), [load]));
+  /* Only online_orders: a courier status change does not alter this list. */
+  useLiveTables(["online_orders"], useCallback(() => load({ silent: true }), [load]));
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
