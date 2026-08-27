@@ -310,9 +310,19 @@ function parseOwnExInvoice(flat: string): Batch[] {
     const ns = rest.match(/-?[\d,]+\.\d{2}/g);
     if (!ns || ns.length < 6) continue;
     const v = ns.slice(0, 6).map((x) => Number(x.replace(/,/g, "")));
+    /* SIGN MATTERS, AND abs() DESTROYED IT.
+       OwnEx writes Net Total from its own point of view:
+           delivered   -3,349.00   negative — the courier owes YOU
+           returned      +150.00   positive — YOU owe the courier the shipping
+       Taking the absolute value flattened both into a positive receipt, so 153
+       return charges were stored as if they were money received, and 0084's
+       safety rule (only touch rows whose net is <= 0) skipped every one.
+       Delivered stays positive; a return is stored as the cost it is. */
+    const delivered = isDelivered(st[1]);
     rows.push({ tracking_id: m[1], status: st[1],
                 cod: n2(v[0]), fee: n2(v[3]), tax: n2(v[4]),
-                net: n2(Math.abs(v[5])), paid_on: date });
+                net: delivered ? n2(Math.abs(v[5])) : -n2(Math.abs(v[5])),
+                paid_on: date });
   }
 
   const delivered = rows.filter((r) => isDelivered(r.status));
