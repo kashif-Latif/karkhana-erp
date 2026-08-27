@@ -377,6 +377,17 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
   const good = all.filter((b) => !b.problem);
   const bad = all.filter((b) => b.problem);
   const many = all.length > 1;
+  /* DOES THE FILE DECLARE ITS OWN FIGURES?
+     This, not the number of settlements, is what decides whether anything has
+     to be typed. An OwnEx invoice carries "Delivered 55", its own COD and its
+     own Grand Total — every one of those is checked against the parse before
+     the batch is even offered, so demanding the same numbers by hand is asking
+     the person to retype what the file already proved.
+
+     The earlier version keyed this off `many`, so a merged PostEx PDF skipped
+     the form and a single OwnEx invoice demanded it. Only the PostEx CSV — the
+     one export with no totals of its own — actually needs typing. */
+  const selfDeclaring = all.length > 0 && all.every((b) => b.declaredCount != null);
   const totals = good.reduce((a, b) => ({
     parcels: a.parcels + b.rows.length,
     delivered: a.delivered + b.rows.filter((r) => isDelivered(r.status)).length,
@@ -422,7 +433,12 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
         // A CPR carries its own count. Only the CSV, which carries none, falls
         // back to what was typed from the portal.
         p_declared_count: b.declaredCount ?? (dCount ? Number(dCount) : null),
-        p_declared_total: many ? null : (dTotal ? Number(dTotal) : null),
+        /* Only sent when the file declares nothing. A courier's own COD figure
+           counts DELIVERED parcels, while the rows include returns that also
+           carry a COD, so the two are not comparable — the delivered-COD check
+           happens in the parser instead, and a batch that fails it never gets
+           this far. */
+        p_declared_total: b.declaredCount != null ? null : (dTotal ? Number(dTotal) : null),
         p_rows: b.rows,
         p_dry_run: dry,
         // The receipt's own figures. Without these the stored amount is only
@@ -441,7 +457,7 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
 
   const passed = results.length > 0 && results.every((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
-  const guardReady = many || (!!ref.trim() && !!dCount && !!dTotal);
+  const guardReady = selfDeclaring || (!!ref.trim() && !!dCount && !!dTotal);
 
   return (
     <>
@@ -523,7 +539,7 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
               </div>
             )}
 
-            {!many && (
+            {!many && !selfDeclaring && (
               <div className="grid grid-cols-2 gap-2 text-[13px]">
                 <label className="block"><span className="text-muted">Courier</span>
                   <select value={courier} onChange={(e) => setCourier(e.target.value as "PostEx" | "OwnEx")}
@@ -546,11 +562,19 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
               </div>
             )}
 
-            {!many && parsed.source === "csv" && (
+            {!selfDeclaring && parsed.source === "csv" && (
               <div className="mt-2 flex gap-2 rounded-card border border-amber-300 bg-amber-50 p-2.5 text-[12px] text-amber-900">
                 <ShieldCheck size={15} className="mt-0.5 shrink-0" />
                 <span>Type these from the PostEx portal, not from the file. Copied from what was
                 just parsed, the check compares the parse to itself and cannot fail.</span>
+              </div>
+            )}
+
+            {selfDeclaring && !many && (
+              <div className="rounded-card border border-line p-2.5 text-[12px] text-muted dark:border-white/10 dark:text-[#a89f93]">
+                This file declares its own totals — {all[0].declaredCount} parcels
+                {all[0].summary ? <> and {money(all[0].summary.gross)} delivered COD</> : null} — and the
+                parse was checked against them before anything was offered. Nothing to type.
               </div>
             )}
 
@@ -591,6 +615,15 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
               <button className={btnPrimary} disabled={busy || !checked || committed} onClick={() => run(false)}>
                 {committed ? <><CheckCircle2 size={15} /> Imported</> : "Import for real"}
               </button>
+            </div>
+
+            {/* A disabled button with no explanation is just a wall. */}
+            <div className="mt-1.5 text-right text-[11.5px] text-hint dark:text-[#8a8175]">
+              {committed ? "Imported. Re-importing the same file is safe — it updates rather than duplicates."
+               : !guardReady ? "Fill in the count and COD total from the courier's portal to run the check."
+               : !checked ? <>Run <b>Check only</b> first — nothing can be written until it passes.</>
+               : results.length && failed.length ? `${failed.length} settlement${failed.length === 1 ? "" : "s"} refused; only the ones that passed will be written.`
+               : "Checked. Safe to import."}
             </div>
           </>
         )}
