@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock } from "lucide-react";
+import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock, Truck } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import ReturnsPanel from "@/components/ReturnsPanel";
 import RangeBar from "@/components/RangeBar";
@@ -61,6 +61,10 @@ export default function FinancePage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [cprRow, setCprRow] = useState<Row | null>(null);
+  /* Which card is driving the list. Clicking a figure should show you the rows
+     behind it — a number you cannot open is a number you have to take on
+     trust, and this page exists precisely because those were wrong. */
+  const [pick, setPick] = useState<"" | "pending" | "received" | "charges">("");
   const [byCourier, setByCourier] = useState<CourierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -106,12 +110,13 @@ export default function FinancePage() {
       which === "payments"
         ? supabase.from("v_finance_payments")
             .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days")
-            // Unpaid first, oldest debt at the top — that is the chase list.
+            // Oldest first. A receivable list is worked from the top, and the
+            // oldest debt is the one closest to being uncollectable.
             .order("is_paid", { ascending: true })
-            .order("finance_date", { ascending: false, nullsFirst: false })
+            .order("finance_date", { ascending: true, nullsFirst: false })
             .limit(1000)
         : supabase.from("online_cpr")
-            .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status,gross_total,shipping_charges,gst,wh_income_tax,wh_sales_tax,net_total,delivered_count,returned_count,returns_cost,matched_count,matched_total,unmatched")
+            .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status,gross_total,shipping_charges,gst,wh_income_tax,wh_sales_tax,net_total,delivered_count,returned_count,returns_cost,matched_count,matched_total,unmatched,settlement_status")
             .order("cpr_date", { ascending: false, nullsFirst: false }).limit(1000);
     if (from) q = q.gte(dcol, from);
     if (to) q = q.lte(dcol, to);
@@ -125,40 +130,63 @@ export default function FinancePage() {
 
   // The table is filtered in the browser only because it is explicitly a page
   // of rows, never a total. Every total on this page comes from the RPC above.
-  const rowsF = useMemo(() => (store === "ALL" ? rows : rows.filter((r) => r.store_code === store)), [rows, store]);
+  const rowsF = useMemo(() => {
+    let out = store === "ALL" ? rows : rows.filter((r) => r.store_code === store);
+    // The card you pressed decides what the list shows. Pressing it again clears it.
+    if (tab === "payments" && pick === "pending")  out = out.filter((r) => !r.is_paid);
+    if (tab === "payments" && pick === "received") out = out.filter((r) => r.is_paid);
+    if (tab === "payments" && pick === "charges")
+      out = out.filter((r) => (Number(r.courier_fee) || 0) + (Number(r.courier_tax) || 0) > 0);
+    return out;
+  }, [rows, store, tab, pick]);
 
   const cards = useMemo(() => {
     if (tab === "payments") {
       const s = summary;
+      const [from, to] = rangeDates(preset, cf, ct);
+      /* AVERAGE DELIVERY CHARGE over whatever period is selected.
+         Two readings of the same figure, both useful and both shown: what one
+         delivery costs on average, and what the couriers cost you per day.
+         Seven days and thirty days therefore give different answers, which is
+         the point — it is a rate, not a total. */
+      const parcels = Number(s?.pending_count ?? 0) + Number(s?.received_count ?? 0);
+      const fees = Number(s?.courier_fees ?? 0);
+      const days = from && to
+        ? Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1)
+        : 0;
       return [
         { label: "Pending payment", value: money(s?.pending_value), Icon: Clock, bg: "bg-amber-soft",
-          note: s ? `${Number(s.pending_count).toLocaleString()} parcels · oldest ${Number(s.oldest_pending_days)} days` : "" },
+          note: s ? `${Number(s.pending_count).toLocaleString()} parcels · oldest ${Number(s.oldest_pending_days)} days` : "",
+          key: "pending" as const },
         { label: "Received", value: money(s?.received_net), Icon: CheckCircle2, bg: "bg-success-soft",
-          note: s ? `${Number(s.received_count).toLocaleString()} parcels` : "" },
+          note: s ? `${Number(s.received_count).toLocaleString()} parcels settled` : "", key: "received" as const },
         // Revenue is GROSS COD — what the customer handed over. The courier's
         // cut is a cost, shown next to it rather than folded into it.
         { label: "Gross COD", value: money(s?.gross_cod), Icon: Wallet, bg: "bg-periwinkle-soft",
-          note: "what customers paid" },
+          note: "what customers paid", key: "" as const },
         { label: "Courier charges", value: money(s?.courier_fees), Icon: Wallet, bg: "bg-salmon-soft",
-          note: s ? `net ${money(s.net_expected)}` : "" },
+          note: s ? `net ${money(s.net_expected)}` : "", key: "charges" as const },
+        { label: "Avg delivery charge", value: parcels ? money(fees / parcels) : "—", Icon: Truck, bg: "bg-periwinkle-soft",
+          note: days ? `per parcel · ${money(fees / days)}/day over ${days}d` : "per parcel", key: "charges" as const },
       ];
     }
+
     if (tab === "cpr") {
       // These stay browser-side on purpose: a CPR batch is one row per
       // settlement file, so the set is small and cannot approach the 1,000 cap.
       // If it ever can, it gets its own function like everything else.
       return [
-        { label: "CPR batches", value: rowsF.length.toLocaleString(), Icon: FileText, bg: "bg-periwinkle-soft", note: "" },
-        { label: "Total amount", value: money(sum(rowsF, "amount")), Icon: Wallet, bg: "bg-success-soft", note: "" },
-        { label: "Orders covered", value: rowsF.reduce((t, r) => t + (Number(r.orders_count) || 0), 0).toLocaleString(), Icon: FileText, bg: "bg-amber-soft", note: "" },
-        { label: "Open", value: rowsF.filter((r) => r.status !== "Paid" && r.status !== "Cleared").length.toLocaleString(), Icon: Clock, bg: "bg-salmon-soft", note: "" },
+        { label: "CPR batches", value: rowsF.length.toLocaleString(), Icon: FileText, bg: "bg-periwinkle-soft", note: "", key: "" as const },
+        { label: "Total amount", value: money(sum(rowsF, "amount")), Icon: Wallet, bg: "bg-success-soft", note: "", key: "" as const },
+        { label: "Orders covered", value: rowsF.reduce((t, r) => t + (Number(r.orders_count) || 0), 0).toLocaleString(), Icon: FileText, bg: "bg-amber-soft", note: "", key: "" as const },
+        { label: "Open", value: rowsF.filter((r) => r.status !== "Paid" && r.status !== "Cleared").length.toLocaleString(), Icon: Clock, bg: "bg-salmon-soft", note: "", key: "" as const },
       ];
     }
     return [
-      { label: "Returns", value: rowsF.length.toLocaleString(), Icon: Undo2, bg: "bg-periwinkle-soft", note: "" },
-      { label: "Received back", value: rowsF.filter((r) => r.received).length.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft", note: "" },
-      { label: "Awaiting", value: rowsF.filter((r) => !r.received).length.toLocaleString(), Icon: Clock, bg: "bg-amber-soft", note: "" },
-      { label: "—", value: "", Icon: Undo2, bg: "bg-salmon-soft", note: "" },
+      { label: "Returns", value: rowsF.length.toLocaleString(), Icon: Undo2, bg: "bg-periwinkle-soft", note: "", key: "" as const },
+      { label: "Received back", value: rowsF.filter((r) => r.received).length.toLocaleString(), Icon: CheckCircle2, bg: "bg-success-soft", note: "", key: "" as const },
+      { label: "Awaiting", value: rowsF.filter((r) => !r.received).length.toLocaleString(), Icon: Clock, bg: "bg-amber-soft", note: "", key: "" as const },
+      { label: "—", value: "", Icon: Undo2, bg: "bg-salmon-soft", note: "", key: "" as const },
     ];
   }, [tab, rowsF, summary]);
 
@@ -203,14 +231,20 @@ export default function FinancePage() {
       </div></div>
 
       {tab === "returns" ? <div className="mt-5"><ReturnsPanel store={store} from={rangeDates(preset, cf, ct)[0]} to={rangeDates(preset, cf, ct)[1]} /></div> : <>
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {cards.map(({ label, value, Icon, bg, note }, i) => (
-          <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
+      {/* Five on payments, four elsewhere. Two per row on a phone. */}
+      <div className={`mt-5 grid grid-cols-2 gap-3 ${tab === "payments" ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+        {cards.map(({ label, value, Icon, bg, note, key }, i) => (
+          <button key={i} type="button"
+            onClick={() => key && setPick((p) => (p === key ? "" : key))}
+            className={`rounded-card border ${bg} p-4 text-left transition dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""} ${
+              key ? "cursor-pointer hover:brightness-95" : "cursor-default"} ${
+              key && pick === key ? "border-ink ring-2 ring-ink/20 dark:border-white" : "border-line dark:border-white/[0.06]"}`}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-[#141414]"><Icon size={16} /></span>
             <div className="mt-3 text-[20px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{loading ? "—" : value}</div>
             <div className="text-[12px] font-medium text-muted dark:text-[#a89f93]">{label}</div>
             {note && !loading && <div className="mt-0.5 text-[11px] text-hint dark:text-[#8a8175]">{note}</div>}
-          </div>
+            {key && pick === key && <div className="mt-1 text-[10.5px] font-semibold uppercase tracking-wide text-ink dark:text-white">filtering ↓</div>}
+          </button>
         ))}
       </div>
 
@@ -240,7 +274,7 @@ export default function FinancePage() {
                   {/* Store dropped: the order number already carries it —
                       #LM15237, #TS2761, #TRZ1760 — so the column repeated
                       itself in narrower form. */}
-                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Courier</th>
+                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Courier</th>
                   <th className="px-4 py-3 text-right font-semibold">COD</th>
                   <th className="px-4 py-3 text-right font-semibold">Charges</th>
                   <th className="px-4 py-3 text-right font-semibold">Net received</th>
@@ -258,16 +292,17 @@ export default function FinancePage() {
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
+                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
               ) : err ? (
-                <tr><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
+                <tr><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
               ) : rowsF.length === 0 ? (
-                <tr><td colSpan={tab === "cpr" ? 8 : 7} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
+                <tr><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
                 rowsF.map((r, i) => (
                   <tr key={i} onClick={() => (tab === "cpr" ? setCprRow(r) : setEditRow(r))} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
+                      <td className="px-4 py-3 font-mono text-[11.5px] text-muted dark:text-[#a89f93]">{String(r.tracking_id ?? "—")}</td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.courier ?? "—")}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{money(r.cod_amount)}</td>
                       {/* What the courier kept: its fee plus the tax withheld.

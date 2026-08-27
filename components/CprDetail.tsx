@@ -47,20 +47,20 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   const [err, setErr] = useState("");
   const cpr = String(row.cpr_number ?? "");
 
-  /* PER-PARCEL CORRECTION.
-   *
-   *  The courier and Shopify disagree more often than anyone would like: PostEx
-   *  hands a parcel back, and nobody on the team closes the order in Shopify.
-   *  The settlement file is then right and our record is wrong, on one parcel,
-   *  and there was no way to say so without editing the database by hand.
-   *
-   *  "Mark paid"      the courier settled it — set Delivered and Paid
-   *  "Mark returned"  it came back — restore Returned and REMOVE the payment,
-   *                   because a returned COD parcel collected no cash
-   *
-   *  Marking returned is the one that moves money off the books, so the old
-   *  values go into online_payment_corrections first — the same audit table
-   *  0084 used, so a mistake here is one query to undo. */
+  /* NOTE ON SETTLEMENT STATUS (migration 0086, now unused).
+     A control here once let you mark a settlement "not yet paid", mirroring
+     PostEx's NEW and OwnEx's Unpaid. It was built on a wrong assumption. In
+     this business the money arrives FIRST and the courier publishes the CPR a
+     day later, so a CPR existing already means you have been paid — the portal
+     flag tracks their paperwork catching up, not your cash. The column stays
+     (harmless, everything reads Paid); the control is gone rather than left
+     there inviting a wrong answer. */
+
+  /* ONE PARCEL AT A TIME, when the bulk buckets are too blunt.
+     "Mark paid" sets Delivered + Paid; "Mark returned" restores Returned and
+     REMOVES the payment, because a returned COD parcel collected no cash. The
+     second writes the old values to online_payment_corrections first — the same
+     audit table 0084 used — so it can be undone. */
   async function correct(p: Parcel, to: "paid" | "returned") {
     if (!supabase) return;
     setBusy(p.tracking_id); setErr("");
@@ -81,25 +81,10 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
         .update({ ...patch, updated_at: new Date().toISOString() })
         .eq("tracking_id", p.tracking_id);
       if (error) throw new Error(error.message);
-      setParcels((xs) => xs.map((x) => x.tracking_id === p.tracking_id
-        ? { ...x, ...patch, payment_status: to === "paid" ? "Paid" : null } as Parcel : x));
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(""); }
+      setParcels((xs) => xs.map((x) => x.tracking_id === p.tracking_id ? { ...x, ...patch } as Parcel : x));
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(""); }
   }
-
-  useEffect(() => {
-    (async () => {
-      if (!isSupabaseConfigured || !supabase || !cpr) { setLoading(false); return; }
-      const { data } = await supabase.from("online_logistics")
-        .select("tracking_id,order_number,store_code,delivery_status,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,return_received_at")
-        .eq("cpr_number", cpr)
-        .order("delivery_status", { ascending: true })
-        .limit(1000);
-      setParcels((data as Parcel[]) ?? []);
-      setLoading(false);
-    })();
-  }, [cpr]);
 
   /* ------------------------------------------------------------------------
      RECONCILING THE SETTLEMENT AGAINST OUR OWN RECORD.
