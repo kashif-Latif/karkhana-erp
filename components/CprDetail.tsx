@@ -47,6 +47,28 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   const [err, setErr] = useState("");
   const cpr = String(row.cpr_number ?? "");
 
+  /* Load the parcels this settlement covers.
+     Lost in an earlier edit, which is why the panel span forever: `loading`
+     starts true and nothing was left to set it false. `error` is read rather
+     than discarded — a silent failure here looks identical to a slow network,
+     and that is exactly the confusion it caused. */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!isSupabaseConfigured || !supabase || !cpr) { setLoading(false); return; }
+      const { data, error } = await supabase.from("online_logistics")
+        .select("tracking_id,order_number,store_code,delivery_status,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,return_received_at")
+        .eq("cpr_number", cpr)
+        .order("delivery_status", { ascending: true })
+        .limit(1000);
+      if (!alive) return;
+      if (error) setErr(error.message);
+      setParcels((data as Parcel[]) ?? []);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [cpr]);
+
   /* NOTE ON SETTLEMENT STATUS (migration 0086, now unused).
      A control here once let you mark a settlement "not yet paid", mirroring
      PostEx's NEW and OwnEx's Unpaid. It was built on a wrong assumption. In
