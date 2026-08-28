@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Users, CalendarCheck, HandCoins, Wallet, RefreshCw } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { AddEmployee, MarkAttendance, AddAdvance, MarkSalary } from "@/components/AttendanceEntry";
+import { AddEmployee, MarkAttendance, AddAdvance } from "@/components/AttendanceEntry";
+import MonthlySummary from "@/components/MonthlySummary";
 
 type Tab = "employees" | "attendance" | "advances" | "salaries";
 type Row = Record<string, unknown>;
@@ -12,7 +13,11 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "employees", label: "Employees" },
   { key: "attendance", label: "Attendance" },
   { key: "advances", label: "Advances" },
-  { key: "salaries", label: "Salaries" },
+  /* "Summary" rather than "Salaries": it is a payroll calculation, not a
+     list of paid/unpaid flags. The old tab showed the flags, which read empty
+     because nobody had pressed Mark Paid — data that was missing by definition
+     rather than by accident. */
+  { key: "salaries", label: "Summary" },
 ];
 const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const money = (n: unknown) => "Rs " + (Number(n) || 0).toLocaleString("en-PK");
@@ -111,7 +116,6 @@ export default function AttendancePage() {
           {tab === "employees" && <AddEmployee onDone={() => load(tab)} />}
           {tab === "attendance" && <MarkAttendance emps={emps} onDone={() => load(tab)} />}
           {tab === "advances" && <AddAdvance emps={emps} onDone={() => load(tab)} />}
-          {tab === "salaries" && <MarkSalary emps={emps} onDone={() => load(tab)} />}
           <button onClick={() => load(tab)} className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -127,6 +131,9 @@ export default function AttendancePage() {
         ))}
       </div></div>
 
+      {tab === "salaries" ? (
+        <div className="mt-5"><MonthlySummary department="HUB" /></div>
+      ) : (<>
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map(({ label, value, Icon, bg }, i) => (
           <div key={i} className={`rounded-card border border-line ${bg} p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${label === "—" ? "opacity-0" : ""}`}>
@@ -145,7 +152,6 @@ export default function AttendancePage() {
                 {tab === "employees" && <><th className="px-4 py-3 font-semibold">Name</th><th className="px-4 py-3 font-semibold">Designation</th><th className="px-4 py-3 font-semibold">Department</th><th className="px-4 py-3 text-right font-semibold">Salary</th><th className="px-4 py-3 text-right font-semibold">Work days</th><th className="px-4 py-3 font-semibold">Phone</th></>}
                 {tab === "attendance" && <><th className="px-4 py-3 font-semibold">Employee</th><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Time in</th><th className="px-4 py-3 font-semibold">Status</th></>}
                 {tab === "advances" && <><th className="px-4 py-3 font-semibold">Employee</th><th className="px-4 py-3 text-right font-semibold">Amount</th><th className="px-4 py-3 font-semibold">Date</th><th className="px-4 py-3 font-semibold">Deduct</th><th className="px-4 py-3 font-semibold">Note</th><th className="px-4 py-3 font-semibold">Settled</th></>}
-                {tab === "salaries" && <><th className="px-4 py-3 font-semibold">Employee</th><th className="px-4 py-3 font-semibold">Month</th><th className="px-4 py-3 font-semibold">Paid</th></>}
               </tr>
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
@@ -180,11 +186,6 @@ export default function AttendancePage() {
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.note || "—")}</td>
                       <td className="px-4 py-3">{r.settled ? <span className="text-[12px] font-semibold text-success">Yes</span> : <span className="text-[12px] font-semibold text-amber-strong dark:text-amber">No</span>}</td>
                     </>}
-                    {tab === "salaries" && <>
-                      <td className="px-4 py-3 font-semibold">{empName(r.emp_id)}</td>
-                      <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{MONTHS[Number(r.month)] ?? r.month} {String(r.year)}</td>
-                      <td className="px-4 py-3">{r.paid ? <span className="text-[12px] font-semibold text-success">Paid</span> : <span className="text-[12px] font-semibold text-amber-strong dark:text-amber">Unpaid</span>}</td>
-                    </>}
                   </tr>
                 ))
               )}
@@ -194,6 +195,7 @@ export default function AttendancePage() {
       </div>
 
       {!isSupabaseConfigured && <p className="mt-4 text-center text-[12px] text-hint dark:text-[#8a8175]">Preview build · connect Supabase to load attendance.</p>}
+      </>)}
     </div>
   );
 }
