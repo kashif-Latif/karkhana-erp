@@ -70,8 +70,20 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   if (mustChange === null) return null;
   if (mustChange) return <SetPassword onDone={() => setMustChange(false)} />;
 
-  // Chooser + new department areas: authenticated, but full-screen (no factory sidebar).
-  if (isFullScreen) return <>{children}</>;
+  /* Chooser + Online/Retail: authenticated, but full-screen — no factory
+     sidebar, no route gate. They still need PERMISSIONS, though.
+
+     This used to return children directly, outside the provider. Anything on
+     those pages calling usePermissions() therefore got the default context —
+     { ready: false, all: false, can: () => false } — which is indistinguishable
+     from "this person is allowed nothing". That is why the Administration box
+     never appeared on the home screen even for a super admin: it was not
+     refused, it was asked before anyone was listening.
+
+     The provider now wraps both branches. Only the chrome differs. */
+  if (isFullScreen) {
+    return <PermissionsProvider>{children}</PermissionsProvider>;
+  }
 
   // Only now (fully authenticated) do we load permissions — one shared copy.
   return (
