@@ -22,11 +22,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Search, Users, AlertTriangle } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
-type Dept = { id: string; code: string; name: string; kind: string | null };
+type Dept = { id: string; code: string; name: string; kind: string | null; parent_id: string | null };
 type Emp = {
-  id: string; name: string | null; designation: string | null;
-  department: string | null; department_id: string | null;
-  sal: number | null; phone: string | null;
+  id: string; name: string | null; department_id: string | null;
+  phone: string | null; is_active: boolean | null;
+  pay_type: string | null; pay_amount: number | null;
+  departments: { name: string | null; parent_id: string | null } | null;
+  designations: { name: string | null } | null;
 };
 
 const rs = (v: unknown) => (v == null ? "—" : "Rs " + Math.round(Number(v) || 0).toLocaleString("en-PK"));
@@ -42,37 +44,72 @@ export default function EmployeesTab({ canManage }: { canManage: boolean }) {
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
+    /* Read `employees`, not online_att_employees.
+       online_att_employees is empty and belongs to a separate attendance app
+       that has not been migrated yet. The people who actually exist — all of
+       them, every department — are in `employees`, which already carries
+       department_id, pay_type and pay_amount.
+
+       Every department is fetched, not just the business units, because an
+       employee is attached to a SECTION (Cutting, Stitching) and the section
+       is what knows which business it belongs to. */
     const [d, e] = await Promise.all([
-      supabase.from("departments").select("id,code,name,kind")
-        .eq("kind", "business_unit").order("sort_order"),
-      supabase.from("online_att_employees")
-        .select("id,name,designation,department,department_id,sal,phone")
+      supabase.from("departments").select("id,code,name,kind,parent_id").order("sort_order"),
+      supabase.from("employees")
+        .select("id,name,department_id,phone,is_active,pay_type,pay_amount,departments(name,parent_id),designations(name)")
         .order("name").limit(1000),
     ]);
     if (d.error) setErr(d.error.message);
     if (e.error) setErr(e.error.message);
     setDepts((d.data as Dept[]) ?? []);
-    setRows((e.data as Emp[]) ?? []);
+    /* Supabase types an embedded relation as an array even when it resolves to
+       one row, so it is flattened here rather than fought with everywhere it is
+       read. */
+    const flat = ((e.data ?? []) as Record<string, unknown>[]).map((r) => ({
+      ...r,
+      departments: Array.isArray(r.departments) ? r.departments[0] ?? null : r.departments,
+      designations: Array.isArray(r.designations) ? r.designations[0] ?? null : r.designations,
+    })) as unknown as Emp[];
+    setRows(flat);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /* Which BUSINESS does this person belong to?
+     Karkhana staff sit in a section — Cutting, Stitching — and the section
+     points at Karkhana. Hub staff will sit against the Hub directly. Comparing
+     department_id to a business unit would therefore match every Hub person and
+     no factory worker at all, which is how this showed an empty list.
+     Resolve the section to its parent first, then compare. */
+  const unitOf = useCallback((r: Emp) => {
+    const dept = depts.find((d) => d.id === r.department_id);
+    if (!dept) return null;
+    return dept.kind === "business_unit" ? dept.id : dept.parent_id;
+  }, [depts]);
+
+  const units = useMemo(() => depts.filter((d) => d.kind === "business_unit"), [depts]);
+
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((r) =>
-      (pick === "ALL" || r.department_id === pick) &&
+      (pick === "ALL" || unitOf(r) === pick) &&
       (!needle ||
         (r.name ?? "").toLowerCase().includes(needle) ||
-        (r.designation ?? "").toLowerCase().includes(needle)));
-  }, [rows, pick, q]);
+        (r.departments?.name ?? "").toLowerCase().includes(needle) ||
+        (r.designations?.name ?? "").toLowerCase().includes(needle)));
+  }, [rows, pick, q, unitOf]);
 
   const byDept = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of rows) m.set(r.department_id ?? "none", (m.get(r.department_id ?? "none") ?? 0) + 1);
+    for (const r of rows) { const u = unitOf(r) ?? "none"; m.set(u, (m.get(u) ?? 0) + 1); }
     return m;
-  }, [rows]);
+  }, [rows, unitOf]);
 
-  const payroll = shown.reduce((t, r) => t + (Number(r.sal) || 0), 0);
+  // Only monthly salaries add up. A piece-rate worker has no monthly figure to
+  // total, so including them would invent a payroll number that is not real.
+  const payroll = shown
+    .filter((r) => (r.pay_type ?? "").toLowerCase().startsWith("month"))
+    .reduce((t, r) => t + (Number(r.pay_amount) || 0), 0);
 
   return (
     <div>
@@ -91,7 +128,7 @@ export default function EmployeesTab({ canManage }: { canManage: boolean }) {
                            : "border-line bg-surface text-muted hover:bg-panel dark:border-white/10 dark:bg-white/[0.05] dark:text-[#a89f93]"}`}>
           Everyone · {rows.length}
         </button>
-        {depts.map((d) => (
+        {units.map((d) => (
           <button key={d.id} onClick={() => setPick(d.id)}
             className={`rounded-full border px-3.5 py-1.5 text-[12.5px] font-semibold transition ${
               pick === d.id ? "border-ink bg-ink text-white dark:border-white dark:bg-white dark:text-[#141414]"
@@ -137,13 +174,18 @@ export default function EmployeesTab({ canManage }: { canManage: boolean }) {
             ) : shown.map((r) => (
               <tr key={r.id} className="text-ink dark:text-[#e7e2d8]">
                 <td className="px-4 py-3 font-semibold">{r.name ?? "—"}</td>
-                <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.designation ?? "—"}</td>
+                <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.designations?.name ?? "—"}</td>
                 <td className="px-4 py-3 text-muted dark:text-[#a89f93]">
                   {depts.find((d) => d.id === r.department_id)?.name
                     ?? <span className="text-amber-700">not set</span>}
                 </td>
                 <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.phone ?? "—"}</td>
-                <td className="px-4 py-3 text-right font-semibold tabular-nums">{rs(r.sal)}</td>
+                {/* Piece-rate has no monthly figure, and showing a dash is more
+                    honest than showing zero. */}
+                <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                  {(r.pay_type ?? "").toLowerCase().startsWith("month") ? rs(r.pay_amount)
+                    : <span className="text-muted dark:text-[#a89f93]">{r.pay_type ?? "—"}</span>}
+                </td>
               </tr>
             ))}
           </tbody>
