@@ -200,7 +200,7 @@ export default function MyPortal() {
                   <dt className="text-muted dark:text-[#a89f93]">
                     Earned over {pay?.counted_days ?? 0} days
                     <span className="mt-0.5 block text-[11.5px] text-hint dark:text-[#8a8175]">
-                      each day at that day&rsquo;s rate, divided by the days in the month
+                      each day at that day&rsquo;s rate ÷ 30
                     </span>
                   </dt>
                   <dd className="shrink-0 font-semibold tabular-nums text-ink dark:text-[#e7e2d8]">{rs(gross)}</dd>
