@@ -57,7 +57,7 @@ export default function HubEmployeesPage() {
   const [busy, setBusy] = useState(false);
   const [login, setLogin] = useState<Emp | null>(null);
   const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("1234");
+  const [pw, setPw] = useState("123456");
   const [made, setMade] = useState("");
 
   /* GIVING SOMEBODY A LOGIN.
@@ -74,11 +74,23 @@ export default function HubEmployeesPage() {
     if (!email.trim()) { setErr("An email is required."); return; }
     setBusy(true); setErr(""); setMade("");
     try {
+      /* functions.invoke throws a FunctionsHttpError whose USEFUL text is in the
+         response body, not in error.message — which just says a non-2xx code
+         came back. Reporting that is reporting that something went wrong
+         without saying what, which is how "Password must be at least 6
+         characters" showed up as an unexplained failure. */
       const { data, error } = await supabase.functions.invoke("create-user", {
         body: { action: "create", email: email.trim(), password: pw,
                 full_name: login.name ?? email.trim() },
       });
-      if (error) throw new Error(error.message);
+      if (error) {
+        let detail = error.message;
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === "function") {
+          try { detail = (await ctx.json())?.error ?? detail; } catch { /* keep the original */ }
+        }
+        throw new Error(detail);
+      }
       const d = data as { error?: string };
       if (d?.error) throw new Error(d.error);
 
@@ -89,9 +101,8 @@ export default function HubEmployeesPage() {
       const r = linked as { ok?: boolean; error?: string };
       if (!r?.ok) throw new Error(r?.error ?? "Could not link the account.");
 
-      // A temporary password that is never replaced is a permanent shared one.
-      await supabase.from("app_users").update({ must_change_password: true })
-        .eq("email", email.trim());
+      // create-user already sets must_change_password when it creates the
+      // account, so there is nothing to set here.
 
       setMade(`${login.name} can sign in with ${email.trim()} and the password ${pw}. They will be asked to set their own before anything opens.`);
       await load();
@@ -251,7 +262,7 @@ export default function HubEmployeesPage() {
                   {e.user_id ? (
                     <span className="mr-1 rounded-full bg-success-soft px-2 py-1 text-[11px] font-semibold text-emerald-800">Has login</span>
                   ) : (
-                    <button onClick={() => { setLogin(e); setEmail(""); setPw("1234"); setMade(""); setErr(""); }}
+                    <button onClick={() => { setLogin(e); setEmail(""); setPw("123456"); setMade(""); setErr(""); }}
                       className="mr-1 rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold hover:bg-panel dark:border-white/15 dark:hover:bg-white/10">
                       Give login
                     </button>
@@ -289,6 +300,11 @@ export default function HubEmployeesPage() {
                    onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
             <Field label="Temporary password"><input className={inputCls} value={pw}
                    onChange={(e) => setPw(e.target.value)} /></Field>
+            {pw.length < 6 && (
+              <p className="-mt-1 text-[12px] font-medium text-red-700">
+                At least 6 characters — Supabase refuses anything shorter.
+              </p>
+            )}
             <p className="text-[12px] text-hint dark:text-[#8a8175]">
               Give them this password once. The first time they sign in they must set
               their own before anything opens, so the shared one stops working — and
@@ -301,7 +317,7 @@ export default function HubEmployeesPage() {
             {made ? "Done" : "Cancel"}
           </button>
           {!made && (
-            <button className={btnPrimary} disabled={busy} onClick={createLogin}>
+            <button className={btnPrimary} disabled={busy || pw.length < 6 || !email.trim()} onClick={createLogin}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : null} Create login
             </button>
           )}
