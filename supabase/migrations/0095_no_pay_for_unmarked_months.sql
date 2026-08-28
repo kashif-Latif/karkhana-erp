@@ -1,4 +1,4 @@
--- 0095_no_pay_for_unmarked_months.sql  (rev 2 — paid leave, visible deduction)
+-- 0095_no_pay_for_unmarked_months.sql  (rev 3 — drops before replacing)
 --
 -- TWO PROBLEMS. THE SECOND IS THE SERIOUS ONE.
 --
@@ -39,9 +39,32 @@
 --   absences turned Rs 13,000 into Rs 12,000 with nothing on screen saying so.
 --   `absent_deduction` states it — what those days would have paid.
 --
+-- REV 3: CREATE OR REPLACE FUNCTION CANNOT CHANGE A RETURN TYPE.
+--   Rev 2 added leave_days and absent_deduction to the returns table, and
+--   Postgres refused:
+--
+--     cannot change return type of existing function
+--
+--   The function has to be dropped first. It is a trap this project has hit
+--   before and one that only appears the SECOND time a function is deployed —
+--   the first run creates it happily and the shape is never questioned again.
+--
+--   my_monthly_payable (0096) selects from hub_monthly_payable, so it depends on
+--   it and blocks the drop. Both are dropped here and hub_monthly_payable is
+--   rebuilt below; 0096 recreates its own afterwards.
+--
+-- RUN ORDER NO LONGER MATTERS. Run this, then 0096, in either order — each
+-- drops what it is about to replace.
+--
 -- Safe to run more than once.
 
 begin;
+
+-- Dependants first, then the function itself. Dropping in the other order fails
+-- with "other objects depend on it", which reads like a permissions problem and
+-- is not.
+drop function if exists my_monthly_payable(integer, integer);
+drop function if exists hub_monthly_payable(integer, integer, text);
 
 -- ---------------------------------------------------------------------------
 -- 1. The stray July record. Hub employees only, and only before August 2026 —

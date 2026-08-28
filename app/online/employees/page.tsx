@@ -29,7 +29,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 const BUSINESS_CODE = "HUB";
 
 type Emp = {
-  id: string; name: string | null; phone: string | null;
+  id: string; name: string | null; phone: string | null; user_id: string | null;
   department_id: string | null; is_active: boolean | null;
   pay_type: string | null; pay_amount: number | null;
   join_date: string | null; cnic: string | null;
@@ -55,6 +55,50 @@ export default function HubEmployeesPage() {
   const [editing, setEditing] = useState<Emp | null>(null);
   const [form, setForm] = useState({ ...blank });
   const [busy, setBusy] = useState(false);
+  const [login, setLogin] = useState<Emp | null>(null);
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("1234");
+  const [made, setMade] = useState("");
+
+  /* GIVING SOMEBODY A LOGIN.
+     Three steps that have to happen together, or the result is an account that
+     signs in and sees nothing, or an employee nobody can find:
+       create the auth account with a temporary password
+       attach it to this employee and put them in the Employee role
+       mark the password as temporary, so the first sign-in demands a new one
+
+     The Employee role grants nothing at all. They reach /me and are refused
+     everywhere else — no orders, no logistics, no money. */
+  async function createLogin() {
+    if (!supabase || !login) return;
+    if (!email.trim()) { setErr("An email is required."); return; }
+    setBusy(true); setErr(""); setMade("");
+    try {
+      const { data, error } = await supabase.functions.invoke("create-user", {
+        body: { action: "create", email: email.trim(), password: pw,
+                full_name: login.name ?? email.trim() },
+      });
+      if (error) throw new Error(error.message);
+      const d = data as { error?: string };
+      if (d?.error) throw new Error(d.error);
+
+      const { data: linked, error: le } = await supabase.rpc("hub_link_employee_login", {
+        p_employee_name: login.name, p_email: email.trim(), p_department: "HUB",
+      });
+      if (le) throw new Error(le.message);
+      const r = linked as { ok?: boolean; error?: string };
+      if (!r?.ok) throw new Error(r?.error ?? "Could not link the account.");
+
+      // A temporary password that is never replaced is a permanent shared one.
+      await supabase.from("app_users").update({ must_change_password: true })
+        .eq("email", email.trim());
+
+      setMade(`${login.name} can sign in with ${email.trim()} and the password ${pw}. They will be asked to set their own before anything opens.`);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -71,7 +115,7 @@ export default function HubEmployeesPage() {
     setDeptId(d.id as string);
 
     const { data, error } = await supabase.from("employees")
-      .select("id,name,phone,department_id,is_active,pay_type,pay_amount,join_date,cnic,designations(name)")
+      .select("id,name,phone,department_id,is_active,pay_type,pay_amount,join_date,cnic,user_id,designations(name)")
       .eq("department_id", d.id)
       .order("name").limit(1000);
     if (error) setErr(error.message);
@@ -204,6 +248,14 @@ export default function HubEmployeesPage() {
                 <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{e.join_date ?? "—"}</td>
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">{rs(e.pay_amount)}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">
+                  {e.user_id ? (
+                    <span className="mr-1 rounded-full bg-success-soft px-2 py-1 text-[11px] font-semibold text-emerald-800">Has login</span>
+                  ) : (
+                    <button onClick={() => { setLogin(e); setEmail(""); setPw("1234"); setMade(""); setErr(""); }}
+                      className="mr-1 rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold hover:bg-panel dark:border-white/15 dark:hover:bg-white/10">
+                      Give login
+                    </button>
+                  )}
                   <button onClick={() => startEdit(e)} className="mr-1 rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold hover:bg-panel dark:border-white/15 dark:hover:bg-white/10">
                     <Pencil size={11} className="mr-1 inline" />Edit
                   </button>
@@ -225,6 +277,36 @@ export default function HubEmployeesPage() {
           )}
         </table>
       </div>
+
+      <Modal open={!!login} onClose={() => !busy && setLogin(null)}
+             title={`Give ${login?.name ?? ""} a login`}
+             subtitle="They will see only their own attendance, advances and salary.">
+        {made ? (
+          <div className="rounded-card border border-emerald-300 bg-emerald-50 p-3 text-[13px] text-emerald-900">{made}</div>
+        ) : (
+          <div className="grid gap-3">
+            <Field label="Their email"><input className={inputCls} value={email} type="email"
+                   onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
+            <Field label="Temporary password"><input className={inputCls} value={pw}
+                   onChange={(e) => setPw(e.target.value)} /></Field>
+            <p className="text-[12px] text-hint dark:text-[#8a8175]">
+              Give them this password once. The first time they sign in they must set
+              their own before anything opens, so the shared one stops working — and
+              from then on what an account does is traceable to a person.
+            </p>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button className={btnGhost} disabled={busy} onClick={() => setLogin(null)}>
+            {made ? "Done" : "Cancel"}
+          </button>
+          {!made && (
+            <button className={btnPrimary} disabled={busy} onClick={createLogin}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : null} Create login
+            </button>
+          )}
+        </div>
+      </Modal>
 
       <Modal open={open} onClose={() => !busy && setOpen(false)}
              title={editing ? `Edit ${editing.name ?? "employee"}` : "Add a Hub employee"}

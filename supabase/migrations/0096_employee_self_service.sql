@@ -59,6 +59,7 @@ $do$;
 --    page shows as "your account is not linked to an employee record yet"
 --    rather than an empty portal that looks broken.
 -- ---------------------------------------------------------------------------
+drop function if exists my_employee();
 create or replace function my_employee()
 returns table (
   emp_id      text,
@@ -90,6 +91,10 @@ grant execute on function my_employee() to authenticated;
 --    Rather than reimplement the arithmetic and risk the two drifting apart,
 --    it calls the same function and filters. One formula, one place to fix.
 -- ---------------------------------------------------------------------------
+-- Dropped before creating, for the same reason 0095 does: a later change to
+-- these columns would otherwise fail with "cannot change return type", and the
+-- error only appears on the second deployment.
+drop function if exists my_monthly_payable(integer, integer);
 create or replace function my_monthly_payable(
   p_year  integer,
   p_month integer
@@ -125,6 +130,7 @@ grant execute on function my_monthly_payable(integer, integer) to authenticated;
 -- ---------------------------------------------------------------------------
 -- 4. My own attendance and advances, for the calendar and the advance list.
 -- ---------------------------------------------------------------------------
+drop function if exists my_attendance(integer, integer);
 create or replace function my_attendance(p_year integer, p_month integer)
 returns table (day integer, status text)
 language sql
@@ -142,6 +148,7 @@ $function$;
 
 grant execute on function my_attendance(integer, integer) to authenticated;
 
+drop function if exists my_advances(integer, integer);
 create or replace function my_advances(p_year integer, p_month integer)
 returns table (date text, amount numeric, note text)
 language sql
