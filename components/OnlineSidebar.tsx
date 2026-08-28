@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { usePermissions } from "@/lib/usePermissions";
+import { ROUTE_PERMS } from "@/lib/access";
 import ThemeToggle from "@/components/ThemeToggle";
 
 type NavItem = {
@@ -39,6 +41,24 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
      a button that owns the state, and the route only decides what is open
      BEFORE anyone touches it. */
   const [manual, setManual] = useState<Record<string, boolean>>({});
+  const { ready, can } = usePermissions();
+
+  /* THE MENU SHOWS ONLY WHAT THE PERSON CAN OPEN.
+     The Karkhana sidebar has filtered like this all along; this one did not, so
+     somebody granted Finance alone still saw Orders, Logistics and Returns and
+     was refused at each. Listing doors that all turn you away is worse than
+     listing none — it tells someone the system has places for them and then
+     does not let them in.
+
+     A parent disappears when none of its children survive: a People group with
+     nothing under it is a heading pointing at nothing. */
+  const visible = NAV.map((n) => {
+    if (n.children) {
+      const kids = n.children.filter((c) => can(ROUTE_PERMS[c.href] ?? null));
+      return kids.length ? { ...n, children: kids } : null;
+    }
+    return can(ROUTE_PERMS[n.href] ?? null) ? n : null;
+  }).filter((n): n is (typeof NAV)[number] => n !== null);
   const pathname = usePathname();
   const router = useRouter();
   async function logout() { if (supabase) await supabase.auth.signOut(); router.replace("/login"); }
@@ -58,7 +78,7 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
           </div>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
-          {NAV.map(({ label, href, Icon, soon, children }) => {
+          {ready && visible.map(({ label, href, Icon, soon, children }) => {
             const on = active(href);
             // Opened by hand wins; otherwise a section opens because you are in it.
             const openGroup = !!children && (manual[href] ?? on);

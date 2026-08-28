@@ -8,9 +8,20 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { usePermissions } from "@/lib/usePermissions";
 
 const DEPARTMENTS = [
-  { href: "/dashboard", title: "Karkhana", subtitle: "Production, materials, inventory & payroll", icon: Factory, light: "bg-amber-soft", chip: "dark:bg-amber" },
-  { href: "/online", title: "Hub Department", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle" },
-  { href: "/retail", title: "FS Traders", subtitle: "Retail shops · sales, cash book & commissions", icon: Store, light: "bg-salmon-soft", chip: "dark:bg-salmon" },
+  /* EVERY BOX NEEDS A PERMISSION, not just Administration.
+     These three had none, so anyone who could log in saw all three — including
+     an employee whose account grants nothing. He could not open them, because
+     the routes are gated, but being shown three doors that all refuse you is
+     worse than being shown none: it says the system has places for you and then
+     turns you away at each one.
+
+     A box now appears only if the person can reach something behind it. */
+  { href: "/dashboard", title: "Karkhana", subtitle: "Production, materials, inventory & payroll", icon: Factory, light: "bg-amber-soft", chip: "dark:bg-amber",
+    needs: ["inventory.view", "production.view", "reports.view", "employees.manage", "payments.manage"] },
+  { href: "/online", title: "Hub Department", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle",
+    needs: ["hub.dashboard.view", "hub.orders.view", "hub.logistics.view", "hub.finance.view", "hub.attendance.view"] },
+  { href: "/retail", title: "FS Traders", subtitle: "Retail shops · sales, cash book & commissions", icon: Store, light: "bg-salmon-soft", chip: "dark:bg-salmon",
+    needs: ["retail.view", "retail.manage"] },
   /* Administration is not a business — it is the room where people and access
      are managed. It carries a `needs` list, so it only appears for someone who
      can actually manage users or roles. Staff never see it at all, which is
@@ -28,6 +39,15 @@ export default function DepartmentChooser() {
      removing after would flash Administration at every employee for a moment,
      which is exactly the sort of thing people notice and remember. */
   const visible = DEPARTMENTS.filter((d) => !d.needs || (ready && can(d.needs)));
+
+  /* SOMEBODY WITH NO DEPARTMENT DOES NOT GET A DEPARTMENT CHOOSER.
+     An employee's account grants nothing, so every box is filtered out and this
+     page becomes an empty screen asking them to choose. Their portal is the
+     whole application as far as they are concerned, so they are sent there
+     instead of being shown a lobby with no doors. */
+  useEffect(() => {
+    if (ready && visible.length === 0) router.replace("/me");
+  }, [ready, visible.length, router]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
