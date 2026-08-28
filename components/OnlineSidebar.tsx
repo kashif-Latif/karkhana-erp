@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -20,7 +20,14 @@ const NAV: NavItem[] = [
       { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },
   ] },
   { label: "Finance", href: "/online/finance", Icon: Wallet },
-  { label: "Attendance", href: "/online/attendance", Icon: CalendarCheck },
+  /* People, grouped. The department's accounts person adds staff and marks
+     attendance in one place, because that is one job. Logins and permissions
+     stay in Administration — adding a person and granting them access to money
+     are different decisions, and only one of them belongs to a department. */
+  { label: "People", href: "/online/attendance", Icon: CalendarCheck, children: [
+      { label: "Attendance", href: "/online/attendance", Icon: CalendarCheck },
+      { label: "Employees",  href: "/online/employees",  Icon: Users },
+  ] },
 ];
 
 export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
