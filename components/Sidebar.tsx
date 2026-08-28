@@ -3,8 +3,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, Boxes, Layers, Factory, Users, Truck, Shirt, ClipboardList,
-  FileBarChart, CheckSquare, Settings, Gem, LogOut, Wallet, ArrowLeftRight,
+  LayoutDashboard, Boxes, Layers, Factory, Truck, Shirt, ClipboardList,
+  FileBarChart, CheckSquare, Gem, LogOut, Wallet, ArrowLeftRight,
   ChevronDown, ArrowLeft, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
@@ -26,13 +26,21 @@ const NAV: NavItem[] = [
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Orders", href: "/orders", Icon: ClipboardList },
   { label: "Articles", href: "/articles", Icon: Shirt },
-  { label: "Employees", href: "/employees", Icon: Users },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
   { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
   { label: "Approvals", href: "/approvals", Icon: CheckSquare, badge: 7 },
-  { label: "Administration", href: "/administration", Icon: Settings },
 ];
+
+/* ADMINISTRATION AND EMPLOYEES ARE NOT KARKHANA THINGS.
+   They were in this sidebar because the factory is where staff were first
+   needed, not because they belong to it. People and access span every business
+   — Karkhana, Hub, FS Traders — so they now live in their own box on the
+   Grohub Solutions home screen, alongside the three departments rather than
+   inside one of them.
+   Leaving them here as well would mean two doors to the same room, and two
+   places to look when something is wrong. The routes still exist and still
+   work; only the duplicate entry points are gone. */
 
 export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
