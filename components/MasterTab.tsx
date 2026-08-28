@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Pencil, X, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 export type Field = {
   key: string;
@@ -22,6 +23,7 @@ export default function MasterTab({
   selectQuery?: string;
   canManage: boolean;
 }) {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -78,7 +80,8 @@ export default function MasterTab({
 
   async function remove() {
     if (!supabase || !editing) return;
-    if (!window.confirm(`Delete this ${singular.toLowerCase()} permanently? This cannot be undone.`)) return;
+    if (!(await confirm({ title: `Delete this ${singular.toLowerCase()}?`,
+                          body: "This cannot be undone.", confirmLabel: "Delete" }))) return;
     setSaving(true); setError("");
     const res = await supabase.from(table).delete().eq("id", editing);
     setSaving(false);

@@ -2,19 +2,32 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Factory, ShoppingBag, Store, ChevronRight, LogOut } from "lucide-react";
+import { Factory, ShoppingBag, Store, ShieldCheck, ChevronRight, LogOut } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import ThemeToggle from "@/components/ThemeToggle";
+import { usePermissions } from "@/lib/usePermissions";
 
 const DEPARTMENTS = [
   { href: "/dashboard", title: "Karkhana", subtitle: "Production, materials, inventory & payroll", icon: Factory, light: "bg-amber-soft", chip: "dark:bg-amber" },
   { href: "/online", title: "Hub Department", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle" },
   { href: "/retail", title: "FS Traders", subtitle: "Retail shops · sales, cash book & commissions", icon: Store, light: "bg-salmon-soft", chip: "dark:bg-salmon" },
+  /* Administration is not a business — it is the room where people and access
+     are managed. It carries a `needs` list, so it only appears for someone who
+     can actually manage users or roles. Staff never see it at all, which is
+     better than showing a box that refuses them when they press it. */
+  { href: "/administration", title: "Administration", subtitle: "Employees, logins, roles & permissions", icon: ShieldCheck, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle",
+    needs: ["users.manage", "roles.manage"] },
 ];
 
 export default function DepartmentChooser() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const { ready, can } = usePermissions();
+
+  /* Hidden until permissions have actually loaded. Rendering first and
+     removing after would flash Administration at every employee for a moment,
+     which is exactly the sort of thing people notice and remember. */
+  const visible = DEPARTMENTS.filter((d) => !d.needs || (ready && can(d.needs)));
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -54,7 +67,7 @@ export default function DepartmentChooser() {
           </div>
 
           <div className="flex flex-col gap-3.5">
-            {DEPARTMENTS.map(({ href, title, subtitle, icon: Icon, light, chip }) => (
+            {visible.map(({ href, title, subtitle, icon: Icon, light, chip }) => (
               <Link
                 key={href}
                 href={href}

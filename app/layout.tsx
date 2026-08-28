@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppFrame from "@/components/AppFrame";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 
 export const metadata: Metadata = {
   title: "Karkhana ERP — Head Office",
@@ -36,7 +37,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <AppFrame>{children}</AppFrame>
+        <AppFrame><ConfirmProvider>{children}</ConfirmProvider></AppFrame>
       </body>
     </html>
   );

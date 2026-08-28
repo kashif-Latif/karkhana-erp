@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Loader2, UserPlus, ShieldCheck, X, KeyRound, Users, Trash2, RotateCcw } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Role = { id: string; name: string; code: string };
 type AppUser = Record<string, unknown>;
@@ -11,6 +12,7 @@ const EMPTY_NEW: NewForm = { full_name: "", email: "", phone: "", password: "", 
 const SYNTH = "@karkhana.local";
 
 export default function UsersTab({ canManage }: { canManage: boolean }) {
+  const confirm = useConfirm();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +68,9 @@ export default function UsersTab({ canManage }: { canManage: boolean }) {
 
   async function removeUser(userId: string, name: string) {
     if (!supabase) return;
-    if (!window.confirm(`Remove ${name}'s account permanently? They will no longer be able to log in. This cannot be undone.`)) return;
+    if (!(await confirm({ title: `Remove ${name}'s account?`,
+                          body: "They will no longer be able to log in. What they did stays in the audit log, but stops naming them.",
+                          confirmLabel: "Remove account" }))) return;
     setBusy(userId); setError("");
     const { data, error } = await supabase.functions.invoke("create-user", { body: { action: "delete", user_id: userId } });
     setBusy(null);

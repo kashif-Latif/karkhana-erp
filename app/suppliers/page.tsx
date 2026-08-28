@@ -4,6 +4,7 @@ import Topbar from "@/components/Topbar";
 import IconChip from "@/components/IconChip";
 import { Truck, Plus, Search, Pencil, X, Loader2, Building2, Trash2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Supplier = {
   id: string;
@@ -25,6 +26,7 @@ const EMPTY = {
 };
 
 export default function SuppliersPage() {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [canManage, setCanManage] = useState(false);
@@ -84,7 +86,8 @@ export default function SuppliersPage() {
 
   async function remove() {
     if (!supabase || !editing) return;
-    if (!window.confirm("Delete this supplier permanently? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete this supplier?",
+                          body: "This cannot be undone.", confirmLabel: "Delete" }))) return;
     setSaving(true); setError("");
     const res = await supabase.from("suppliers").delete().eq("id", editing);
     setSaving(false);

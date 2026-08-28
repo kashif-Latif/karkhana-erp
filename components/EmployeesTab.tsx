@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, X, Loader2, Trash2, Users } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const when = (s: string) => new Date(s).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 type Opt = { id: string; name: string };
@@ -30,6 +31,7 @@ const PAY_METHODS = ["Cash", "Bank"];
 export default function EmployeesTab({ canManage, departments, designations }: {
   canManage: boolean; departments: Opt[]; designations: Opt[];
 }) {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<Emp[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -91,7 +93,9 @@ export default function EmployeesTab({ canManage, departments, designations }: {
   }
   async function remove() {
     if (!supabase || !editing) return;
-    if (!window.confirm("Delete this employee permanently? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete this employee?",
+                          body: "Their attendance and salary history goes with them. This cannot be undone.",
+                          confirmLabel: "Delete" }))) return;
     setSaving(true); setError("");
     const res = await supabase.from("employees").delete().eq("id", editing);
     setSaving(false);

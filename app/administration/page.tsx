@@ -2,15 +2,18 @@
 import { useEffect, useState } from "react";
 import Topbar from "@/components/Topbar";
 import UsersTab from "@/components/UsersTab";
+import AdminEmployeesTab from "@/components/AdminEmployeesTab";
 import RolesView from "@/components/RolesView";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ShieldAlert } from "lucide-react";
 
-const TABS = ["Users", "Roles & Permissions"] as const;
+// Employees first: it is the tab people open most, and it is the one that
+// makes this page the place where staff are managed rather than just logins.
+const TABS = ["Employees", "Users", "Roles & Permissions"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function AdministrationPage() {
-  const [tab, setTab] = useState<Tab>("Users");
+  const [tab, setTab] = useState<Tab>("Employees");
   const [canManage, setCanManage] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -20,7 +23,7 @@ export default function AdministrationPage() {
 
   return (
     <>
-      <Topbar title="Administration" subtitle="Accounts, roles & access" />
+      <Topbar title="Administration" subtitle="Employees, logins, roles & access" />
       <div className="px-6 pb-10">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage users.</div>
@@ -40,6 +43,7 @@ export default function AdministrationPage() {
               ))}
             </div>
 
+            {tab === "Employees" && <AdminEmployeesTab canManage={!!canManage} />}
             {tab === "Users" && <UsersTab canManage={!!canManage} />}
             {tab === "Roles & Permissions" && <RolesView />}
           </>

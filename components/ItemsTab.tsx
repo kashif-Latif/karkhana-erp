@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Pencil, X, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Group = { id: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean };
 type Opt = { id: string; name: string };
@@ -16,6 +17,7 @@ type FormState = {
 const EMPTY: FormState = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", name: "", is_active: true };
 
 export default function ItemsTab({ canManage }: { canManage: boolean }) {
+  const confirm = useConfirm();
   const [items, setItems] = useState<Item[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [categories, setCategories] = useState<CatOpt[]>([]);
@@ -107,7 +109,8 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
 
   async function remove() {
     if (!supabase || !editing) return;
-    if (!window.confirm("Delete this item permanently? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete this item?",
+                          body: "This cannot be undone.", confirmLabel: "Delete" }))) return;
     setSaving(true); setError("");
     const res = await supabase.from("material_items").delete().eq("id", editing);
     setSaving(false);

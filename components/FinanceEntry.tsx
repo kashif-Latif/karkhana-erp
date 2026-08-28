@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Plus, Loader2, CheckCircle2, AlertTriangle, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import Modal, { Field, inputCls, btnPrimary, btnGhost } from "@/components/Modal";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Res = { ok: boolean; msg: string } | null;
 type Row = Record<string, unknown>;
@@ -89,6 +90,7 @@ export function AddFinanceRow({ tab, onDone }: { tab: "payments" | "cpr" | "retu
 /* ---------------- Edit an existing row (mark paid / received) ---------------- */
 export function EditFinanceRow({ tab, row, onClose, onDone }:
   { tab: "payments" | "cpr" | "returns"; row: Row | null; onClose: () => void; onDone: () => void }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Res>(null);
   const [f, setF] = useState<Record<string, string>>({});
@@ -148,7 +150,8 @@ export function EditFinanceRow({ tab, row, onClose, onDone }:
 
   async function remove() {
     if (!supabase || tab === "payments") return;
-    if (!confirm("Delete this record? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete this record?",
+                          body: "This cannot be undone.", confirmLabel: "Delete" }))) return;
     setBusy(true);
     const table = tab === "cpr" ? "online_cpr" : "online_returns";
     const { error } = await supabase.from(table).delete().eq("id", id);
