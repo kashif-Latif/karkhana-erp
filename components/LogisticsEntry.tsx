@@ -215,14 +215,14 @@ export function UploadCourierFile({ onDone }: { onDone: () => void }) {
               {preview.rows.length.toLocaleString()} rows · {preview.headers.length} columns detected
             </div>
             <div className="max-h-48 overflow-auto">
-              <table className="w-full text-left text-[12px]">
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[12px]">
                 <thead><tr className="text-[10.5px] uppercase tracking-wide text-hint dark:text-[#8a8175]">{preview.headers.slice(0, 6).map((h) => <th key={h} className="px-3 py-2 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-line dark:divide-white/[0.05]">
                   {preview.rows.slice(0, 4).map((r, i) => (
                     <tr key={i} className="text-ink dark:text-[#e7e2d8]">{preview.headers.slice(0, 6).map((h) => <td key={h} className="max-w-[130px] truncate px-3 py-2">{r[h]}</td>)}</tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           </div>
         )}

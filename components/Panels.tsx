@@ -4,19 +4,21 @@ import { Boxes, FileText, ArrowRight, Flame } from "lucide-react";
 import IconChip from "./IconChip";
 import { materials, approvals } from "@/lib/sampleData";
 
+// Variables, so .dark can redefine them — see globals.css.
 const DOT: Record<string, string> = {
-  salmon: "#E1876B",
-  amber: "#E4B47E",
-  lavender: "#B693DD",
-  periwinkle: "#7FA3DC",
-  pink: "#E07FBE",
+  salmon: "var(--dot-salmon)",
+  amber: "var(--dot-amber)",
+  lavender: "var(--dot-lavender)",
+  periwinkle: "var(--dot-periwinkle)",
+  pink: "var(--dot-pink)",
 };
+// Variables, so .dark can redefine them — see globals.css.
 const TILE: Record<string, string> = {
-  salmon: "#F5D9CE",
-  amber: "#F7EAD3",
-  lavender: "#ECE1F6",
-  periwinkle: "#DCE7F5",
-  pink: "#F8DCEE",
+  salmon: "var(--tint-salmon)",
+  amber: "var(--tint-amber)",
+  lavender: "var(--tint-lavender)",
+  periwinkle: "var(--tint-periwinkle)",
+  pink: "var(--tint-pink)",
 };
 
 export function StockPanel() {

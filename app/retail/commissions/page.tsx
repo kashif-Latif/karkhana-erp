@@ -167,7 +167,7 @@ export default function CommissionsPage() {
             ))}
           </div>
           <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
-            <table className="w-full text-left text-[13px]">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
               <thead><tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]"><th className="px-4 py-3 font-semibold">Salesperson</th><th className="px-4 py-3 text-right font-semibold">Receipts</th><th className="px-4 py-3 text-right font-semibold">Sales</th><th className="px-4 py-3 text-right font-semibold">Item comm.</th><th className="px-4 py-3 text-right font-semibold">Bonus</th><th className="px-4 py-3 text-right font-semibold">Total</th></tr></thead>
               <tbody className="divide-y divide-line dark:divide-white/[0.05]">
                 {loading ? Array.from({ length: 6 }).map((_, i) => <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
@@ -177,7 +177,7 @@ export default function CommissionsPage() {
                   <tr key={e.sp} className="text-ink dark:text-[#e7e2d8]"><td className="px-4 py-3 font-semibold">{e.sp}</td><td className="px-4 py-3 text-right tabular-nums">{e.receipts.toLocaleString()}</td><td className="px-4 py-3 text-right tabular-nums">{rs(e.sales)}</td><td className="px-4 py-3 text-right tabular-nums">{rs(e.item)}</td><td className="px-4 py-3 text-right tabular-nums">{rs(e.bonus)}</td><td className="px-4 py-3 text-right font-bold tabular-nums">{rs(e.total)}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </>
       )}
@@ -193,7 +193,7 @@ export default function CommissionsPage() {
             </div>
           </div>
           <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
-            <table className="w-full text-left text-[13px]">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
               <thead><tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]">
                 {tab === "rates" ? <><th className="px-4 py-3 font-semibold">Item code</th><th className="px-4 py-3 font-semibold">Item name</th><th className="px-4 py-3 text-right font-semibold">Retail</th><th className="px-4 py-3 text-right font-semibold">Commission</th><th className="px-4 py-3 text-right font-semibold">%</th></>
                             : <><th className="px-4 py-3 font-semibold">Item code</th><th className="px-4 py-3 text-right font-semibold">Commission</th></>}
@@ -207,7 +207,7 @@ export default function CommissionsPage() {
                   : filteredFc.slice(0, 500).map((f) => <tr key={f.item_code} className="text-ink dark:text-[#e7e2d8]"><td className="px-4 py-3 font-semibold">{f.item_code}</td><td className="px-4 py-3 text-right tabular-nums">{rs(num(f.commission))}</td></tr>)
                 )}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </>
       )}

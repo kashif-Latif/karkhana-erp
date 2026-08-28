@@ -207,7 +207,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                 totals were captured — re-import the file and it will fill in.</span>
               </div>
             ) : (
-              <table className="mt-2 w-full text-[13px]">
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="mt-2 w-full text-[13px]">
                 <tbody>
                   {lines.map(([label, val, isDeduction]) => (
                     <tr key={label} className="border-b border-line/60 last:border-0 dark:border-white/[0.06]">
@@ -220,7 +220,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                     <td className="pt-2 text-right text-[15px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{money(netTotal)}</td>
                   </tr>
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
 
@@ -345,7 +345,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
             ) : parcels.length === 0 ? (
               <div className="p-4 text-[13px] text-muted">No parcels here carry this CPR number.</div>
             ) : (
-              <table className="w-full text-[12.5px]">
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-[12.5px]">
                 <thead className="sticky top-0 bg-panel text-left text-muted dark:bg-[#221e19] dark:text-[#a89f93]">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Order</th>
@@ -385,7 +385,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                     );
                   })}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
           <div className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">

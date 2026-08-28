@@ -45,7 +45,7 @@ export default function DotMatrix({
             y={h + 16}
             textAnchor="middle"
             fontSize="10"
-            fill="#857C72"
+            fill="var(--muted)"
           >
             {l}
           </text>

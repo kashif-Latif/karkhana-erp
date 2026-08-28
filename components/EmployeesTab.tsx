@@ -138,7 +138,7 @@ export default function EmployeesTab({ canManage, departments, designations }: {
             <p className="text-[12.5px] text-muted">{canManage ? "Add your first employee." : "Nothing here yet."}</p>
           </div>
         ) : (
-          <table className="w-full text-left text-[13px]">
+          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                 <th className="px-5 py-3 font-semibold">Code</th>
@@ -175,7 +175,7 @@ export default function EmployeesTab({ canManage, departments, designations }: {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       <p className="mt-3 text-[12px] text-muted">{filtered.length} employee(s)</p>

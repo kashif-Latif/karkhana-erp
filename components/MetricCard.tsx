@@ -3,12 +3,13 @@ import { ArrowUpRight, type LucideIcon } from "lucide-react";
 import IconChip from "./IconChip";
 import { useCountUp } from "@/lib/useCountUp";
 
+// Variables, so .dark can redefine them — see globals.css.
 const TINT: Record<string, string> = {
-  salmon: "#F5D9CE",
-  amber: "#F7EAD3",
-  lavender: "#ECE1F6",
-  periwinkle: "#DCE7F5",
-  pink: "#F8DCEE",
+  salmon: "var(--tint-salmon)",
+  amber: "var(--tint-amber)",
+  lavender: "var(--tint-lavender)",
+  periwinkle: "var(--tint-periwinkle)",
+  pink: "var(--tint-pink)",
 };
 
 export default function MetricCard({
@@ -42,11 +43,11 @@ export default function MetricCard({
     >
       <div className="flex items-start justify-between">
         <IconChip Icon={Icon} />
-        <ArrowUpRight size={18} className="text-ink/40" />
+        <ArrowUpRight size={18} style={{ color: "var(--tint-ink)", opacity: 0.4 }} />
       </div>
-      <p className="mt-4 text-[13px] font-medium text-ink/70">{label}</p>
+      <p className="mt-4 text-[13px] font-medium" style={{ color: "var(--tint-ink)", opacity: 0.7 }}>{label}</p>
       <div className="mt-1 flex items-end gap-2">
-        <span className="text-2xl font-extrabold tnum text-ink">{display}</span>
+        <span className="text-2xl font-extrabold tnum" style={{ color: "var(--tint-ink)" }}>{display}</span>
         {delta && (
           <span
             className="mb-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"

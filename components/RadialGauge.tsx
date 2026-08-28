@@ -31,7 +31,9 @@ export default function RadialGauge({
     const x2 = cx + rOuter * Math.cos(ang);
     const y2 = cy + rOuter * Math.sin(ang);
     const on = i < filled;
-    const color = on ? ACCENTS[Math.floor(t * ACCENTS.length) % ACCENTS.length] : "#E7E1D8";
+    // The unlit part of the dial has to darken with the page, or the gauge
+    // reads as almost-full in dark mode.
+    const color = on ? ACCENTS[Math.floor(t * ACCENTS.length) % ACCENTS.length] : "var(--tint-track)";
     return (
       <line
         key={i}

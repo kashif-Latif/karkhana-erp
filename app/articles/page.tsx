@@ -137,7 +137,7 @@ export default function Articles() {
               </div>
             ) : (
               <div className="overflow-hidden rounded-card bg-surface shadow-card">
-                <table className="w-full text-left text-[13.5px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13.5px]">
                   <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                     <th className="px-5 py-3 font-semibold">Code</th><th className="px-5 py-3 font-semibold">Article</th>
                     <th className="px-5 py-3 font-semibold">Type</th><th className="px-5 py-3 font-semibold">Audience</th>
@@ -161,7 +161,7 @@ export default function Articles() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             )}
           </>

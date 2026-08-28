@@ -114,7 +114,7 @@ export default function MasterTab({
             No {singular.toLowerCase()} yet{canManage ? " — add your first one." : "."}
           </div>
         ) : (
-          <table className="w-full text-left text-[13px]">
+          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                 {cols.map((c) => <th key={c.key} className="px-5 py-3 font-semibold">{c.label}</th>)}
@@ -147,7 +147,7 @@ export default function MasterTab({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       <p className="mt-3 text-[12px] text-muted">{rows.length} {singular.toLowerCase()}(s)</p>

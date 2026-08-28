@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import UsersTab from "@/components/UsersTab";
 import AdminEmployeesTab from "@/components/AdminEmployeesTab";
@@ -25,6 +27,12 @@ export default function AdministrationPage() {
     <>
       <Topbar title="Administration" subtitle="Employees, logins, roles & access" />
       <div className="px-6 pb-10">
+        {/* Administration is one of the four boxes on the home screen, not a
+            page inside a department — so it needs its own way back. Without the
+            factory sidebar there was no route out but the browser button. */}
+        <Link href="/" className="mb-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-muted transition hover:text-ink dark:text-[#a89f93] dark:hover:text-white">
+          <ArrowLeft size={15} /> All departments
+        </Link>
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage users.</div>
         ) : (

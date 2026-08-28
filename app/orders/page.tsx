@@ -25,7 +25,7 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
   if (reqs.length === 0) return <div className="rounded-xl2 bg-panel px-3.5 py-3 text-[12.5px] text-muted">No recipe set for this article yet — add one on the <b>Articles</b> screen, and material will calculate here automatically.</div>;
   return (
     <div className="overflow-hidden rounded-xl2 border border-line">
-      <table className="w-full text-left text-[12.5px]">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[12.5px]">
         <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted"><th className="px-3 py-2 font-semibold">Material</th><th className="px-3 py-2 text-right font-semibold">Needed</th><th className="px-3 py-2 text-right font-semibold">In stock</th><th className="px-3 py-2 text-right font-semibold">OK?</th></tr></thead>
         <tbody>
           {reqs.map((r, i) => (
@@ -39,7 +39,7 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -157,7 +157,7 @@ export default function Orders() {
               </div>
             ) : (
               <div className="overflow-hidden rounded-card bg-surface shadow-card">
-                <table className="w-full text-left text-[13.5px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13.5px]">
                   <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                     <th className="px-5 py-3 font-semibold">Order</th><th className="px-5 py-3 font-semibold">Article</th>
                     <th className="px-5 py-3 text-right font-semibold">Pieces</th><th className="px-5 py-3 font-semibold">Target</th>
@@ -179,7 +179,7 @@ export default function Orders() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             )}
           </>

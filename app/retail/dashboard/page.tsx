@@ -208,14 +208,14 @@ export default function RetailDashboard() {
         <div className="mt-6">
           <h3 className="mb-2 text-[14px] font-bold text-ink dark:text-[#f4f1ea]">By business</h3>
           <div className="overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
-            <table className="w-full text-left text-[13px]">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
               <thead><tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]"><th className="px-4 py-3 font-semibold">Business</th><th className="px-4 py-3 text-right font-semibold">Sales</th><th className="px-4 py-3 text-right font-semibold">Gross Margin</th><th className="px-4 py-3 text-right font-semibold">Expenses</th><th className="px-4 py-3 text-right font-semibold">Net Profit</th></tr></thead>
               <tbody className="divide-y divide-line dark:divide-white/[0.05]">
                 {chainKeys.map((c) => ({ c, ...M.chainAgg[c], net: M.chainAgg[c].mg - M.chainAgg[c].e })).sort((a, b) => b.s - a.s).map((r) => (
                   <tr key={r.c} className="text-ink dark:text-[#e7e2d8]"><td className="px-4 py-3 font-semibold">{r.c}</td><td className="px-4 py-3 text-right tabular-nums">{rs(r.s)}</td><td className="px-4 py-3 text-right tabular-nums">{rs(r.mg)}</td><td className="px-4 py-3 text-right tabular-nums">{rs(r.e)}</td><td className={`px-4 py-3 text-right font-semibold tabular-nums ${r.net < 0 ? "text-danger" : "text-success"}`}>{rs(r.net)}</td></tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}

@@ -114,7 +114,7 @@ export default function InventoryPage() {
                   <p className="text-[12.5px] text-muted">Receive your first delivery to see stock here.</p>
                 </div>
               ) : (
-                <table className="w-full text-left text-[13px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                       <th className="px-5 py-2.5 font-semibold">Material</th>
@@ -129,7 +129,7 @@ export default function InventoryPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
 
@@ -142,7 +142,7 @@ export default function InventoryPage() {
                   <p className="text-[13px] font-semibold text-ink">No receipts yet</p>
                 </div>
               ) : (
-                <table className="w-full text-left text-[13px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                       <th className="px-5 py-2.5 font-semibold">GRN</th>
@@ -182,7 +182,7 @@ export default function InventoryPage() {
                       </tr>
                     );})}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
           </div>
@@ -207,7 +207,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-center gap-2 py-10 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
             ) : (
               <>
-                <table className="w-full text-left text-[13px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                       <th className="px-3 py-2 font-semibold">Material</th>
@@ -226,7 +226,7 @@ export default function InventoryPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
                 <div className="mt-4 ml-auto w-full max-w-[260px] space-y-1.5 text-[13px]">
                   <div className="flex justify-between"><span className="text-muted">Subtotal</span><span className="tnum text-ink">{money(Number(detailGrn.subtotal ?? 0))}</span></div>
                   <div className="flex justify-between"><span className="text-muted">Freight (+)</span><span className="tnum text-ink">{money(Number(detailGrn.freight ?? 0))}</span></div>

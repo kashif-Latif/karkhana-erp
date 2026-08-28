@@ -53,6 +53,9 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   const isFullScreen =
     pathname === "/" ||
     pathname === "/administration" || pathname.startsWith("/administration/") ||
+    // The employee portal is the whole app for the person using it. No sidebar,
+    // no department chrome — there is nowhere else for them to go.
+    pathname === "/me" ||
     pathname === "/online" || pathname.startsWith("/online/") ||
     pathname === "/retail" || pathname.startsWith("/retail/");
   const [authReady, setAuthReady] = useState(false);

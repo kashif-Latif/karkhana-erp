@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
@@ -31,6 +32,13 @@ const NAV: NavItem[] = [
 ];
 
 export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
+  /* Which groups the person has opened by hand.
+     A group used to open only while you were inside it, so the arrow was
+     decoration — it turned, but pressing it navigated instead of toggling and
+     there was no way to close a section you were standing in. Now the arrow is
+     a button that owns the state, and the route only decides what is open
+     BEFORE anyone touches it. */
+  const [manual, setManual] = useState<Record<string, boolean>>({});
   const pathname = usePathname();
   const router = useRouter();
   async function logout() { if (supabase) await supabase.auth.signOut(); router.replace("/login"); }
@@ -52,16 +60,25 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
           {NAV.map(({ label, href, Icon, soon, children }) => {
             const on = active(href);
-            // a parent opens only while you are inside it, so the sidebar stays
-            // short until the section is actually in use
-            const openGroup = !!children && on;
+            // Opened by hand wins; otherwise a section opens because you are in it.
+            const openGroup = !!children && (manual[href] ?? on);
             return (
               <div key={href}>
                 <Link href={href} className={`flex items-center gap-3 rounded-xl2 px-3.5 py-2.5 text-[14px] transition ${on ? "bg-periwinkle-soft font-semibold text-ink dark:bg-white/[0.10] dark:text-white" : "text-muted hover:bg-panel hover:text-ink dark:text-[#a89f93] dark:hover:bg-white/[0.06] dark:hover:text-white"}`}>
                   <Icon size={18} strokeWidth={2} />
                   <span className="flex-1">{label}</span>
                   {soon && <span className="rounded-full bg-panel px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-hint dark:bg-white/[0.06] dark:text-[#8a8175]">Soon</span>}
-                  {children && <ChevronDown size={15} className={`transition ${openGroup ? "rotate-180" : ""}`} />}
+                  {children && (
+                    /* Inside the Link, so the arrow has to stop the click from
+                       navigating — otherwise pressing it would open the section
+                       AND move you, which is not what an arrow means. */
+                    <button type="button" aria-label={openGroup ? `Collapse ${label}` : `Expand ${label}`}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation();
+                                        setManual((m) => ({ ...m, [href]: !openGroup })); }}
+                      className="-mr-1 rounded-full p-1 hover:bg-black/5 dark:hover:bg-white/10">
+                      <ChevronDown size={15} className={`transition ${openGroup ? "rotate-180" : ""}`} />
+                    </button>
+                  )}
                 </Link>
                 {openGroup && (
                   <div className="ml-4 mt-1 space-y-0.5 border-l border-line pl-3 dark:border-white/[0.08]">

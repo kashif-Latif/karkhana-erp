@@ -9,6 +9,34 @@
   --line: #eae5dd;
   --ink: #141414;
   --muted: #857c72;
+
+  /* PASTEL TINTS AS VARIABLES, NOT HEX IN THE COMPONENTS.
+     The dashboard cards, the material tiles and the consumption dots set their
+     colour with an inline style. An inline style beats every CSS class, so a
+     `dark:` variant could never override them — the page went dark around cards
+     that stayed pale, which is the colour "fluctuation" on the Karkhana
+     dashboard. A variable is readable from inside an inline style AND can be
+     redefined under .dark, so the same component works in both. */
+  --tint-salmon: #F5D9CE;
+  --tint-amber: #F7EAD3;
+  --tint-lavender: #ECE1F6;
+  --tint-periwinkle: #DCE7F5;
+  --tint-pink: #F8DCEE;
+
+  /* The dots and bars keep their hue in both themes — they are data, and a
+     reader learns which colour means which material. Only the large tinted
+     areas change. */
+  --dot-salmon: #E1876B;
+  --dot-amber: #E4B47E;
+  --dot-lavender: #B693DD;
+  --dot-periwinkle: #7FA3DC;
+  --dot-pink: #E07FBE;
+
+  /* Text sitting ON a tinted card. Dark ink on a pastel; near-white on the deep
+     dark tint. Without this the labels stayed near-black on a dark card and
+     effectively disappeared. */
+  --tint-ink: #141414;
+  --tint-track: #E7E1D8;
 }
 
 * {
@@ -59,6 +87,20 @@ body {
 }
 
 /* ---- Dark mode (opt-in via .dark on <html>) ---- */
+
+/* Deep, low-saturation versions of the same five hues. Dark enough for white
+   text to sit on comfortably, distinct enough that a card is still recognisable
+   as "the salmon one". Not the light pastels dimmed, which goes muddy. */
+.dark {
+  --tint-salmon: #3a2a24;
+  --tint-amber: #3a3226;
+  --tint-lavender: #322a3c;
+  --tint-periwinkle: #26303e;
+  --tint-pink: #3a2a35;
+  --tint-ink: #f4f1ea;
+  --tint-track: #2b2620;
+}
+
 .dark body {
   background: #17140f;
   color: #f4f1ea;

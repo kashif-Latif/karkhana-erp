@@ -329,14 +329,14 @@ export default function Movements() {
             {detailLines === null ? (
               <div className="flex items-center justify-center gap-2 py-8 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
             ) : (
-              <table className="w-full text-left text-[13px]">
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted"><th className="px-2 py-2 font-semibold">Item</th><th className="px-2 py-2 text-right font-semibold">Quantity</th></tr></thead>
                 <tbody>
                   {detailLines.map((r, i) => (
                     <tr key={i} className="border-b border-line/60 last:border-0"><td className="px-2 py-2 font-medium text-ink">{r.label}</td><td className="px-2 py-2 text-right tnum text-ink/80">{r.qty} <span className="text-[11px] text-muted">{r.unit}</span></td></tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         </div>

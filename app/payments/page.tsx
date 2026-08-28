@@ -132,7 +132,7 @@ export default function Payments() {
                   <p className="text-[12.5px] text-muted">Add suppliers and receive stock to see balances here.</p>
                 </div>
               ) : (
-                <table className="w-full text-left text-[13px]">
+                <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted">
                       <th className="px-5 py-3 font-semibold">Supplier</th>
@@ -164,7 +164,7 @@ export default function Payments() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
           </>
@@ -220,7 +220,7 @@ export default function Payments() {
             ) : stmt.length === 0 ? (
               <p className="py-8 text-center text-[13px] text-muted">No transactions yet.</p>
             ) : (
-              <table className="w-full text-left text-[13px]">
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
                 <thead>
                   <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                     <th className="px-3 py-2 font-semibold">Date</th>
@@ -250,7 +250,7 @@ export default function Payments() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         </div>
