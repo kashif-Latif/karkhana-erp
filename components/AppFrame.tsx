@@ -46,8 +46,13 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
   const isLogin = pathname === "/login" || pathname === "/reset-password";
   // The department chooser (/) and the new Online/Retail areas render full-screen
   // (their own chrome), not inside the factory sidebar. Still auth-gated below.
+  /* Administration is one of the four boxes on the home screen, not a page
+     inside Karkhana — so it gets its own full-screen chrome like the others.
+     It was still rendering inside the factory sidebar, which put "Raw
+     Materials" and "Production" next to a page about Hub and FS Traders staff. */
   const isFullScreen =
     pathname === "/" ||
+    pathname === "/administration" || pathname.startsWith("/administration/") ||
     pathname === "/online" || pathname.startsWith("/online/") ||
     pathname === "/retail" || pathname.startsWith("/retail/");
   const [authReady, setAuthReady] = useState(false);
