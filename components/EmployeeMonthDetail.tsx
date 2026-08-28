@@ -21,7 +21,7 @@ type Row = {
   emp_id: string; name: string; designation: string | null; salary: number;
   present: number; half: number; absent: number; leave_days: number;
   absent_deduction: number; paid_off: number; extra_days: number;
-  counted_days: number; advances: number; payable: number; is_paid: boolean;
+  counted_days: number; gross: number; advances: number; payable: number; is_paid: boolean;
 };
 type Day = { day: number; status: string };
 type Adv = { date: string; amount: number; note: string | null };
@@ -69,7 +69,8 @@ export default function EmployeeMonthDetail({
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDow = new Date(year, month - 1, 1).getDay();
   const byDay = new Map(days.map((d) => [d.day, (d.status || "").toUpperCase()]));
-  const gross = (Number(row.salary) / 30) * Number(row.counted_days);
+  // From the database: a local salary ÷ 30 × days cannot see a mid-month raise.
+  const gross = Number(row.gross ?? 0);
 
   const cards: [string, string, string][] = [
     ["Present", String(row.present), "text-emerald-700"],
@@ -196,7 +197,7 @@ export default function EmployeeMonthDetail({
           <div className="mb-1.5 font-semibold text-ink dark:text-[#f4f1ea]">Payable breakdown</div>
           <div className="space-y-1 text-muted dark:text-[#a89f93]">
             <div className="flex justify-between">
-              <span>{rs(row.salary)} ÷ 30 × {row.counted_days} counted days</span>
+              <span>Earned over {row.counted_days} counted days, each at that day&rsquo;s rate ÷ 30</span>
               <span className="tabular-nums">{rs(gross)}</span>
             </div>
             {Number(row.extra_days) > 0 && (

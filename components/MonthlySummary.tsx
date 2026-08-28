@@ -28,7 +28,7 @@ type Row = {
   emp_id: string; name: string; designation: string | null; salary: number;
   present: number; half: number; absent: number;
   leave_days: number; absent_deduction: number;
-  paid_off: number; extra_days: number; counted_days: number;
+  paid_off: number; extra_days: number; counted_days: number; gross: number;
   advances: number; payable: number; is_paid: boolean;
 };
 

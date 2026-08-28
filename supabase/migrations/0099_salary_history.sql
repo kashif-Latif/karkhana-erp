@@ -1,0 +1,258 @@
+-- 0099_salary_history.sql
+--
+-- EVERY DAY IS PAID AT THE RATE IN FORCE ON THAT DAY.
+--
+-- Hamza Khan went from Rs 45,000 to Rs 65,000 on 12 August. The old app splits
+-- the month at that date; this system applied the current rate to the whole of
+-- it and overpaid him by about Rs 7,700:
+--
+--     old app   45,000/30 x 11.5  +  65,000/30 x 17   =  54,083  ->  25,083
+--     here      65,000/30 x 28.5                      =  61,750  ->  32,750
+--
+-- Six of the seven matched only because nobody else has ever had a raise. The
+-- error was invisible and in the employee's favour, which is the kind that goes
+-- unnoticed until somebody checks the arithmetic by hand.
+--
+-- HOW THIS WORKS NOW
+--   Instead of one salary multiplied by a day count, every day of the month is
+--   valued on its own: what that day was worth, at the rate that applied then.
+--
+--       a working day worked        1 day
+--       a half day                  ½ day
+--       approved leave              1 day
+--       a Sunday or public holiday  1 day, to anyone employed that day
+--       working one of those        1 more day on top
+--       absent                      nothing
+--
+--   Each is multiplied by that day's rate ÷ 30 and the month is the sum. A
+--   raise mid-month, somebody joining on the 20th, a holiday worked — all fall
+--   out of the same rule rather than needing a special case each.
+--
+-- WHY A TABLE AND NOT A COLUMN
+--   A salary is not a fact about a person, it is a fact about a person AND a
+--   date. Storing only the current one throws away the information needed to
+--   pay last month correctly, and it is thrown away at exactly the moment
+--   somebody gets a raise — when it matters most.
+--
+-- Safe to run more than once.
+
+begin;
+
+create table if not exists online_att_salary_history (
+  emp_id         text not null,
+  effective_from date not null,
+  sal            integer not null,
+  note           text,
+  created_at     timestamptz not null default now(),
+  primary key (emp_id, effective_from)
+);
+
+comment on table online_att_salary_history is
+  'What each person was paid, and from when. A month is valued day by day against this, so a raise part way through does not retrospectively change days already worked.';
+
+grant select on online_att_salary_history to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Everyone starts with their current salary, backdated far enough to cover any
+-- month anybody will look at. Their figures do not move.
+-- ---------------------------------------------------------------------------
+insert into online_att_salary_history (emp_id, effective_from, sal, note)
+select e.id::text, date '2000-01-01', coalesce(e.sal, 0), 'starting rate'
+  from online_att_employees e
+ where not exists (
+   select 1 from online_att_salary_history h
+    where h.emp_id = e.id::text and h.effective_from = date '2000-01-01');
+
+-- The one real change in the imported data: Hamza Khan, 12 August 2026.
+-- His starting row is corrected to the rate he was actually on before it.
+update online_att_salary_history h
+   set sal = 45000, note = 'rate before the August increase'
+  from online_att_employees e
+ where e.id::text = h.emp_id
+   and lower(e.name) = 'hamza khan'
+   and h.effective_from = date '2000-01-01';
+
+insert into online_att_salary_history (emp_id, effective_from, sal, note)
+select e.id::text, date '2026-08-12', 65000, 'increase'
+  from online_att_employees e
+ where lower(e.name) = 'hamza khan'
+on conflict (emp_id, effective_from) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- The payable, valued day by day.
+-- ---------------------------------------------------------------------------
+drop function if exists my_monthly_payable(integer, integer);
+drop function if exists hub_monthly_payable(integer, integer, text);
+
+create or replace function hub_monthly_payable(
+  p_year  integer,
+  p_month integer,
+  p_department text default 'HUB'
+)
+returns table (
+  emp_id        text,
+  name          text,
+  designation   text,
+  salary        numeric,
+  present       integer,
+  half          integer,
+  absent        integer,
+  leave_days    integer,
+  absent_deduction numeric,
+  paid_off      integer,
+  extra_days    integer,
+  counted_days  numeric,
+  gross         numeric,
+  advances      numeric,
+  payable       numeric,
+  is_paid       boolean
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $function$
+  with bounds as (
+    select make_date(p_year, p_month, 1) as first_day,
+           least((make_date(p_year, p_month, 1) + interval '1 month - 1 day')::date,
+                 current_date) as up_to
+  ),
+  days as (
+    select d::date                                   as day_date,
+           to_char(d, 'YYYY-MM-DD')                  as day,
+           (extract(dow from d) = 0
+             or exists (select 1 from online_att_holidays h
+                         where h.hdate = to_char(d, 'YYYY-MM-DD'))) as is_off
+      from bounds b, generate_series(b.first_day, b.up_to, interval '1 day') d
+  ),
+  staff as (
+    select e.id::text as emp_id, e.name, e.designation,
+           coalesce(e.sal, 0)::numeric as salary,
+           (select x.join_date from employees x
+             where lower(x.name) = lower(e.name)
+               and x.department_id = e.department_id limit 1) as join_date
+      from online_att_employees e
+     where p_department is null
+        or e.department_id = (select id from departments where code = p_department)
+  ),
+  marked as (
+    select r.emp_id,
+           to_char(make_date(r.year, r.month, r.day), 'YYYY-MM-DD') as day,
+           upper(btrim(r.status)) as status
+      from online_att_records r
+     where r.year = p_year and r.month = p_month
+  ),
+  -- One row per person per day: what that day was worth, and at what rate.
+  valued as (
+    select s.emp_id,
+           d.day_date,
+           d.is_off,
+           m.status,
+           /* The day's value in days. A day off that was worked is worth two:
+              one because it is paid to everyone, one more for working it. */
+           case
+             when m.status = 'A' then 0
+             when d.is_off and m.status in ('P','H','L') then 2
+             when d.is_off then case when s.join_date is null
+                                      or d.day_date >= s.join_date then 1 else 0 end
+             when m.status in ('P','L') then 1
+             when m.status = 'H' then 0.5
+             else 0
+           end::numeric as day_value,
+           /* The rate in force on that day — the most recent change on or
+              before it. This is the whole point of the table. */
+           coalesce((select h.sal from online_att_salary_history h
+                      where h.emp_id = s.emp_id and h.effective_from <= d.day_date
+                      order by h.effective_from desc limit 1), s.salary)::numeric as rate
+      from staff s
+      cross join days d
+      left join marked m on m.emp_id = s.emp_id and m.day = d.day
+  ),
+  tally as (
+    select v.emp_id,
+           count(*) filter (where v.status in ('P','L') and not v.is_off)      as present,
+           count(*) filter (where v.status = 'H' and not v.is_off)             as half,
+           count(*) filter (where v.status = 'A')                              as absent,
+           count(*) filter (where v.status = 'L')                              as leave_days,
+           count(*) filter (where v.is_off and v.day_value > 0)                as paid_off,
+           count(*) filter (where v.is_off and v.status in ('P','H','L'))      as extra_days,
+           sum(v.day_value)                                                    as counted_days,
+           sum(v.day_value * v.rate / 30.0)                                    as gross,
+           -- What the absent days would have paid, at their own day's rate.
+           sum(case when v.status = 'A' then v.rate / 30.0 else 0 end)         as absent_deduction,
+           count(*) filter (where v.status is not null)                        as marked_days
+      from valued v
+     group by v.emp_id
+  ),
+  adv as (
+    select a.emp_id, coalesce(sum(a.amount), 0)::numeric as advances
+      from online_att_advances a
+     where a.deduct_year = p_year and a.deduct_month = p_month
+     group by a.emp_id
+  )
+  select s.emp_id, s.name, s.designation, s.salary,
+         t.present::integer, t.half::integer, t.absent::integer, t.leave_days::integer,
+         round(t.absent_deduction)::numeric,
+         -- Nobody marked at all was not being tracked that month, so no days
+         -- off are owed and the month is zero rather than a month of Sundays.
+         case when t.marked_days = 0 then 0 else t.paid_off end::integer,
+         t.extra_days::integer,
+         case when t.marked_days = 0 then 0 else t.counted_days end,
+         case when t.marked_days = 0 then 0 else round(t.gross) end,
+         coalesce(a.advances, 0),
+         case when t.marked_days = 0 then -coalesce(a.advances, 0)
+              else round(t.gross - coalesce(a.advances, 0)) end,
+         coalesce(ss.paid, false)
+    from staff s
+    join tally t on t.emp_id = s.emp_id
+    left join adv a on a.emp_id = s.emp_id
+    left join online_att_salary_status ss
+           on ss.emp_id = s.emp_id and ss.year = p_year and ss.month = p_month
+   order by s.name;
+$function$;
+
+grant execute on function hub_monthly_payable(integer, integer, text) to authenticated;
+
+create or replace function my_monthly_payable(p_year integer, p_month integer)
+returns table (
+  name text, designation text, salary numeric,
+  present integer, half integer, absent integer, leave_days integer,
+  absent_deduction numeric, paid_off integer, extra_days integer,
+  counted_days numeric, gross numeric, advances numeric, payable numeric, is_paid boolean
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $function$
+  select m.name, m.designation, m.salary, m.present, m.half, m.absent,
+         m.leave_days, m.absent_deduction, m.paid_off, m.extra_days,
+         m.counted_days, m.gross, m.advances, m.payable, m.is_paid
+    from hub_monthly_payable(p_year, p_month, null) m
+   where m.emp_id = (select e.id::text from online_att_employees e
+                      where e.user_id = auth.uid() limit 1);
+$function$;
+
+grant execute on function my_monthly_payable(integer, integer) to authenticated;
+
+commit;
+
+-- ===========================================================================
+-- VERIFY — Hamza Khan must now come to Rs 25,083 on 28 counted days, matching
+-- the old app exactly. Everyone else must be unchanged.
+-- ===========================================================================
+-- select name, present, half, absent, paid_off, extra_days,
+--        counted_days, gross, advances, payable
+--   from hub_monthly_payable(2026, 8) order by name;
+--
+--   Hamza Khan     28.5 counted · gross 54,083 · payable 25,083
+--   Abdul Rehman   29.0 counted · gross 58,967 · payable 57,952
+--   Awais          29.0 counted · gross 53,167 · payable 13,167
+--
+-- RECORDING A RAISE FROM NOW ON
+--   insert into online_att_salary_history (emp_id, effective_from, sal, note)
+--   select id::text, date '2026-09-01', 70000, 'annual increase'
+--     from online_att_employees where name = 'Hamza Khan';
+--
+--   Days before that date keep the old rate. Nothing already paid moves.
+-- ===========================================================================
