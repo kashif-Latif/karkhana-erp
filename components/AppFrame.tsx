@@ -22,6 +22,22 @@ function AccessRestricted() {
 }
 
 // Inside the provider: has access to the shared permissions.
+/* THE SAME GATE, WITHOUT THE FACTORY CHROME.
+   FrameContent checks requiredFor(pathname) before rendering. The full-screen
+   branch returned children straight through, so every /online/* page was open
+   to anyone who could log in — Finance included. Adding the Hub routes to
+   ROUTE_PERMS changed nothing on its own, because on those pages nothing was
+   reading the map.
+
+   The rule has to be applied wherever a page renders, not wherever it happens
+   to be convenient. */
+function FullScreenGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { ready, can } = usePermissions();
+  if (!ready) return null;                       // nothing until we know
+  return can(requiredFor(pathname)) ? <>{children}</> : <AccessRestricted />;
+}
+
 function FrameContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { ready, can } = usePermissions();
@@ -90,7 +106,7 @@ export default function AppFrame({ children }: { children: React.ReactNode }) {
 
      The provider now wraps both branches. Only the chrome differs. */
   if (isFullScreen) {
-    return <PermissionsProvider>{children}</PermissionsProvider>;
+    return <PermissionsProvider><FullScreenGate>{children}</FullScreenGate></PermissionsProvider>;
   }
 
   // Only now (fully authenticated) do we load permissions — one shared copy.

@@ -17,6 +17,28 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/reports": ["reports.view"],
   "/approvals": ["inventory.approve", "production.approve", "grn.approve"],
   "/administration": ["users.manage", "roles.manage"],
+
+  /* THE HUB. Until now not one /online/* path was listed here, so every Hub
+     page was open to anyone who could log in — Finance included. The
+     permissions have existed since 0090; nothing was checking them.
+
+     `.manage` is listed alongside `.view` on each line because someone who can
+     change a thing can obviously look at it, and a role granted only manage
+     should not be locked out of the page it manages.
+
+     /me is deliberately absent: the employee portal is for whoever is signed
+     in, it takes no parameter, and every figure on it is filtered by auth.uid()
+     inside Postgres. Requiring a permission would lock employees out of their
+     own wages. */
+  "/online": null,
+  "/online/dashboard": ["hub.dashboard.view"],
+  "/online/orders": ["hub.orders.view", "hub.orders.manage"],
+  "/online/logistics": ["hub.logistics.view", "hub.logistics.manage"],
+  "/online/logistics/returns": ["hub.logistics.view", "hub.logistics.manage"],
+  "/online/finance": ["hub.finance.view", "hub.finance.manage"],
+  "/online/attendance": ["hub.attendance.view", "hub.attendance.manage"],
+  "/online/employees": ["hub.attendance.view", "hub.attendance.manage"],
+  "/me": null,
 };
 
 export function hasAny(perms: Set<string>, required: string[] | null): boolean {

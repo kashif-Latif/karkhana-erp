@@ -22,10 +22,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, AlertTriangle, Check } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import EmployeeMonthDetail from "@/components/EmployeeMonthDetail";
 
 type Row = {
   emp_id: string; name: string; designation: string | null; salary: number;
   present: number; half: number; absent: number;
+  leave_days: number; absent_deduction: number;
   paid_off: number; extra_days: number; counted_days: number;
   advances: number; payable: number; is_paid: boolean;
 };
@@ -42,6 +44,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
+  const [detail, setDetail] = useState<Row | null>(null);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -73,9 +76,10 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
     present: a.present + Number(r.present),
     half: a.half + Number(r.half),
     absent: a.absent + Number(r.absent),
+    lost: a.lost + Number(r.absent_deduction),
     advances: a.advances + Number(r.advances),
     payable: a.payable + Number(r.payable),
-  }), { present: 0, half: 0, absent: 0, advances: 0, payable: 0 });
+  }), { present: 0, half: 0, absent: 0, lost: 0, advances: 0, payable: 0 });
 
   const isCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
 
@@ -116,6 +120,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
               <th className="px-3 py-3 text-right font-semibold text-emerald-700">Present</th>
               <th className="px-3 py-3 text-right font-semibold text-amber-700">Half</th>
               <th className="px-3 py-3 text-right font-semibold text-red-700">Absent</th>
+              <th className="px-3 py-3 text-right font-semibold text-red-700">Lost</th>
               <th className="px-3 py-3 text-right font-semibold">Paid off</th>
               <th className="px-3 py-3 text-right font-semibold">Counted</th>
               <th className="px-3 py-3 text-right font-semibold">Advance</th>
@@ -125,23 +130,36 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
           </thead>
           <tbody className="divide-y divide-line dark:divide-white/[0.05]">
             {loading ? (
-              <tr><td colSpan={10} className="px-3 py-10 text-center text-muted">
+              <tr><td colSpan={11} className="px-3 py-10 text-center text-muted">
                 <Loader2 size={15} className="mr-2 inline animate-spin" /> Loading…
               </td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-14 text-center text-[13px] text-muted dark:text-[#a89f93]">
+              <tr><td colSpan={11} className="px-3 py-14 text-center text-[13px] text-muted dark:text-[#a89f93]">
                 Nobody in this department for {MONTHS[month]} {year}.
               </td></tr>
             ) : rows.map((r) => (
               <tr key={r.emp_id} className="text-ink dark:text-[#e7e2d8]">
                 <td className="px-3 py-3">
-                  <div className="font-semibold">{r.name}</div>
+                  {/* The name is the way in. A summary answers what everyone is
+                      owed; this answers why THIS person is owed it, which is the
+                      question actually asked when somebody queries their pay. */}
+                  <button onClick={() => setDetail(r)}
+                          className="text-left font-semibold underline decoration-transparent underline-offset-2 transition hover:decoration-current">
+                    {r.name}
+                  </button>
                   {r.designation && <div className="text-[11.5px] text-muted dark:text-[#a89f93]">{r.designation}</div>}
                 </td>
                 <td className="px-3 py-3 text-right tabular-nums">{rs(r.salary)}</td>
                 <td className="px-3 py-3 text-right font-semibold tabular-nums text-emerald-700">{r.present}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-amber-700">{r.half || "0"}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-red-700">{r.absent || "0"}</td>
+                {/* The deduction, stated. An absent day already cost a day's pay
+                    by not being counted, but subtraction by omission is invisible
+                    — Ahmad's two absences turned 13,000 into 12,000 with nothing
+                    on screen saying why. */}
+                <td className="px-3 py-3 text-right tabular-nums text-red-700">
+                  {Number(r.absent_deduction) ? "− " + rs(r.absent_deduction) : "—"}
+                </td>
                 <td className="px-3 py-3 text-right tabular-nums text-muted dark:text-[#a89f93]">
                   {r.paid_off}{Number(r.extra_days) > 0 && <span className="text-emerald-700"> +{r.extra_days}</span>}
                 </td>
@@ -170,6 +188,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
                 <td className="px-3 py-3 text-right tabular-nums text-emerald-700">{t.present}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-amber-700">{t.half}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-red-700">{t.absent}</td>
+                <td className="px-3 py-3 text-right tabular-nums text-red-700">− {rs(t.lost)}</td>
                 <td /><td />
                 <td className="px-3 py-3 text-right tabular-nums">{rs(t.advances)}</td>
                 <td className="px-3 py-3 text-right text-[15px] tabular-nums">{rs(t.payable)}</td>
@@ -180,9 +199,15 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
         </table>
       </div>
 
+      {detail && (
+        <EmployeeMonthDetail row={detail} year={year} month={month}
+          onClose={() => setDetail(null)} onChanged={load} />
+      )}
+
       <p className="mt-3 text-[12px] leading-relaxed text-hint dark:text-[#8a8175]">
         Payable = Salary ÷ 30 × counted days (Present + ½·Half + paid days off) − advances.
         Sundays and public holidays are paid for everyone; working a day off adds one extra day.
+        Approved leave is paid in full; an absent day is not counted, and "Lost" is what it would have paid.
         {isCurrentMonth && " This month counts days up to today, so the figure grows as the month goes on."}
       </p>
     </div>

@@ -1,4 +1,4 @@
--- 0095_no_pay_for_unmarked_months.sql
+-- 0095_no_pay_for_unmarked_months.sql  (rev 2 — paid leave, visible deduction)
 --
 -- TWO PROBLEMS. THE SECOND IS THE SERIOUS ONE.
 --
@@ -27,6 +27,17 @@
 --
 -- Everything else is untouched: the formula, the ÷30, the extra day for working
 -- a day off. Abdul Rehman's August still comes to Rs 57,952.
+--
+-- REV 2 adds two things.
+--
+--   PAID LEAVE. 'L' now counts as a full present day. Approved leave that costs
+--   somebody their wage is not leave, it is an absence with a friendlier name —
+--   the distinction between the two IS whether it is paid.
+--
+--   A VISIBLE DEDUCTION. Absence already cost a day's pay, because an uncounted
+--   day earns nothing. But subtraction by omission is invisible: Ahmad's two
+--   absences turned Rs 13,000 into Rs 12,000 with nothing on screen saying so.
+--   `absent_deduction` states it — what those days would have paid.
 --
 -- Safe to run more than once.
 
@@ -59,6 +70,8 @@ returns table (
   present       integer,
   half          integer,
   absent        integer,
+  leave_days    integer,
+  absent_deduction numeric,
   paid_off      integer,
   extra_days    integer,
   counted_days  numeric,
@@ -105,7 +118,9 @@ as $function$
   tally as (
     select s.emp_id,
            count(m.day)                                                       as marked_days,
-           count(*) filter (where m.status = 'P' and not m.is_off)            as present,
+           -- Leave counts exactly like a present day. That is what makes it leave.
+           count(*) filter (where m.status in ('P','L') and not m.is_off)      as present,
+           count(*) filter (where m.status = 'L')                             as leave_days,
            count(*) filter (where m.status = 'H' and not m.is_off)            as half,
            count(*) filter (where m.status = 'A')                             as absent,
            /* PAID DAYS OFF ARE A BENEFIT OF BEING EMPLOYED THAT MONTH, not a
@@ -118,7 +133,7 @@ as $function$
            case when count(m.day) = 0 then 0
                 else (select count(*) from days d where d.is_sunday or d.is_holiday) end
                                                                               as paid_off,
-           count(*) filter (where m.status in ('P','H') and m.is_off)         as extra_days
+           count(*) filter (where m.status in ('P','H','L') and m.is_off)     as extra_days
       from staff s
       left join marked m on m.emp_id = s.emp_id
      group by s.emp_id
@@ -129,8 +144,13 @@ as $function$
      where a.deduct_year = p_year and a.deduct_month = p_month
      group by a.emp_id
   )
+  -- absent_deduction is what the absent days WOULD have paid. The money is
+  -- already gone by not being counted; this only makes the loss visible instead
+  -- of leaving the reader to infer it from a smaller total.
   select s.emp_id, s.name, s.designation, s.salary,
          t.present::integer, t.half::integer, t.absent::integer,
+         t.leave_days::integer,
+         round((s.salary / 30.0) * t.absent)::numeric as absent_deduction,
          t.paid_off::integer, t.extra_days::integer,
          (t.present + t.half * 0.5 + t.paid_off + t.extra_days)::numeric as counted_days,
          coalesce(a.advances, 0) as advances,

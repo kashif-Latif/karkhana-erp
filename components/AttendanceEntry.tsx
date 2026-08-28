@@ -7,7 +7,21 @@ import Modal, { Field, inputCls, btnPrimary, btnGhost } from "@/components/Modal
 type Result = { ok: boolean; msg: string } | null;
 export type EmpLite = { id: string; name: string };
 
-const STATUSES = ["Present", "Absent", "Leave", "Half Day", "Holiday"];
+/* THE CODE IS WHAT GETS STORED, AND IT MUST BE ONE LETTER.
+   This wrote the full word — "Present" — while every imported record and the
+   payable function use 'P'. Anything marked from today would have been
+   invisible to the salary calculation, and nobody would have found out until
+   payday. The label is for the person; the code is for the database.
+
+   Leave is PAID: an approved day off should not cost somebody their wage, which
+   is the whole difference between leave and absence. It counts as a present day.
+   Absent is unpaid — the day simply is not counted, and that is the deduction. */
+const STATUSES: { code: string; label: string; hint: string }[] = [
+  { code: "P", label: "Present",  hint: "full day, paid" },
+  { code: "H", label: "Half day", hint: "counts as ½ a day" },
+  { code: "L", label: "Leave",    hint: "approved, paid in full" },
+  { code: "A", label: "Absent",   hint: "not counted — a day's pay is lost" },
+];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -86,11 +100,12 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Result>(null);
   const [date, setDate] = useState(today());
-  const [status, setStatus] = useState("Present");
+  const [status, setStatus] = useState("P");
   const [timeIn, setTimeIn] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
 
   async function save() {
     if (!supabase) return;
@@ -106,7 +121,7 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
       id: `${emp_id}-${y}-${m}-${day}`,
       emp_id, year: y, month: m, day,
       status,
-      time_in: status === "Present" || status === "Half Day" ? timeIn : "",
+      time_in: status === "P" || status === "H" ? timeIn : "",
     }));
 
     const { error } = await supabase.from("online_att_records").upsert(rowsToSave, { onConflict: "emp_id,year,month,day" });
@@ -125,10 +140,10 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Date"><input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
           <Field label="Status">
-            <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
+            <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map((s) => <option key={s.code} value={s.code}>{s.label} — {s.hint}</option>)}</select>
           </Field>
           <Field label="Time in">
-            <input type="time" className={inputCls} value={timeIn} disabled={status !== "Present" && status !== "Half Day"}
+            <input type="time" className={inputCls} value={timeIn} disabled={status !== "P" && status !== "H"}
               onChange={(e) => setTimeIn(e.target.value)} />
           </Field>
         </div>
@@ -243,6 +258,7 @@ export function MarkSalary({ emps, onDone }: { emps: EmpLite[]; onDone: () => vo
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
 
   async function save() {
     if (!supabase) return;
