@@ -315,8 +315,18 @@ export default function FinancePage() {
               ) : rowsF.length === 0 ? (
                 <tr><td colSpan={9} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
+                /* SELECTING TEXT IS NOT CLICKING A ROW.
+                   The whole row was a click target, so dragging across a
+                   tracking number to copy it counted as a click and threw up the
+                   edit dialog — which then swallowed the selection. A click that
+                   ends with text highlighted was a copy, not a choice. */
                 rowsF.map((r, i) => (
-                  <tr key={i} onClick={() => (tab === "cpr" ? setCprRow(r) : setEditRow(r))} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
+                  <tr key={i}
+                      onClick={() => {
+                        if ((window.getSelection()?.toString() ?? "").length > 0) return;
+                        if (tab === "cpr") setCprRow(r); else setEditRow(r);
+                      }}
+                      className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
                       <td className="px-4 py-3 font-mono text-[11.5px] text-muted dark:text-[#a89f93]">{String(r.tracking_id ?? "—")}</td>

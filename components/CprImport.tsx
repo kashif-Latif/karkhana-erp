@@ -101,30 +101,64 @@ async function readSheet(file: File): Promise<Parsed> {
     wht:      matchHeader(headers, ["wh_income_tax (2%)", "wh_income_tax", "income tax"]),
     wst:      matchHeader(headers, ["wh_sales_tax (2%)", "wh_sales_tax"]),
     date:     matchHeader(headers, ["d/r date", "dr date", "delivery date", "date"]),
+    /* THE CPR NUMBER, IF THE EXPORT CARRIES ONE.
+       A PostEx transactions CSV usually has a settlement reference per row —
+       the same CPR the PDF is named after. When it is there the file can be
+       split into batches exactly like a merged PDF, and nothing needs typing.
+       Only when it is absent does anything have to be entered by hand. */
+    cpr:      matchHeader(headers, ["cpr_number", "cpr number", "cpr", "cpr no",
+                                    "settlement", "settlement_number", "batch",
+                                    "batch_number", "payment_reference", "reference"]),
   };
   if (!col.tracking) throw new Error("No tracking-number column found. Columns seen: " + headers.join(", "));
 
-  const rows: CprRow[] = [];
+  // Grouped by settlement when the file names one, so a CSV covering several
+  // CPRs imports as several batches rather than one undifferentiated lump.
+  const groups = new Map<string, CprRow[]>();
+  const dates = new Map<string, string>();
   for (const r of raw) {
     const tracking = String(r[col.tracking] ?? "").trim();
     if (!tracking) continue;
+    const ref = col.cpr ? String(r[col.cpr] ?? "").trim() : "";
     // PostEx splits its deductions across four columns. The store cares about
     // two numbers: what the courier kept, and what the government kept.
     const fee = n2(toNum(r[col.ship])) + n2(toNum(r[col.gst]));
     const tax = n2(toNum(r[col.wht])) + n2(toNum(r[col.wst]));
-    rows.push({
+    const paid_on = (String(r[col.date] ?? "").trim().slice(0, 10)) || null;
+    if (!groups.has(ref)) groups.set(ref, []);
+    groups.get(ref)!.push({
       tracking_id: tracking,
       status: String(r[col.status] ?? "Delivered").trim(),
       cod: n2(toNum(r[col.cod])), net: n2(toNum(r[col.net])),
-      fee, tax,
-      paid_on: (String(r[col.date] ?? "").trim().slice(0, 10)) || null,
+      fee, tax, paid_on,
     });
+    if (paid_on && !dates.has(ref)) dates.set(ref, paid_on);
   }
+
+  const batches = [...groups.entries()].map(([ref, rows]) => ({
+    ref,
+    date: dates.get(ref) ?? new Date().toISOString().slice(0, 10),
+    rows,
+    courier: "PostEx" as const,
+    computedNet: n2(rows.reduce((t, r) => t + r.net, 0)),
+  }));
+
+  /* WHEN THE FILE NAMES ITS SETTLEMENTS, IT NEEDS NOTHING TYPED.
+     A CSV carrying a CPR reference per row is as self-describing as the PDF:
+     the batches are its own, and the guard compares each one against the
+     portal's figure for that CPR.
+
+     Without that column the file is just a list of rows. Deriving the "declared"
+     totals from those same rows would compare the parse against itself and pass
+     however wrong it was — which is not a check, it is the appearance of one.
+     That is the only case that still asks for anything by hand. */
+  const named = col.cpr && batches.some((b) => b.ref);
   return {
-    batches: [{ ref: "", date: new Date().toISOString().slice(0, 10), rows, courier: "PostEx",
-                computedNet: n2(rows.reduce((t, r) => t + r.net, 0)) }],
+    batches,
     source: "csv",
-    note: "This transactions export states no totals of its own, so the count and COD must be typed from the PostEx portal. Filling them in from the file would compare the parse against itself and pass no matter what. A CPR PDF carries its own summary and needs none of this.",
+    note: named
+      ? undefined
+      : "This export names no settlement, so the count and COD have to come from the PostEx portal. Deriving them from the file would check the parse against itself and pass no matter what. An export with a CPR column, or a CPR PDF, needs none of this.",
   };
 }
 
