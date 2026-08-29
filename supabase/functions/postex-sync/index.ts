@@ -396,8 +396,19 @@ Deno.serve(async (req) => {
               updated_at: new Date().toISOString(),
             };
             if (needs_review) upd.review_status = r.status;
-            if (delivery_status === "Delivered" || delivery_status === "Returned")
-              upd.delivery_date = day((r.detail as Record<string, unknown>)?.orderDeliveryDate) ?? new Date().toISOString().slice(0, 10);
+            /* ONLY POSTEX'S OWN DATE. Never today's.
+               This fell back to `new Date()` when PostEx sent no date — and for
+               older parcels PostEx has long since dropped that field, so every
+               one it reported got stamped with the day we happened to ask. A
+               parcel dispatched in November 2024 ended up with a delivery date
+               of 25 August 2026, which then drove its age, its place in the
+               returns list, and any rule that judges by age.
+
+               A missing date is missing. Leaving the column null is honest and
+               the page falls back to dispatch_date, which is real. */
+            const dd = day((r.detail as Record<string, unknown>)?.orderDeliveryDate);
+            if (dd && (delivery_status === "Delivered" || delivery_status === "Returned"))
+              upd.delivery_date = dd;
             if (delivery_status === "Returned") { upd.rts = "Yes"; upd.rts_reason = `PostEx: ${r.status}`; }
             else if (/refus|attempt/i.test(r.status)) { upd.rts_reason = `PostEx: ${r.status}`; }
             // rts_reason stays a status echo. The reason itself gets its own
@@ -428,8 +439,10 @@ Deno.serve(async (req) => {
           const { delivery_status, needs_review } = classify(raw);
           const upd: Record<string, unknown> = { delivery_status, needs_review, raw_status: raw };
           if (needs_review) upd.review_status = raw;
-          if (delivery_status === "Delivered" || delivery_status === "Returned")
-            upd.delivery_date = day(t.orderDeliveryDate) ?? new Date().toISOString().slice(0, 10);
+          // Same rule as above: PostEx's date or nothing. Never today's.
+          const dd2 = day(t.orderDeliveryDate);
+          if (dd2 && (delivery_status === "Delivered" || delivery_status === "Returned"))
+            upd.delivery_date = dd2;
           if (delivery_status === "Returned") { upd.rts = "Yes"; upd.rts_reason = `PostEx: ${raw}`; }
           else if (/refus|attempt/i.test(raw)) { upd.rts_reason = `PostEx: ${raw}`; }
           const reason = postexReason(raw, t);

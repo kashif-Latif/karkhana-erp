@@ -28,7 +28,7 @@ const TABS: { key: Section; label: string; hint: string }[] = [
 
 type ReturnRow = {
   tracking_id: string; order_number: string | null; store_code: string | null;
-  courier: string | null; cod_amount: number | null; stage: string | null;
+  courier: string | null; cod_amount: number | null; stage: string | null; cpr_number: string | null;
   courier_reason: string | null; courier_reason_text: string | null;
   shopify_reason: string | null; shopify_note: string | null;
   agent_note: string | null; order_tags: string[] | null;
@@ -239,6 +239,11 @@ export default function ReturnsPage() {
               <th className="px-4 py-3 font-semibold">Store</th>
               <th className="px-4 py-3 font-semibold">Courier</th>
               <th className="px-4 py-3 font-semibold">Tracking</th>
+              {/* Which settlement covered this parcel. On a return it shows what
+                  the courier charged for the trip back; on a delivered parcel,
+                  what paid for it. Either way it is the document to go to when
+                  a figure is questioned. */}
+              <th className="px-4 py-3 font-semibold">CPR / Invoice</th>
               <th className="px-4 py-3 font-semibold">{isReturns ? "Return date" : "Delivered"}</th>
               <th className="px-4 py-3 text-right font-semibold">COD</th>
               <th className="px-4 py-3 text-right font-semibold">Age</th>
@@ -268,6 +273,11 @@ export default function ReturnsPage() {
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.store_code ?? "—"}</td>
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.courier ?? "—"}</td>
                   <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">{r.tracking_id}</td>
+                  <td className="px-4 py-3 font-mono text-[11.5px]">
+                    {r.cpr_number
+                      ? <span className="text-ink dark:text-[#e7e2d8]">{String(r.cpr_number)}</span>
+                      : <span className="text-hint">not settled</span>}
+                  </td>
                   <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">{(isReturns ? ret.return_date : up.delivery_date) ?? "—"}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-ink dark:text-[#f4f1ea]">{rs(Number(r.cod_amount ?? 0))}</td>
                   <td className={`px-4 py-3 text-right tabular-nums font-semibold ${Number(r.age_days ?? 0) > 14 ? "text-danger" : "text-muted dark:text-[#a89f93]"}`}>

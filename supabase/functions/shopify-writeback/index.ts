@@ -31,6 +31,12 @@
 //   max defaults to 200 so a mistake is 200 orders, not 4,000.
 //
 // CALL
+// ACTIONS
+//   close    archive a returned order — reversible from the Shopify admin
+//   cancel   permanent, refuses without confirm:"CANCEL PERMANENTLY"
+//   deliver  mark a DELIVERED parcel's fulfillment as delivered in Shopify, so
+//            the shop agrees with what the courier reported
+//
 //   { action: "close", from: "2024-01-01", to: "2026-06-30",
 //     stores: ["LM","TS","TRZ"], dry_run: true, max: 200, key: SYNC_KEY }
 //
@@ -103,7 +109,7 @@ Deno.serve(async (req) => {
        Minors parcel came back. */
     let q = db.from("online_logistics")
       .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at")
-      .in("delivery_status", ["Returned", "RTS"])
+      .in("delivery_status", wantStatuses)
       .in("store_code", stores)
       .limit(max);
 
@@ -112,8 +118,10 @@ Deno.serve(async (req) => {
     } else {
       // The date a parcel started coming back, falling back the same way the
       // returns page and migration 0101 do, so the three agree on what is old.
-      if (body.to) q = q.lte("return_leg_started_at", `${body.to}T23:59:59Z`);
-      if (body.from) q = q.gte("return_leg_started_at", `${body.from}T00:00:00Z`);
+      // A delivery is dated by delivery_date; a return by when it turned back.
+      const dateCol = action === "deliver" ? "delivery_date" : "return_leg_started_at";
+      if (body.to) q = q.lte(dateCol, action === "deliver" ? body.to : `${body.to}T23:59:59Z`);
+      if (body.from) q = q.gte(dateCol, action === "deliver" ? body.from : `${body.from}T00:00:00Z`);
     }
 
     const { data: rows, error } = await q;
@@ -182,6 +190,58 @@ Deno.serve(async (req) => {
       }
 
       const id = String(gid).replace(/\D/g, "");            // REST wants the number
+
+      /* MARKING DELIVERED IS TWO CALLS, NOT ONE.
+         Shopify has no "delivered" field on an order. Delivery is an event on a
+         FULFILLMENT, so the fulfillment has to be found first. An order that was
+         never fulfilled has nothing to mark — that is reported rather than
+         forced, because creating a fulfillment to hang an event on would invent
+         a shipment that never existed in Shopify. */
+      if (action === "deliver") {
+        let fid = "";
+        try {
+          const fr = await fetch(
+            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/fulfillments.json`,
+            { headers: { "X-Shopify-Access-Token": st.token } });
+          const fj = await fr.json();
+          const list = (fj?.fulfillments ?? []) as Record<string, unknown>[];
+          const open = list.find((f) => f.status !== "cancelled");
+          fid = open ? String(open.id) : "";
+        } catch { /* handled as a failure below */ }
+
+        if (!fid) {
+          skipped++;
+          results.push({ order: r.order_number, skipped: "no fulfillment in Shopify to mark" });
+          await sleep(550);
+          continue;
+        }
+
+        let ok2 = false, detail2 = "";
+        try {
+          const er = await fetch(
+            `https://${st.domain}/admin/api/${API_VERSION}/fulfillments/${fid}/events.json`,
+            { method: "POST",
+              headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+              body: JSON.stringify({ event: { status: "delivered" } }) });
+          ok2 = er.ok;
+          if (!ok2) detail2 = `${er.status} ${(await er.text().catch(() => "")).slice(0, 200)}`;
+        } catch (err) { detail2 = err instanceof Error ? err.message : String(err); }
+
+        if (ok2) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "delivered" }); }
+        else     { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail2 }); }
+
+        try {
+          await db.from("online_shopify_writebacks").insert({
+            order_number: r.order_number, store_code: r.store_code,
+            shopify_order_id: String(gid), action,
+            succeeded: ok2, error: ok2 ? null : detail2.slice(0, 500),
+          });
+        } catch { /* the write already happened */ }
+
+        await sleep(550);
+        continue;
+      }
+
       const url = action === "cancel"
         ? `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/cancel.json`
         : `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/close.json`;

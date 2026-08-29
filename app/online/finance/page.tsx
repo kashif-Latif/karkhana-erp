@@ -109,7 +109,7 @@ export default function FinancePage() {
     let q =
       which === "payments"
         ? supabase.from("v_finance_payments")
-            .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days")
+            .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days,cpr_number")
             // Oldest first. A receivable list is worked from the top, and the
             // oldest debt is the one closest to being uncollectable.
             .order("is_paid", { ascending: true })
@@ -291,7 +291,7 @@ export default function FinancePage() {
                   {/* Store dropped: the order number already carries it —
                       #LM15237, #TS2761, #TRZ1760 — so the column repeated
                       itself in narrower form. */}
-                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Courier</th>
+                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">CPR / Invoice</th><th className="px-4 py-3 font-semibold">Courier</th>
                   <th className="px-4 py-3 text-right font-semibold">COD</th>
                   <th className="px-4 py-3 text-right font-semibold">Charges</th>
                   <th className="px-4 py-3 text-right font-semibold">Net received</th>
@@ -309,17 +309,26 @@ export default function FinancePage() {
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
+                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={9} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
               ) : err ? (
-                <tr><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
               ) : rowsF.length === 0 ? (
-                <tr><td colSpan={tab === "cpr" ? 8 : 8} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
                 rowsF.map((r, i) => (
                   <tr key={i} onClick={() => (tab === "cpr" ? setCprRow(r) : setEditRow(r))} className="cursor-pointer text-ink transition hover:bg-panel/50 dark:text-[#e7e2d8] dark:hover:bg-white/[0.03]">
                     {tab === "payments" && <>
                       <td className="px-4 py-3 font-semibold">{String(r.order_number ?? "—")}</td>
                       <td className="px-4 py-3 font-mono text-[11.5px] text-muted dark:text-[#a89f93]">{String(r.tracking_id ?? "—")}</td>
+                      {/* Which settlement paid this parcel. Without it a payment
+                          can be seen but not traced back to the courier document
+                          that produced it, which is the first thing anyone asks
+                          when a figure is questioned. */}
+                      <td className="px-4 py-3 font-mono text-[11.5px]">
+                        {r.cpr_number
+                          ? <span className="text-ink dark:text-[#e7e2d8]">{String(r.cpr_number)}</span>
+                          : <span className="text-hint">not settled yet</span>}
+                      </td>
                       <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(r.courier ?? "—")}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{money(r.cod_amount)}</td>
                       {/* What the courier kept: its fee plus the tax withheld.
