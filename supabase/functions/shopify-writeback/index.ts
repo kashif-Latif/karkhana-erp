@@ -138,6 +138,15 @@ Deno.serve(async (req) => {
        Both columns, always: order numbers repeat across the three stores, and
        matching on the number alone would close a TopShop order because a Little
        Minors parcel came back. */
+    /* WHICH PARCELS THIS ACTION IS ABOUT.
+       `deliver` and `paid` act on what the courier DELIVERED; `close` and
+       `cancel` on what came back. Everything else about the run — the dry run,
+       the batching, the audit log, the rate limit — is the same either way,
+       because the dangerous parts are dangerous whichever direction the write
+       goes. */
+    const wantStatuses = (action === "deliver" || action === "paid")
+      ? ["Delivered"] : ["Returned", "RTS"];
+
     let q = db.from("online_logistics")
       .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at")
       .in("delivery_status", wantStatuses)

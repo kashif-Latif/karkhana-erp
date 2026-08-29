@@ -79,9 +79,36 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     setShop({ openReturns, delivered });
   }, []);
 
+  async function pushOne(action: "close" | "deliver" | "paid" | "cancel") {
+    if (!supabase) return;
+    const returns = action === "close" || action === "cancel";
+    const wanted = returns
+      ? parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS")
+      : parcels.filter((p) => p.delivery_status === "Delivered");
+    const tracking = [...new Set(wanted.map((p) => p.tracking_id).filter(Boolean))] as string[];
+    if (!tracking.length) return;
+    const { data, error } = await supabase.functions.invoke("shopify-writeback", {
+      body: { action, tracking, dry_run: false, max: 200,
+              ...(action === "cancel" ? { confirm: "CANCEL PERMANENTLY" } : {}) },
+    });
+    if (error) {
+      let detail = error.message;
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        try { detail = (await ctx.json())?.error ?? detail; } catch { /* keep it */ }
+      }
+      setErr(detail);
+    } else {
+      setShopMsg((data as { report?: string })?.report ?? "Done.");
+      await loadShopState(parcels);
+    }
+  }
+
   async function pushToShopify(action: "close" | "deliver" | "paid" | "cancel") {
     if (!supabase) return;
     setBusy("shopify"); setShopMsg(""); setErr("");
+    // "Send again" retries both halves, since the automatic push does both.
+    if (action === "paid") { await pushOne("paid"); await pushOne("deliver"); setBusy(""); return; }
     const returns = action === "close" || action === "cancel";
     const wanted = returns
       ? parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS")
@@ -432,18 +459,16 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
               {shop.delivered > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-panel p-2.5 dark:border-white/10 dark:bg-white/[0.04]">
                   <span className="text-muted dark:text-[#a89f93]">
-                    <b className="text-ink dark:text-[#f4f1ea]">{shop.delivered}</b> delivered — mark them delivered in Shopify too.
+                    <b className="text-ink dark:text-[#f4f1ea]">{shop.delivered}</b> delivered — already sent to Shopify as paid and delivered.
                   </span>
-                  <span className="flex gap-2">
-                    <button disabled={!!busy} onClick={() => pushToShopify("paid")}
-                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
-                      Mark paid
-                    </button>
-                    <button disabled={!!busy} onClick={() => pushToShopify("deliver")}
-                            className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold hover:bg-panel disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10">
-                      Mark delivered
-                    </button>
-                  </span>
+                  {/* Paid and delivered are both sent automatically when the
+                      settlement is imported — a CPR IS the payment, so there is
+                      nothing to decide. This button only exists to retry if that
+                      push failed, which is why it is quiet rather than primary. */}
+                  <button disabled={!!busy} onClick={() => pushToShopify("paid")}
+                          className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold hover:bg-panel disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10">
+                    Send again
+                  </button>
                 </div>
               )}
               {busy === "shopify" && (
