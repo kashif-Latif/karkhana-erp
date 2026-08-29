@@ -78,11 +78,15 @@ export default function ReturnsPage() {
 
     const view = tab === "delivered_unpaid" ? "v_delivered_unpaid" : "v_returns_all";
     const dateCol = tab === "delivered_unpaid" ? "delivery_date" : "return_date";
-    // Newest first on every tab. Pending returns used to be oldest-first so the
-    // about-to-expire claim sat at the top; Zeeshan wants the most recent return
-    // first, and the AGE column still shows the old ones in red, so nothing is
-    // hidden — it just is not the thing the list is organised around.
-    const ascending = false;
+    /* OLDEST FIRST, on both tabs.
+       A chase list is worked from the top, and the oldest parcel is the one
+       closest to being written off — so it should be the first thing seen, not
+       something found by scrolling. Newest-first put the parcel that came back
+       an hour ago above the one that has been missing for three months.
+
+       This was newest-first briefly at Zeeshan's request and has been changed
+       back deliberately. */
+    const ascending = true;
 
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })

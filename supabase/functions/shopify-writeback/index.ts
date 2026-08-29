@@ -72,7 +72,13 @@ Deno.serve(async (req) => {
 
     const action: string = String(body.action ?? "close");
     const dryRun: boolean = body.dry_run !== false;      // must be asked to write
-    const max: number = Math.min(Number(body.max ?? 200), 1000);
+    /* 50 A CALL, NOT 200.
+       64 orders at 550ms each, plus 64 round trips to Shopify, runs past a
+       minute — and the caller gives up before the reply arrives. The work
+       finished every time; only the answer was lost, which looked like a crash
+       and invited running it again. Fifty comes back in about half a minute.
+       Call it repeatedly; it skips what it has already done. */
+    const max: number = Math.min(Number(body.max ?? 50), 200);
     const stores: string[] = Array.isArray(body.stores) && body.stores.length
       ? body.stores.map((s: string) => s.toUpperCase()) : ["LM", "TS", "TRZ"];
 
@@ -85,13 +91,18 @@ Deno.serve(async (req) => {
     }
 
     // ---- which parcels ------------------------------------------------------
-    /* shopify_order_id lives on online_orders, not on online_logistics — a
-       parcel is not a Shopify object, an order is. The two join on order_number
-       AND store_code together, because order numbers repeat across the three
-       stores and matching on the number alone would close a TopShop order
-       because a Little Minors parcel came back. */
+    /* Two queries, not an embedded join.
+       shopify_order_id lives on online_orders, and PostgREST can only embed
+       tables joined by a FOREIGN KEY. These two are matched on order_number AND
+       store_code — a natural pair, not a declared relationship — so asking for
+       the embed gives "could not find a relationship in the schema cache".
+       They are fetched separately and paired in code below.
+
+       Both columns, always: order numbers repeat across the three stores, and
+       matching on the number alone would close a TopShop order because a Little
+       Minors parcel came back. */
     let q = db.from("online_logistics")
-      .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at,online_orders!inner(shopify_order_id,cancelled_at)")
+      .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at")
       .in("delivery_status", ["Returned", "RTS"])
       .in("store_code", stores)
       .limit(max);
@@ -109,6 +120,42 @@ Deno.serve(async (req) => {
     if (error) return json({ error: error.message }, 500);
     if (!rows?.length) return json({ ok: true, dry_run: dryRun, found: 0, report: "Nothing matched." });
 
+    /* WHAT HAS ALREADY BEEN CLOSED, so a second call does not do it again.
+       Without this every re-run repeated the same orders — harmless in Shopify,
+       but it burns the rate limit and makes the audit log useless as a record of
+       what actually changed. */
+    const { data: doneRows } = await db.from("online_shopify_writebacks")
+      .select("order_number,store_code")
+      .eq("succeeded", true)
+      .eq("action", action);
+    const alreadyDone = new Set((doneRows ?? []).map((d) => `${d.store_code}|${d.order_number}`));
+
+    // The matching orders, keyed by store + number.
+    const { data: orderRows, error: oe } = await db.from("online_orders")
+      .select("order_number,store_code,shopify_order_id,cancelled_at")
+      .in("order_number", [...new Set(rows.map((r) => String(r.order_number)))])
+      .in("store_code", stores);
+    if (oe) return json({ error: oe.message }, 500);
+    const orders = new Map<string, { shopify_order_id: number | null; cancelled_at: string | null }>();
+    for (const o of orderRows ?? []) {
+      orders.set(`${o.store_code}|${o.order_number}`, {
+        shopify_order_id: o.shopify_order_id as number | null,
+        cancelled_at: o.cancelled_at as string | null,
+      });
+    }
+
+    /* THE AUDIT TABLE MUST EXIST BEFORE ANYTHING IS WRITTEN.
+       Without it a run can change orders in Shopify and leave no record of
+       which — and Shopify cannot tell you which changes came from here. Better
+       to refuse with a clear message than to half-succeed unrecorded. */
+    if (!dryRun) {
+      const { error: te } = await db.from("online_shopify_writebacks").select("id").limit(1);
+      if (te) {
+        return json({ error: "online_shopify_writebacks is missing or unreadable — run migration 0103 first. " +
+                             "Nothing was written. (" + te.message + ")" }, 400);
+      }
+    }
+
     // ---- act ----------------------------------------------------------------
     const results: Record<string, unknown>[] = [];
     let closed = 0, skipped = 0, failed = 0;
@@ -117,10 +164,15 @@ Deno.serve(async (req) => {
       const st = store(String(r.store_code));
       if (!st) { skipped++; results.push({ order: r.order_number, skipped: "no credentials for this store" }); continue; }
 
-      const o = Array.isArray(r.online_orders) ? r.online_orders[0] : r.online_orders;
+      if (alreadyDone.has(`${r.store_code}|${r.order_number}`)) {
+        skipped++; results.push({ order: r.order_number, skipped: "already done in an earlier run" }); continue;
+      }
+
+      const o = orders.get(`${r.store_code}|${r.order_number}`);
+      if (!o) { skipped++; results.push({ order: r.order_number, skipped: "no matching Shopify order" }); continue; }
       // Already cancelled in Shopify by an agent — leave it alone.
-      if (o?.cancelled_at) { skipped++; results.push({ order: r.order_number, skipped: "already cancelled in Shopify" }); continue; }
-      const gid = o?.shopify_order_id;
+      if (o.cancelled_at) { skipped++; results.push({ order: r.order_number, skipped: "already cancelled in Shopify" }); continue; }
+      const gid = o.shopify_order_id;
       if (!gid) { skipped++; results.push({ order: r.order_number, skipped: "no Shopify id on this parcel" }); continue; }
 
       if (dryRun) {
@@ -134,28 +186,35 @@ Deno.serve(async (req) => {
         ? `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/cancel.json`
         : `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/close.json`;
 
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
-        body: action === "cancel" ? JSON.stringify({ reason: "customer", email: false }) : "{}",
-      });
-
-      if (res.ok) {
-        closed++;
-        results.push({ order: r.order_number, store: r.store_code, done: action });
-        await db.from("online_shopify_writebacks").insert({
-          order_number: r.order_number, store_code: r.store_code,
-          shopify_order_id: String(gid), action, succeeded: true,
+      /* ONE BAD ROW MUST NOT END THE RUN.
+         An unhandled throw here stops everything and returns a 500 — after some
+         orders have already been changed, with no record of which. Each order
+         is handled on its own: it succeeds, or it is recorded as failed, and
+         the run carries on to the next. */
+      let ok = false, detail = "";
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+          body: action === "cancel" ? JSON.stringify({ reason: "customer", email: false }) : "{}",
         });
-      } else {
-        failed++;
-        const text = await res.text();
-        results.push({ order: r.order_number, store: r.store_code, failed: res.status, detail: text.slice(0, 160) });
-        await db.from("online_shopify_writebacks").insert({
-          order_number: r.order_number, store_code: r.store_code,
-          shopify_order_id: String(gid), action, succeeded: false, error: text.slice(0, 500),
-        });
+        ok = res.ok;
+        if (!ok) detail = `${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`;
+      } catch (err) {
+        detail = err instanceof Error ? err.message : String(err);
       }
+
+      if (ok) { closed++; results.push({ order: r.order_number, store: r.store_code, done: action }); }
+      else    { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail }); }
+
+      // Recorded either way, and never allowed to break the run.
+      try {
+        await db.from("online_shopify_writebacks").insert({
+          order_number: r.order_number, store_code: r.store_code,
+          shopify_order_id: String(gid), action,
+          succeeded: ok, error: ok ? null : detail.slice(0, 500),
+        });
+      } catch { /* the write already happened; losing the log must not stop it */ }
 
       // Shopify's REST limit is 2 calls a second per store. Going faster earns
       // 429s and a partly-finished run, which is the worst outcome here.
@@ -167,7 +226,8 @@ Deno.serve(async (req) => {
       closed, skipped, failed,
       report: dryRun
         ? `${closed} orders would be ${action}d. Nothing was written. Send dry_run:false to do it.`
-        : `${closed} ${action}d, ${skipped} skipped, ${failed} failed.`,
+        : `${closed} ${action}d, ${skipped} skipped, ${failed} failed.` +
+          (closed === max ? ` There may be more — call again to continue.` : ` Nothing left in this range.`),
       sample: results.slice(0, 25),
     });
   } catch (e) {
