@@ -21,6 +21,16 @@ const STATUSES: { code: string; label: string; hint: string }[] = [
   { code: "H", label: "Half day", hint: "counts as ½ a day" },
   { code: "L", label: "Leave",    hint: "approved, paid in full" },
   { code: "A", label: "Absent",   hint: "not counted — a day's pay is lost" },
+  /* CLEAR REMOVES THE MARK ENTIRELY, back to blank.
+     Every other option OVERWRITES: mark somebody Absent and the day still says
+     something. There was no way to say "this day should never have been marked"
+     — and on a Sunday that matters, because a Sunday marked Present earns an
+     EXTRA day on top of being paid, so one stray tap put Abdul Rehman on 31
+     counted days and Rs 62,018 against a Rs 61,000 salary.
+
+     Overwriting with Absent would have been worse: it would have read as a day
+     he failed to turn up, on a day nobody was expected to. */
+  { code: "",  label: "Clear",    hint: "remove the mark — back to not marked" },
 ];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
@@ -140,6 +150,19 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
     const [y, m, day] = [d.getFullYear(), d.getMonth() + 1, d.getDate()];
     // id is built from employee + date, so marking the same day twice corrects
     // the record instead of creating a second one
+    /* Clearing is a delete, not a write. Storing an empty status would leave a
+       row that says nothing and still has to be reasoned about. */
+    if (status === "") {
+      const { error: de } = await supabase.from("online_att_records").delete()
+        .in("emp_id", picked).eq("year", y).eq("month", m).eq("day", day);
+      setBusy(false);
+      if (de) { setRes({ ok: false, msg: de.message }); return; }
+      setRes({ ok: true, msg: `${picked.length} mark(s) removed for ${date}. Those days now count as not marked.` });
+      setPicked([]);
+      onDone();
+      return;
+    }
+
     const rowsToSave = picked.map((emp_id) => ({
       id: `${emp_id}-${y}-${m}-${day}`,
       emp_id, year: y, month: m, day,
@@ -308,6 +331,9 @@ export function MarkSalary({ emps, onDone }: { emps: EmpLite[]; onDone: () => vo
     if (!picked.length) { setRes({ ok: false, msg: "Select at least one employee." }); return; }
     setBusy(true); setRes(null);
     const y = Number(year), m = Number(month);
+    /* Clearing is a delete, not a write. Storing an empty status would leave a
+       row that says nothing and still has to be reasoned about. */
+
     const rowsToSave = picked.map((emp_id) => ({ id: `${emp_id}-${y}-${m}`, emp_id, year: y, month: m, paid }));
     const { error } = await supabase.from("online_att_salary_status").upsert(rowsToSave, { onConflict: "emp_id,year,month" });
     setBusy(false);

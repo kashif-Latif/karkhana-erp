@@ -36,6 +36,11 @@ export default function EmployeeMonthDetail({
   const [days, setDays] = useState<Day[]>([]);
   const [advs, setAdvs] = useState<Adv[]>([]);
   const [loading, setLoading] = useState(true);
+  /* The calendar has to know about public holidays, not just Sundays.
+     Without them 14 August — Independence Day, worked — renders as an ordinary
+     "P" while the cards above it say "Extra days +2". The figures were right;
+     the calendar was the one disagreeing. */
+  const [hols, setHols] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [paid, setPaid] = useState(row.is_paid);
   const [err, setErr] = useState("");
@@ -43,15 +48,17 @@ export default function EmployeeMonthDetail({
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
-    const [d, a] = await Promise.all([
+    const [d, a, h] = await Promise.all([
       supabase.from("online_att_records").select("day,status")
         .eq("emp_id", row.emp_id).eq("year", year).eq("month", month).order("day"),
       supabase.from("online_att_advances").select("date,amount,note")
         .eq("emp_id", row.emp_id).eq("deduct_year", year).eq("deduct_month", month).order("date"),
+      supabase.from("online_att_holidays").select("hdate"),
     ]);
     if (d.error) setErr(d.error.message);
     setDays((d.data as Day[]) ?? []);
     setAdvs((a.data as Adv[]) ?? []);
+    setHols(new Set(((h.data as { hdate: string }[]) ?? []).map((x) => x.hdate)));
     setLoading(false);
   }, [row.emp_id, year, month]);
   useEffect(() => { load(); }, [load]);
@@ -140,21 +147,24 @@ export default function EmployeeMonthDetail({
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                   const dnum = i + 1;
                   const st = byDay.get(dnum);
+                  const iso = `${year}-${String(month).padStart(2, "0")}-${String(dnum).padStart(2, "0")}`;
                   const sunday = new Date(year, month - 1, dnum).getDay() === 0;
-                  const workedOff = sunday && (st === "P" || st === "H" || st === "L");
+                  const holiday = hols.has(iso);
+                  const off = sunday || holiday;
+                  const workedOff = off && (st === "P" || st === "H" || st === "L");
                   const cls =
                     workedOff ? "bg-success-soft text-emerald-800 font-bold"
                     : st === "P" ? "bg-success-soft text-emerald-800"
                     : st === "L" ? "bg-periwinkle-soft text-sky-800"
                     : st === "H" ? "bg-amber-soft text-amber-900"
                     : st === "A" ? "bg-salmon-soft text-red-800"
-                    : sunday ? "bg-panel text-muted dark:bg-white/[0.06]"
+                    : off ? "bg-panel text-muted dark:bg-white/[0.06]"
                     : "text-hint";
                   return (
                     <div key={dnum} className={`rounded-lg py-1.5 text-[11.5px] font-semibold ${cls}`}>
                       <div>{dnum}</div>
                       <div className="text-[9px] font-normal">
-                        {workedOff ? "Sun+" : st ?? (sunday ? "Sun" : "")}
+                        {workedOff ? (holiday ? "Hol+" : "Sun+") : st ?? (holiday ? "Hol" : sunday ? "Sun" : "")}
                       </div>
                     </div>
                   );
