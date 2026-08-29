@@ -39,9 +39,18 @@ type Emp = {
 const rs = (v: unknown) =>
   v == null || v === "" ? "—" : "Rs " + Math.round(Number(v) || 0).toLocaleString("en-PK");
 
+/* JOIN DATE STARTS EMPTY, NOT AS TODAY.
+   It used to default to the current date, so opening somebody's record to
+   change their name and pressing save wrote "joined today" as a fact. Since
+   0099 pays days off only from the join date, that silently deleted every
+   paid Sunday before it — Abdul Rehman's August dropped from 5 paid days off
+   to 2 and his salary fell about Rs 8,000, with nothing on screen to say why.
+
+   A blank join date means "here all month", which is true of everyone imported
+   from the old system. Guessing was worse than not knowing. */
 const blank = {
   name: "", phone: "", cnic: "", designation: "",
-  pay_amount: "", join_date: new Date().toISOString().slice(0, 10),
+  pay_amount: "", join_date: "",
 };
 
 export default function HubEmployeesPage() {
@@ -155,7 +164,7 @@ export default function HubEmployeesPage() {
       name: e.name ?? "", phone: e.phone ?? "", cnic: e.cnic ?? "",
       designation: e.designations?.name ?? "",
       pay_amount: e.pay_amount == null ? "" : String(e.pay_amount),
-      join_date: e.join_date ?? new Date().toISOString().slice(0, 10),
+      join_date: e.join_date ?? "",
     });
     setOpen(true);
   }
@@ -168,13 +177,37 @@ export default function HubEmployeesPage() {
     /* department_id is fixed to this page's business and monthly is fixed as
        the pay type: Hub staff are salaried, and a piece-rate field here would
        only be a way to enter something the payroll cannot use. */
+    /* THE ROLE IS SAVED NOW.
+       The form has always collected it and the payload never carried it, so
+       typing a new role changed nothing and gave no error — the modal simply
+       closed and the old role was still there.
+
+       employees stores a designation_id, so the text has to become a row first.
+       An unrecognised role is added rather than rejected: a business names its
+       own jobs, and refusing "Dispatch Manager" because nobody typed it before
+       would be the software arguing with the company. */
+    let designation_id: string | null = null;
+    const roleText = form.designation.trim();
+    if (roleText) {
+      const { data: found } = await supabase.from("designations")
+        .select("id").ilike("name", roleText).limit(1).maybeSingle();
+      if (found?.id) designation_id = found.id as string;
+      else {
+        const { data: made } = await supabase.from("designations")
+          .insert({ name: roleText }).select("id").single();
+        designation_id = (made?.id as string) ?? null;
+      }
+    }
+
     const payload = {
       name: form.name.trim(),
+      designation_id,
       phone: form.phone.trim() || null,
       cnic: form.cnic.trim() || null,
       department_id: deptId,
       pay_type: "Monthly",
       pay_amount: form.pay_amount === "" ? null : Number(form.pay_amount),
+      // Empty stays empty. Never today.
       join_date: form.join_date || null,
       is_active: true,
     };
@@ -182,6 +215,15 @@ export default function HubEmployeesPage() {
     const { error } = editing
       ? await supabase.from("employees").update(payload).eq("id", editing.id)
       : await supabase.from("employees").insert(payload);
+
+    /* online_att_employees is what the attendance and payroll screens read, and
+       it carries its own copy of the name, role and salary. Updating one and not
+       the other is how the same person ends up with two job titles. */
+    if (!error && editing) {
+      await supabase.from("online_att_employees")
+        .update({ name: payload.name, designation: roleText || null, sal: payload.pay_amount })
+        .eq("id", editing.id);
+    }
 
     if (error) setErr(error.message);
     else { setOpen(false); await load(); }
@@ -339,7 +381,11 @@ export default function HubEmployeesPage() {
           <Field label="CNIC"><input className={inputCls} value={form.cnic}
                  onChange={(e) => setForm({ ...form, cnic: e.target.value })} placeholder="optional" /></Field>
           <Field label="Joined"><input type="date" className={inputCls} value={form.join_date}
-                 onChange={(e) => setForm({ ...form, join_date: e.target.value })} /></Field>
+                 onChange={(e) => setForm({ ...form, join_date: e.target.value })} />
+            <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+              Leave blank unless they started this month. A join date stops Sundays
+              before it being paid.
+            </p></Field>
         </div>
         <p className="mt-3 text-[12px] text-hint dark:text-[#8a8175]">
           A login is not created here. Adding someone to the payroll and giving them

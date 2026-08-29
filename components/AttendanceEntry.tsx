@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, UserPlus, CalendarCheck, Wallet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import Modal, { Field, inputCls, btnPrimary, btnGhost } from "@/components/Modal";
@@ -100,11 +100,34 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Result>(null);
   const [date, setDate] = useState(today());
+  /* WHAT IS ALREADY MARKED FOR THIS DAY.
+     Marking twice has always corrected the record — the id is built from
+     employee and date, so a second save overwrites. What was missing was
+     being able to SEE it: the list gave no hint that somebody was already
+     marked, so a correction looked identical to a first entry and a mistake
+     stayed invisible until it turned up in a salary. */
+  const [existing, setExisting] = useState<Record<string, string>>({});
+  useEffect(() => {
+    (async () => {
+      if (!supabase || !date) return;
+      const d = new Date(date);
+      if (isNaN(d.getTime())) return;
+      const { data } = await supabase.from("online_att_records")
+        .select("emp_id,status")
+        .eq("year", d.getFullYear()).eq("month", d.getMonth() + 1).eq("day", d.getDate());
+      const m: Record<string, string> = {};
+      for (const r of (data ?? []) as { emp_id: string; status: string }[]) m[r.emp_id] = r.status;
+      setExisting(m);
+    })();
+  }, [date, res]);
+
   const [status, setStatus] = useState("P");
   const [timeIn, setTimeIn] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+
 
 
   async function save() {
@@ -127,7 +150,10 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
     const { error } = await supabase.from("online_att_records").upsert(rowsToSave, { onConflict: "emp_id,year,month,day" });
     setBusy(false);
     if (error) { setRes({ ok: false, msg: error.message }); return; }
-    setRes({ ok: true, msg: `${rowsToSave.length} employee(s) marked ${status} for ${date}.` });
+    // Say plainly when a save changed something rather than added it.
+    const changed = picked.filter((id) => existing[id] && existing[id] !== status).length;
+    setRes({ ok: true, msg: `${rowsToSave.length} marked ${status} for ${date}` +
+      (changed ? ` — ${changed} of them corrected from a previous mark.` : ".") });
     setPicked([]);
     onDone();
   }
@@ -158,13 +184,29 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
           </div>
           <div className="max-h-[240px] overflow-y-auto rounded-card border border-line p-1 dark:border-white/[0.06]">
             {emps.length === 0 && <p className="px-3 py-6 text-center text-[13px] text-muted dark:text-[#a89f93]">No employees yet — add one first.</p>}
-            {emps.map((e) => (
+            {emps.map((e) => {
+              const now = existing[e.id];
+              return (
               <label key={e.id} className="flex cursor-pointer items-center gap-2.5 rounded-xl2 px-3 py-2 text-[13px] text-ink transition hover:bg-panel dark:text-[#f4f1ea] dark:hover:bg-white/[0.05]">
                 <input type="checkbox" checked={picked.includes(e.id)} onChange={() => toggle(e.id)} className="h-4 w-4 accent-current" />
-                {e.name}
+                <span className="flex-1">{e.name}</span>
+                {/* What this day already says, so a correction looks like one. */}
+                {now && (
+                  <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-bold ${
+                    now === "P" ? "bg-success-soft text-emerald-800"
+                    : now === "H" ? "bg-amber-soft text-amber-900"
+                    : now === "L" ? "bg-periwinkle-soft text-sky-800"
+                    : "bg-salmon-soft text-red-800"}`}>
+                    already {now}
+                  </span>
+                )}
               </label>
-            ))}
+            );})}
           </div>
+          <p className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">
+            Saving again for the same day replaces what is there — that is how a
+            wrong mark is corrected.
+          </p>
         </div>
 
         <Feedback res={res} />
@@ -258,6 +300,7 @@ export function MarkSalary({ emps, onDone }: { emps: EmpLite[]; onDone: () => vo
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
 
 
   async function save() {
