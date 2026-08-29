@@ -393,16 +393,18 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
 
         {shop && (shop.openReturns > 0 || shop.delivered > 0) && (
           <div className="mt-4 rounded-card border border-line p-3.5 dark:border-white/10">
-            <div className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">Update Shopify</div>
+            <div className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">Shopify</div>
             <p className="mt-0.5 text-[12px] text-muted dark:text-[#a89f93]">
-              This settlement is recorded here. Shopify does not know about it yet.
+              Delivered parcels were marked paid and delivered automatically when this
+              settlement was imported. Anything below still needs a decision.
             </p>
             <div className="mt-2.5 space-y-2 text-[12.5px]">
               {shop.openReturns > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-amber-300 bg-amber-50 p-2.5 text-amber-900">
                   <span>
-                    <b>{shop.openReturns}</b> return{shop.openReturns === 1 ? "" : "s"} still open in Shopify —
-                    counted as live sales in its reports.
+                    <b>{shop.openReturns}</b> return{shop.openReturns === 1 ? "" : "s"} in this settlement
+                    {shop.openReturns === 1 ? " was" : " were"} never cancelled in Shopify by an agent —
+                    still counted as live sales in its reports.
                   </span>
                   <span className="flex gap-2">
                     <button disabled={!!busy} onClick={() => pushToShopify("close")}

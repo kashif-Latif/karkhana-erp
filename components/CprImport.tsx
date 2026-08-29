@@ -470,6 +470,9 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
       setProgress(`${dry ? "Checking" : "Importing"} ${i + 1} of ${list.length} · ${b.ref || "settlement"}`);
+      // Kept so the Shopify push below knows what this settlement covered.
+      const deliveredNums = [...new Set(b.rows.filter((r) => /deliver/i.test(r.status))
+        .map((r) => r.tracking_id))];
       const { data, error } = await supabase.rpc("hub_cpr_import", {
         p_courier: many ? b.courier : courier,
         p_cpr_number: (many ? b.ref : ref).trim(),
@@ -493,6 +496,30 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
       if (error) { acc.push({ ref: b.ref, ok: false, report: { error: error.message } }); }
       else acc.push({ ref: b.ref, ok: (data as { ok?: boolean })?.ok === true, report: data as Record<string, unknown> });
       setResults([...acc]);
+
+      /* SHOPIFY IS UPDATED AUTOMATICALLY FOR WHAT WAS DELIVERED.
+         A delivered COD order that Shopify still shows as payment-pending makes
+         its revenue reports read zero for money already collected. That is not
+         a judgement call — the courier settled it, the cash exists, and marking
+         it paid states a fact.
+
+         Only on a real import, never a dry run: a check that writes to three
+         live shops is not a check.
+
+         Cancelling a return is NOT done here. That decision stays with a person
+         — see the panel on the settlement, which lists what the agents missed
+         and waits to be told. */
+      if (!dry && !error && (data as { ok?: boolean })?.ok === true && deliveredNums.length) {
+        setProgress(`Updating Shopify for ${b.ref || "this settlement"}…`);
+        for (const action of ["paid", "deliver"] as const) {
+          const { error: se } = await supabase.functions.invoke("shopify-writeback", {
+            body: { action, tracking: deliveredNums, dry_run: false, max: 200 },
+          });
+          if (se) acc.push({ ref: b.ref, ok: false,
+            report: { shopify: `${action}: ${se.message} — the import itself is safe; use the buttons on the settlement to retry.` } });
+        }
+        setResults([...acc]);
+      }
     }
     setBusy(false); setProgress("");
     if (dry) setChecked(acc.every((r) => r.ok));

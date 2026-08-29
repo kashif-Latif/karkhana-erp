@@ -144,7 +144,12 @@ Deno.serve(async (req) => {
       .in("store_code", stores)
       .limit(max);
 
-    if (Array.isArray(body.orders) && body.orders.length) {
+    /* A settlement names parcels by TRACKING NUMBER, not by order number — the
+       courier has never heard of a Shopify order. Accepting both means the CPR
+       import can pass what it actually has. */
+    if (Array.isArray(body.tracking) && body.tracking.length) {
+      q = q.in("tracking_id", body.tracking);
+    } else if (Array.isArray(body.orders) && body.orders.length) {
       q = q.in("order_number", body.orders);
     } else {
       // The date a parcel started coming back, falling back the same way the
