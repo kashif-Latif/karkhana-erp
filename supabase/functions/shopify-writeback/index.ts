@@ -36,6 +36,9 @@
 //   cancel   permanent, refuses without confirm:"CANCEL PERMANENTLY"
 //   deliver  mark a DELIVERED parcel's fulfillment as delivered in Shopify, so
 //            the shop agrees with what the courier reported
+//   paid     record the COD cash against the order, so Shopify stops showing it
+//            as payment pending. This is the one that makes Shopify's revenue
+//            reports agree with the money the courier actually settled.
 //
 //   { action: "close", from: "2024-01-01", to: "2026-06-30",
 //     stores: ["LM","TS","TRZ"], dry_run: true, max: 200, key: SYNC_KEY }
@@ -72,9 +75,37 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // Same guard the other sync functions use.
+    /* TWO WAYS IN, AND NEITHER PUTS A SECRET IN A BROWSER.
+       A cron job or a manual test sends SYNC_KEY. The app sends the signed-in
+       person's own token, and the function checks they hold hub.finance.manage
+       — the same permission that lets them import a settlement in the first
+       place. Shipping SYNC_KEY to the browser so a button could work would hand
+       every visitor the ability to close orders in the shop. */
     const expected = Deno.env.get("SYNC_KEY") ?? "\u0000";
-    if (String(body.key ?? "") !== expected) return json({ error: "Not authorised." }, 401);
+    let allowed = String(body.key ?? "") === expected;
+
+    if (!allowed) {
+      const auth = req.headers.get("Authorization") ?? "";
+      const jwt = auth.replace(/^Bearer\s+/i, "");
+      if (jwt) {
+        const asUser = createClient(
+          Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!,
+          { global: { headers: { Authorization: `Bearer ${jwt}` } } });
+        const { data: who } = await asUser.auth.getUser();
+        if (who?.user) {
+          // my_permissions() runs as the caller, so this is their real list.
+          const { data: perms } = await asUser.rpc("my_permissions");
+          const list = (perms ?? []) as string[];
+          const { data: prof } = await asUser.from("app_users")
+            .select("is_super_admin").eq("id", who.user.id).maybeSingle();
+          allowed = !!prof?.is_super_admin || list.includes("hub.finance.manage");
+        }
+      }
+    }
+
+    if (!allowed) {
+      return json({ error: "Not authorised. Send SYNC_KEY, or sign in with hub.finance.manage." }, 401);
+    }
 
     const action: string = String(body.action ?? "close");
     const dryRun: boolean = body.dry_run !== false;      // must be asked to write
@@ -119,9 +150,10 @@ Deno.serve(async (req) => {
       // The date a parcel started coming back, falling back the same way the
       // returns page and migration 0101 do, so the three agree on what is old.
       // A delivery is dated by delivery_date; a return by when it turned back.
-      const dateCol = action === "deliver" ? "delivery_date" : "return_leg_started_at";
-      if (body.to) q = q.lte(dateCol, action === "deliver" ? body.to : `${body.to}T23:59:59Z`);
-      if (body.from) q = q.gte(dateCol, action === "deliver" ? body.from : `${body.from}T00:00:00Z`);
+      const dateCol = (action === "deliver" || action === "paid") ? "delivery_date" : "return_leg_started_at";
+      const plainDate = action === "deliver" || action === "paid";
+      if (body.to) q = q.lte(dateCol, plainDate ? body.to : `${body.to}T23:59:59Z`);
+      if (body.from) q = q.gte(dateCol, plainDate ? body.from : `${body.from}T00:00:00Z`);
     }
 
     const { data: rows, error } = await q;
@@ -197,6 +229,61 @@ Deno.serve(async (req) => {
          never fulfilled has nothing to mark — that is reported rather than
          forced, because creating a fulfillment to hang an event on would invent
          a shipment that never existed in Shopify. */
+      /* MARKING COD AS PAID.
+         Shopify has no "set paid" switch. Payment is a TRANSACTION against the
+         order, so the cash the courier collected is recorded as one. Until that
+         happens every delivered COD order sits as "payment pending" and
+         Shopify's revenue reports show nothing for money that is already in the
+         bank.
+
+         The amount comes from the order's own outstanding balance, not from our
+         cod_amount — if the two ever disagree, Shopify's figure is the one its
+         reports are built on, and inventing a transaction for a different sum
+         would put the shop permanently out of balance. */
+      if (action === "paid") {
+        let ok3 = false, detail3 = "";
+        try {
+          const or = await fetch(
+            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}.json?fields=id,total_outstanding,financial_status,currency`,
+            { headers: { "X-Shopify-Access-Token": st.token } });
+          const oj = await or.json();
+          const ord = oj?.order ?? {};
+          const outstanding = Number(ord.total_outstanding ?? 0);
+
+          if (ord.financial_status === "paid" || outstanding <= 0) {
+            skipped++;
+            results.push({ order: r.order_number, skipped: "already paid in Shopify" });
+            await sleep(550);
+            continue;
+          }
+
+          const tr = await fetch(
+            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/transactions.json`,
+            { method: "POST",
+              headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+              body: JSON.stringify({ transaction: {
+                kind: "sale", status: "success", gateway: "Cash on Delivery (COD)",
+                amount: outstanding.toFixed(2), currency: ord.currency ?? "PKR",
+              } }) });
+          ok3 = tr.ok;
+          if (!ok3) detail3 = `${tr.status} ${(await tr.text().catch(() => "")).slice(0, 200)}`;
+        } catch (err) { detail3 = err instanceof Error ? err.message : String(err); }
+
+        if (ok3) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "marked paid" }); }
+        else     { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail3 }); }
+
+        try {
+          await db.from("online_shopify_writebacks").insert({
+            order_number: r.order_number, store_code: r.store_code,
+            shopify_order_id: String(gid), action,
+            succeeded: ok3, error: ok3 ? null : detail3.slice(0, 500),
+          });
+        } catch { /* the write already happened */ }
+
+        await sleep(550);
+        continue;
+      }
+
       if (action === "deliver") {
         let fid = "";
         try {

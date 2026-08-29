@@ -20,9 +20,10 @@
  *   for parcels this system has no record of — a real number worth seeing
  *   rather than a rounding difference to bury.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { X, Loader2, AlertTriangle, Check, Undo2, CheckCircle2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Row = Record<string, unknown>;
 type Parcel = {
@@ -45,7 +46,66 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  const confirm = useConfirm();
+  const [shop, setShop] = useState<{ openReturns: number; delivered: number } | null>(null);
+  const [shopMsg, setShopMsg] = useState("");
   const cpr = String(row.cpr_number ?? "");
+
+  /* WHAT THIS SETTLEMENT MEANS FOR SHOPIFY.
+     A CPR settles parcels here, but Shopify knows nothing about it: a returned
+     order can still be sitting open as a live sale, and a delivered one may
+     never have been marked delivered. The two drift apart quietly, and the only
+     symptom is Shopify's reports disagreeing with this system.
+
+     Counted here rather than assumed, and acted on by a button rather than
+     automatically — writing to a live shop is the one thing in this system that
+     cannot be undone by re-running a migration. */
+  const loadShopState = useCallback(async (parcels: Parcel[]) => {
+    if (!supabase || parcels.length === 0) return;
+    const nums = [...new Set(parcels.map((p) => p.order_number).filter(Boolean))] as string[];
+    if (!nums.length) return;
+    const { data } = await supabase.from("online_orders")
+      .select("order_number,store_code,cancelled_at").in("order_number", nums);
+    const cancelled = new Set((data ?? [])
+      .filter((o) => o.cancelled_at)
+      .map((o) => `${o.store_code}|${o.order_number}`));
+    let openReturns = 0, delivered = 0;
+    for (const p of parcels) {
+      const key = `${p.store_code}|${p.order_number}`;
+      if (p.delivery_status === "Returned" || p.delivery_status === "RTS") {
+        if (!cancelled.has(key)) openReturns++;
+      } else if (p.delivery_status === "Delivered") delivered++;
+    }
+    setShop({ openReturns, delivered });
+  }, []);
+
+  async function pushToShopify(action: "close" | "deliver" | "paid" | "cancel") {
+    if (!supabase) return;
+    setBusy("shopify"); setShopMsg(""); setErr("");
+    const returns = action === "close" || action === "cancel";
+    const wanted = returns
+      ? parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS")
+      : parcels.filter((p) => p.delivery_status === "Delivered");
+    const orders = [...new Set(wanted.map((p) => p.order_number).filter(Boolean))] as string[];
+    if (!orders.length) { setBusy(""); setShopMsg("Nothing of that kind in this settlement."); return; }
+    const { data, error } = await supabase.functions.invoke("shopify-writeback", {
+      body: { action, orders, dry_run: false, max: 200,
+              // The function refuses to cancel without this, deliberately.
+              ...(action === "cancel" ? { confirm: "CANCEL PERMANENTLY" } : {}) },
+    });
+    if (error) {
+      let detail = error.message;
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        try { detail = (await ctx.json())?.error ?? detail; } catch { /* keep it */ }
+      }
+      setErr(detail);
+    } else {
+      setShopMsg((data as { report?: string })?.report ?? "Done.");
+      await loadShopState(parcels);
+    }
+    setBusy("");
+  }
 
   /* Load the parcels this settlement covers.
      Lost in an earlier edit, which is why the panel span forever: `loading`
@@ -63,11 +123,13 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
         .limit(1000);
       if (!alive) return;
       if (error) setErr(error.message);
-      setParcels((data as Parcel[]) ?? []);
+      const list = (data as Parcel[]) ?? [];
+      setParcels(list);
       setLoading(false);
+      loadShopState(list);
     })();
     return () => { alive = false; };
-  }, [cpr]);
+  }, [cpr, loadShopState]);
 
   /* NOTE ON SETTLEMENT STATUS (migration 0086, now unused).
      A control here once let you mark a settlement "not yet paid", mirroring
@@ -326,6 +388,75 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
             {busy === "bulk" && (
               <div className="mt-2 flex items-center gap-2 text-[12px] text-muted"><Loader2 size={13} className="animate-spin" /> Writing…</div>
             )}
+          </div>
+        )}
+
+        {shop && (shop.openReturns > 0 || shop.delivered > 0) && (
+          <div className="mt-4 rounded-card border border-line p-3.5 dark:border-white/10">
+            <div className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">Update Shopify</div>
+            <p className="mt-0.5 text-[12px] text-muted dark:text-[#a89f93]">
+              This settlement is recorded here. Shopify does not know about it yet.
+            </p>
+            <div className="mt-2.5 space-y-2 text-[12.5px]">
+              {shop.openReturns > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-amber-300 bg-amber-50 p-2.5 text-amber-900">
+                  <span>
+                    <b>{shop.openReturns}</b> return{shop.openReturns === 1 ? "" : "s"} still open in Shopify —
+                    counted as live sales in its reports.
+                  </span>
+                  <span className="flex gap-2">
+                    <button disabled={!!busy} onClick={() => pushToShopify("close")}
+                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
+                      Close them
+                    </button>
+                    {/* Cancelling is permanent in Shopify — there is no un-cancel,
+                        only recreating the order and losing its number. So it asks
+                        first, and says what it cannot take back. */}
+                    <button disabled={!!busy}
+                            onClick={async () => {
+                              if (!(await confirm({
+                                title: `Cancel ${shop?.openReturns} order${shop?.openReturns === 1 ? "" : "s"} in Shopify?`,
+                                body: "Shopify has no un-cancel. The only way back is recreating the order, losing its number and history. Closing archives them instead and can be reversed.",
+                                confirmLabel: "Cancel them permanently",
+                              }))) return;
+                              pushToShopify("cancel");
+                            }}
+                            className="rounded-full border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
+                      Cancel instead
+                    </button>
+                  </span>
+                </div>
+              )}
+              {shop.delivered > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-panel p-2.5 dark:border-white/10 dark:bg-white/[0.04]">
+                  <span className="text-muted dark:text-[#a89f93]">
+                    <b className="text-ink dark:text-[#f4f1ea]">{shop.delivered}</b> delivered — mark them delivered in Shopify too.
+                  </span>
+                  <span className="flex gap-2">
+                    <button disabled={!!busy} onClick={() => pushToShopify("paid")}
+                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
+                      Mark paid
+                    </button>
+                    <button disabled={!!busy} onClick={() => pushToShopify("deliver")}
+                            className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold hover:bg-panel disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10">
+                      Mark delivered
+                    </button>
+                  </span>
+                </div>
+              )}
+              {busy === "shopify" && (
+                <div className="flex items-center gap-2 text-[12px] text-muted"><Loader2 size={13} className="animate-spin" /> Writing to Shopify…</div>
+              )}
+              {shopMsg && <div className="text-[12px] font-medium text-emerald-800">{shopMsg}</div>}
+            </div>
+            <p className="mt-2 text-[11.5px] leading-relaxed text-hint dark:text-[#8a8175]">
+              <b>Mark paid</b> records the COD cash against the order, so Shopify
+              stops showing it as payment pending — that is what makes its revenue
+              reports agree with what the courier settled.
+              <b> Close</b> archives a returned order and can be reversed from the
+              Shopify admin. <b>Cancel</b> cannot be reversed at all.
+              Orders your agents already handled are skipped, not done twice.
+            </p>
           </div>
         )}
 
