@@ -69,7 +69,7 @@ export default function ReturnsPage() {
      figures that belong to a range the user already moved off. */
   const reqId = useRef(0);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; figuresOnly?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     const my = ++reqId.current;
     if (!opts?.silent) setLoading(true);
@@ -100,7 +100,7 @@ export default function ReturnsPage() {
     if (courier !== "All couriers") rq = rq.eq("courier", courier);
 
     const [r, c] = await Promise.all([
-      rq,
+      opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : rq,
       supabase.rpc("hub_returns_sections", {
         p_store: store === "ALL" ? null : store,
         p_courier: courier === "All couriers" ? null : courier,
@@ -110,13 +110,16 @@ export default function ReturnsPage() {
 
     if (my !== reqId.current) return;      // superseded — discard
     if (r.error) setErr(r.error.message);
-    setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
+    // figuresOnly refreshes the counts and leaves the list alone
+    if (!opts?.figuresOnly) setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
     setCounts((c.data as SectionCount[]) ?? []);
     setLoading(false);
   }, [tab, preset, cf, ct, store, courier]);
 
   useEffect(() => { load(); }, [load]);
-  useLiveTables(["online_logistics"], useCallback(() => load({ silent: true }), [load]));
+  /* Figures only on a live tick — the same reason as Orders and Logistics.
+     A courier status change should update the counts, not re-pull the list. */
+  useLiveTables(["online_logistics"], useCallback(() => load({ silent: true, figuresOnly: true }), [load]));
 
   const find = (k: string) => counts.find((c) => c.section === k);
   const cards = [

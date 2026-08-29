@@ -86,7 +86,7 @@ export default function OrdersPage() {
      A request token keeps a slow older query from painting over a newer one. */
   const reqId = useRef(0);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; figuresOnly?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     const my = ++reqId.current;
     if (!opts?.silent) setLoading(true);
@@ -106,14 +106,15 @@ export default function OrdersPage() {
     if (store !== "ALL") q2 = q2.eq("store_code", store);
 
     const [rowsRes, sumRes] = await Promise.all([
-      q2,
+      opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : q2,
       supabase.rpc("hub_orders_summary", {
         p_from: from, p_to: to, p_store: store === "ALL" ? null : store,
       }),
     ]);
     if (my !== reqId.current) return;
     if (rowsRes.error) setErr(rowsRes.error.message);
-    setOrders((rowsRes.data as Order[]) ?? []);
+    // figuresOnly leaves the existing list in place rather than blanking it
+    if (!opts?.figuresOnly) setOrders((rowsRes.data as Order[]) ?? []);
     setSummary((sumRes.data as OrdersSummary[])?.[0] ?? null);
     setLoading(false);
   }, [preset, cf, ct, store]);
@@ -123,7 +124,12 @@ export default function OrdersPage() {
      which writes to online_orders. This is what turns that write into something
      visible without a manual refresh. */
   /* Only online_orders: a courier status change does not alter this list. */
-  useLiveTables(["online_orders"], useCallback(() => load({ silent: true }), [load]));
+  /* A LIVE UPDATE REFRESHES THE FIGURES, NOT THE LIST.
+     Shopify fires several webhooks for one order — created, paid, fulfilled —
+     and each was pulling 1,000 rows into any open tab. The cards are database
+     aggregates and cost almost nothing; the row list is the expensive part and
+     the part that changes least. Refresh, or any filter change, pulls rows. */
+  useLiveTables(["online_orders"], useCallback(() => load({ silent: true, figuresOnly: true }), [load]));
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
