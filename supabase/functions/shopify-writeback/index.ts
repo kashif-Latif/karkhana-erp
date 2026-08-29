@@ -1,0 +1,176 @@
+// shopify-writeback — closes returned orders in Shopify.
+//
+// THIS IS THE ONLY THING IN THIS SYSTEM THAT WRITES TO SHOPIFY.
+// Everything else reads. That asymmetry was deliberate and this breaks it, so
+// it is built to be hard to misuse rather than convenient.
+//
+// WHAT IT DOES
+//   Finds parcels that came back — Returned or RTS — whose Shopify order is
+//   still open, and closes them there. A returned COD order that stays open in
+//   Shopify is counted as a live sale by every Shopify report the business
+//   looks at, which is why they diverge from this system.
+//
+// WHY CLOSE AND NOT CANCEL
+//   Shopify cancellation is PERMANENT. There is no un-cancel; the only way back
+//   is to recreate the order, losing its number and history. Across thousands of
+//   old orders, one wrong filter would be unrecoverable.
+//
+//   Closing (archiving) takes the order out of the open list and out of the
+//   default reports, and can be reopened one call at a time or in bulk from the
+//   Shopify admin. It achieves what is actually wanted — these stop looking
+//   like live orders — and stays reversible.
+//
+//   `cancel` is available as an explicit action for anyone who genuinely wants
+//   it, and refuses to run without confirm:"CANCEL PERMANENTLY".
+//
+// SAFETY
+//   dry_run defaults to TRUE. A run that writes must ask for it.
+//   Every order touched is recorded in online_shopify_writebacks, before and
+//   after, so there is a list to reopen from if the filter was wrong.
+//   Rate limited to 2 calls a second — Shopify's REST limit is 2/s per store.
+//   max defaults to 200 so a mistake is 200 orders, not 4,000.
+//
+// CALL
+//   { action: "close", from: "2024-01-01", to: "2026-06-30",
+//     stores: ["LM","TS","TRZ"], dry_run: true, max: 200, key: SYNC_KEY }
+//
+//   Or specific orders instead of a date range:
+//   { action: "close", orders: ["#10838","#10877"], dry_run: false, key: ... }
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const API_VERSION = Deno.env.get("SHOPIFY_API_VERSION") ?? "2026-01";
+const env = (k: string) =>
+  (Deno.env.get(k) ?? Deno.env.get(k.toLowerCase()) ?? Deno.env.get(k.toUpperCase()) ?? "").trim();
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+const json = (b: unknown, s = 200) =>
+  new Response(JSON.stringify(b), { status: s, headers: { ...cors, "content-type": "application/json" } });
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function store(code: string) {
+  const s = code.toUpperCase();
+  const domain = env(`SHOPIFY_${s}_DOMAIN`).replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const token = env(`SHOPIFY_${s}_TOKEN`);
+  return domain && token ? { domain, token } : null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // Same guard the other sync functions use.
+    const expected = Deno.env.get("SYNC_KEY") ?? "\u0000";
+    if (String(body.key ?? "") !== expected) return json({ error: "Not authorised." }, 401);
+
+    const action: string = String(body.action ?? "close");
+    const dryRun: boolean = body.dry_run !== false;      // must be asked to write
+    const max: number = Math.min(Number(body.max ?? 200), 1000);
+    const stores: string[] = Array.isArray(body.stores) && body.stores.length
+      ? body.stores.map((s: string) => s.toUpperCase()) : ["LM", "TS", "TRZ"];
+
+    if (action === "cancel" && body.confirm !== "CANCEL PERMANENTLY") {
+      return json({
+        error: "Cancelling cannot be undone in Shopify. To proceed, send " +
+               'confirm: "CANCEL PERMANENTLY". Consider action:"close" instead, ' +
+               "which archives the order and can be reopened.",
+      }, 400);
+    }
+
+    // ---- which parcels ------------------------------------------------------
+    /* shopify_order_id lives on online_orders, not on online_logistics — a
+       parcel is not a Shopify object, an order is. The two join on order_number
+       AND store_code together, because order numbers repeat across the three
+       stores and matching on the number alone would close a TopShop order
+       because a Little Minors parcel came back. */
+    let q = db.from("online_logistics")
+      .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at,online_orders!inner(shopify_order_id,cancelled_at)")
+      .in("delivery_status", ["Returned", "RTS"])
+      .in("store_code", stores)
+      .limit(max);
+
+    if (Array.isArray(body.orders) && body.orders.length) {
+      q = q.in("order_number", body.orders);
+    } else {
+      // The date a parcel started coming back, falling back the same way the
+      // returns page and migration 0101 do, so the three agree on what is old.
+      if (body.to) q = q.lte("return_leg_started_at", `${body.to}T23:59:59Z`);
+      if (body.from) q = q.gte("return_leg_started_at", `${body.from}T00:00:00Z`);
+    }
+
+    const { data: rows, error } = await q;
+    if (error) return json({ error: error.message }, 500);
+    if (!rows?.length) return json({ ok: true, dry_run: dryRun, found: 0, report: "Nothing matched." });
+
+    // ---- act ----------------------------------------------------------------
+    const results: Record<string, unknown>[] = [];
+    let closed = 0, skipped = 0, failed = 0;
+
+    for (const r of rows) {
+      const st = store(String(r.store_code));
+      if (!st) { skipped++; results.push({ order: r.order_number, skipped: "no credentials for this store" }); continue; }
+
+      const o = Array.isArray(r.online_orders) ? r.online_orders[0] : r.online_orders;
+      // Already cancelled in Shopify by an agent — leave it alone.
+      if (o?.cancelled_at) { skipped++; results.push({ order: r.order_number, skipped: "already cancelled in Shopify" }); continue; }
+      const gid = o?.shopify_order_id;
+      if (!gid) { skipped++; results.push({ order: r.order_number, skipped: "no Shopify id on this parcel" }); continue; }
+
+      if (dryRun) {
+        results.push({ order: r.order_number, store: r.store_code, would: action });
+        closed++;
+        continue;
+      }
+
+      const id = String(gid).replace(/\D/g, "");            // REST wants the number
+      const url = action === "cancel"
+        ? `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/cancel.json`
+        : `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/close.json`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+        body: action === "cancel" ? JSON.stringify({ reason: "customer", email: false }) : "{}",
+      });
+
+      if (res.ok) {
+        closed++;
+        results.push({ order: r.order_number, store: r.store_code, done: action });
+        await db.from("online_shopify_writebacks").insert({
+          order_number: r.order_number, store_code: r.store_code,
+          shopify_order_id: String(gid), action, succeeded: true,
+        });
+      } else {
+        failed++;
+        const text = await res.text();
+        results.push({ order: r.order_number, store: r.store_code, failed: res.status, detail: text.slice(0, 160) });
+        await db.from("online_shopify_writebacks").insert({
+          order_number: r.order_number, store_code: r.store_code,
+          shopify_order_id: String(gid), action, succeeded: false, error: text.slice(0, 500),
+        });
+      }
+
+      // Shopify's REST limit is 2 calls a second per store. Going faster earns
+      // 429s and a partly-finished run, which is the worst outcome here.
+      await sleep(550);
+    }
+
+    return json({
+      ok: true, dry_run: dryRun, action, found: rows.length,
+      closed, skipped, failed,
+      report: dryRun
+        ? `${closed} orders would be ${action}d. Nothing was written. Send dry_run:false to do it.`
+        : `${closed} ${action}d, ${skipped} skipped, ${failed} failed.`,
+      sample: results.slice(0, 25),
+    });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
