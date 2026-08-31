@@ -47,7 +47,14 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const confirm = useConfirm();
-  const [shop, setShop] = useState<{ openReturns: number; delivered: number } | null>(null);
+  /* The uncancelled returns themselves, not just how many.
+     A count says something is wrong; the list says which order, in which store,
+     for how much — which is what somebody actually needs to go and check before
+     agreeing to write to a live shop. */
+  const [shop, setShop] = useState<{
+    open: { order: string; store: string; cod: number }[];
+    delivered: number;
+  } | null>(null);
   const [shopMsg, setShopMsg] = useState("");
   const cpr = String(row.cpr_number ?? "");
 
@@ -69,14 +76,21 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     const cancelled = new Set((data ?? [])
       .filter((o) => o.cancelled_at)
       .map((o) => `${o.store_code}|${o.order_number}`));
-    let openReturns = 0, delivered = 0;
+    const open: { order: string; store: string; cod: number }[] = [];
+    let delivered = 0;
     for (const p of parcels) {
       const key = `${p.store_code}|${p.order_number}`;
       if (p.delivery_status === "Returned" || p.delivery_status === "RTS") {
-        if (!cancelled.has(key)) openReturns++;
+        if (!cancelled.has(key)) {
+          open.push({ order: String(p.order_number ?? "—"),
+                      store: String(p.store_code ?? "—"),
+                      cod: Number(p.cod_amount ?? 0) });
+        }
       } else if (p.delivery_status === "Delivered") delivered++;
     }
-    setShop({ openReturns, delivered });
+    // Biggest first: if only some are going to be checked by hand, check those.
+    open.sort((a, b) => b.cod - a.cod);
+    setShop({ open, delivered });
   }, []);
 
   async function pushOne(action: "close" | "deliver" | "paid" | "cancel") {
@@ -418,7 +432,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
           </div>
         )}
 
-        {shop && (shop.openReturns > 0 || shop.delivered > 0) && (
+        {shop && (shop.open.length > 0 || shop.delivered > 0) && (
           <div className="mt-4 rounded-card border border-line p-3.5 dark:border-white/10">
             <div className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">Shopify</div>
             <p className="mt-0.5 text-[12px] text-muted dark:text-[#a89f93]">
@@ -426,14 +440,14 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
               settlement was imported. Anything below still needs a decision.
             </p>
             <div className="mt-2.5 space-y-2 text-[12.5px]">
-              {shop.openReturns > 0 && (
+              {shop.open.length > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-amber-300 bg-amber-50 p-2.5 text-amber-900">
                   <span>
-                    <b>{shop.openReturns}</b> return{shop.openReturns === 1 ? "" : "s"} in this settlement
-                    {shop.openReturns === 1 ? " was" : " were"} never cancelled in Shopify by an agent —
+                    <b>{shop.open.length}</b> return{shop.open.length === 1 ? "" : "s"} in this settlement
+                    {shop.open.length === 1 ? " was" : " were"} never cancelled in Shopify by an agent —
                     still counted as live sales in its reports.
                   </span>
-                  <span className="flex gap-2">
+                  <span className="flex gap-2 shrink-0">
                     <button disabled={!!busy} onClick={() => pushToShopify("close")}
                             className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
                       Close them
@@ -444,7 +458,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                     <button disabled={!!busy}
                             onClick={async () => {
                               if (!(await confirm({
-                                title: `Cancel ${shop?.openReturns} order${shop?.openReturns === 1 ? "" : "s"} in Shopify?`,
+                                title: `Cancel ${shop?.open.length} order${shop?.open.length === 1 ? "" : "s"} in Shopify?`,
                                 body: "Shopify has no un-cancel. The only way back is recreating the order, losing its number and history. Closing archives them instead and can be reversed.",
                                 confirmLabel: "Cancel them permanently",
                               }))) return;
@@ -454,6 +468,20 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                       Cancel instead
                     </button>
                   </span>
+
+                  {/* Wraps to a second line on a phone; each order is its own
+                      chip so a long list stays readable rather than becoming a
+                      wall of commas. */}
+                  <ul className="mt-1 flex w-full flex-wrap gap-1.5">
+                    {shop.open.map((o) => (
+                      <li key={`${o.store}-${o.order}`}
+                          className="flex items-baseline gap-1.5 rounded-full border border-amber-300 bg-white/70 px-2.5 py-1 text-[11.5px]">
+                        <span className="font-semibold text-amber-900">{o.store}</span>
+                        <span className="font-mono text-amber-900">{o.order}</span>
+                        <span className="tabular-nums text-amber-700">{money(o.cod)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
               {shop.delivered > 0 && (

@@ -254,33 +254,47 @@ Deno.serve(async (req) => {
          cod_amount — if the two ever disagree, Shopify's figure is the one its
          reports are built on, and inventing a transaction for a different sum
          would put the shop permanently out of balance. */
+      /* MARK PAID — orderMarkAsPaid, not a hand-built transaction.
+         Posting kind:"sale" was rejected with "sale is not a valid transaction":
+         a COD order already carries a pending authorisation, so the money is
+         CAPTURED against it rather than invented as a new sale. Shopify has one
+         mutation that does exactly this and works out the amount itself, which
+         is safer than us deciding what the order is worth.
+
+         GraphQL because shopify-sync already uses it against these same stores
+         — the REST paths I reached for are not all present in 2026-01. */
       if (action === "paid") {
         let ok3 = false, detail3 = "";
         try {
-          const or = await fetch(
-            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}.json?fields=id,total_outstanding,financial_status,currency`,
-            { headers: { "X-Shopify-Access-Token": st.token } });
-          const oj = await or.json();
-          const ord = oj?.order ?? {};
-          const outstanding = Number(ord.total_outstanding ?? 0);
-
-          if (ord.financial_status === "paid" || outstanding <= 0) {
-            skipped++;
-            results.push({ order: r.order_number, skipped: "already paid in Shopify" });
-            await sleep(550);
-            continue;
-          }
-
-          const tr = await fetch(
-            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/transactions.json`,
-            { method: "POST",
-              headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
-              body: JSON.stringify({ transaction: {
-                kind: "sale", status: "success", gateway: "Cash on Delivery (COD)",
-                amount: outstanding.toFixed(2), currency: ord.currency ?? "PKR",
-              } }) });
-          ok3 = tr.ok;
-          if (!ok3) detail3 = `${tr.status} ${(await tr.text().catch(() => "")).slice(0, 200)}`;
+          const res = await fetch(`https://${st.domain}/admin/api/${API_VERSION}/graphql.json`, {
+            method: "POST",
+            headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+            body: JSON.stringify({
+              query: `mutation($id: ID!) {
+                orderMarkAsPaid(input: { id: $id }) {
+                  order { id displayFinancialStatus }
+                  userErrors { field message }
+                }
+              }`,
+              variables: { id: `gid://shopify/Order/${id}` },
+            }),
+          });
+          const j = await res.json();
+          const ue = j?.data?.orderMarkAsPaid?.userErrors ?? [];
+          const top = j?.errors ?? [];
+          if (!res.ok) detail3 = `${res.status}`;
+          else if (top.length) detail3 = top.map((e: { message: string }) => e.message).join("; ");
+          else if (ue.length) {
+            const msg = ue.map((e: { message: string }) => e.message).join("; ");
+            // Already settled is not a failure — say so and move on.
+            if (/already|paid/i.test(msg)) {
+              skipped++;
+              results.push({ order: r.order_number, skipped: "already paid in Shopify" });
+              await sleep(550);
+              continue;
+            }
+            detail3 = msg;
+          } else ok3 = true;
         } catch (err) { detail3 = err instanceof Error ? err.message : String(err); }
 
         if (ok3) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "marked paid" }); }
@@ -298,34 +312,60 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      /* MARK DELIVERED — a fulfillment event, over GraphQL.
+         The REST path POST /fulfillments/{id}/events.json returned a bare 406:
+         it is not present in API version 2026-01. I wrote it from memory against
+         an older version instead of checking, which is the same mistake as the
+         transaction above.
+
+         Delivery is still an event on a FULFILLMENT, so the fulfillment has to
+         be found first. An order that was never fulfilled has nothing to mark,
+         and that is reported rather than forced — creating a fulfillment to hang
+         an event on would invent a shipment that never existed in Shopify. */
       if (action === "deliver") {
-        let fid = "";
-        try {
-          const fr = await fetch(
-            `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/fulfillments.json`,
-            { headers: { "X-Shopify-Access-Token": st.token } });
-          const fj = await fr.json();
-          const list = (fj?.fulfillments ?? []) as Record<string, unknown>[];
-          const open = list.find((f) => f.status !== "cancelled");
-          fid = open ? String(open.id) : "";
-        } catch { /* handled as a failure below */ }
-
-        if (!fid) {
-          skipped++;
-          results.push({ order: r.order_number, skipped: "no fulfillment in Shopify to mark" });
-          await sleep(550);
-          continue;
-        }
-
         let ok2 = false, detail2 = "";
         try {
-          const er = await fetch(
-            `https://${st.domain}/admin/api/${API_VERSION}/fulfillments/${fid}/events.json`,
-            { method: "POST",
-              headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
-              body: JSON.stringify({ event: { status: "delivered" } }) });
-          ok2 = er.ok;
-          if (!ok2) detail2 = `${er.status} ${(await er.text().catch(() => "")).slice(0, 200)}`;
+          const fr = await fetch(`https://${st.domain}/admin/api/${API_VERSION}/graphql.json`, {
+            method: "POST",
+            headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+            body: JSON.stringify({
+              query: `query($id: ID!) {
+                order(id: $id) { fulfillments(first: 10) { id status } }
+              }`,
+              variables: { id: `gid://shopify/Order/${id}` },
+            }),
+          });
+          const fj = await fr.json();
+          const list = (fj?.data?.order?.fulfillments ?? []) as { id: string; status: string }[];
+          const open = list.find((f) => f.status !== "CANCELLED");
+
+          if (!open) {
+            skipped++;
+            results.push({ order: r.order_number, skipped: "no fulfillment in Shopify to mark" });
+            await sleep(550);
+            continue;
+          }
+
+          const er = await fetch(`https://${st.domain}/admin/api/${API_VERSION}/graphql.json`, {
+            method: "POST",
+            headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
+            body: JSON.stringify({
+              query: `mutation($f: FulfillmentEventInput!) {
+                fulfillmentEventCreate(fulfillmentEvent: $f) {
+                  fulfillmentEvent { id status }
+                  userErrors { field message }
+                }
+              }`,
+              variables: { f: { fulfillmentId: open.id, status: "DELIVERED" } },
+            }),
+          });
+          const ej = await er.json();
+          const ue = ej?.data?.fulfillmentEventCreate?.userErrors ?? [];
+          const top = ej?.errors ?? [];
+          if (!er.ok) detail2 = `${er.status}`;
+          else if (top.length) detail2 = top.map((e: { message: string }) => e.message).join("; ");
+          else if (ue.length) detail2 = ue.map((e: { message: string }) => e.message).join("; ");
+          else ok2 = true;
         } catch (err) { detail2 = err instanceof Error ? err.message : String(err); }
 
         if (ok2) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "delivered" }); }
