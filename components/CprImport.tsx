@@ -376,13 +376,22 @@ function parseOwnExInvoice(flat: string): Batch[] {
     declaredNet: grand ? Math.abs(unParen(grand[1])) : undefined,
     computedNet: n2(delivered.reduce((t, r) => t + r.net, 0)),
     problem,
-    summary: (declDel && declShip) ? {
-      gross: declaredCod ?? 0,
-      shipping: unParen(declShip[2]),
-      gst: fuel ? unParen(fuel[1]) : 0,        // OwnEx calls it a fuel surcharge
-      wh_income: 0, wh_sales: 0,
-      net: grand ? Math.abs(unParen(grand[1])) : 0,
-    } : undefined,
+    /* THE GROSS IS THE NET PLUS WHAT WAS DEDUCTED — not the same number twice.
+       This read `gross` from the invoice's COD total and `net` from its grand
+       total, which on an OwnEx invoice are the SAME figure: the amount actually
+       paid. So the panel showed "Total 641,891" and "Net Total 641,891" with
+       77,420 of shipping and 15,484 of fuel surcharge listed between them as
+       deductions that visibly changed nothing.
+
+       OwnEx states the net. The gross is therefore net + charges, and computing
+       it that way makes the column add up in the direction it is read. */
+    summary: (declDel && declShip) ? (() => {
+      const shipping = unParen(declShip[2]);
+      const gst = fuel ? unParen(fuel[1]) : 0;
+      const net = grand ? Math.abs(unParen(grand[1])) : 0;
+      return { gross: n2(net + shipping + gst), shipping, gst,
+               wh_income: 0, wh_sales: 0, net };
+    })() : undefined,
   }];
 }
 
