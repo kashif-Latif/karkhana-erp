@@ -13,7 +13,7 @@
  * turns into wrong stock and a wrong cost per garment months later.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Scale, AlertTriangle, Plus, Trash2, Check, Lock } from "lucide-react";
+import { Layers, Scale, AlertTriangle, Plus, Trash2, Check, Lock, Undo2 } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -29,6 +29,7 @@ type OutLine = { category_id: string; color_id: string; size_id: string; quantit
 type Job = {
   id: string; job_number: string; sorted_at: string; worker_count: number | null;
   labour_cost: number; variance_qty: number; variance_reason: string | null;
+  voided_at: string | null; void_reason: string | null;
   employees: { name: string } | null;
 };
 type Check = Record<string, unknown>;
@@ -93,7 +94,7 @@ export default function SortingPage() {
     if (!supabase) return;
     const [g, j] = await Promise.all([
       supabase.from("material_groups").select("has_category,has_color,has_size").eq("id", (lot as unknown as { group_id: string }).group_id).maybeSingle(),
-      supabase.from("sort_jobs").select("id,job_number,sorted_at,worker_count,labour_cost,variance_qty,variance_reason,employees(name)")
+      supabase.from("sort_jobs").select("id,job_number,sorted_at,worker_count,labour_cost,variance_qty,variance_reason,voided_at,void_reason,employees(name)")
         .eq("lot_id", lot.id).order("sorted_at"),
     ]);
     setGroup((g.data as typeof group) ?? null);
@@ -129,6 +130,25 @@ export default function SortingPage() {
     const res = data as Check;
     setCheck(res);
     if (!dry && res.ok) { await load(); await openLot(open); setCheck(res); }
+  }
+
+  /* A session can be undone while its output is still on the shelf. The
+     database refuses once any of it has been issued, and says which
+     material and how much is left — so the message is shown as-is rather
+     than replaced with something vaguer. */
+  async function undo(job: Job) {
+    if (!supabase || !open) return;
+    const why = window.prompt(`Undo ${job.job_number}? The material goes back into the lot.\n\nWhy?`);
+    if (!why || !why.trim()) return;
+    setBusy(true); setFormErr(""); setCheck(null);
+    const { data, error } = await supabase.rpc("void_sort_job", { p_job_id: job.id, p_reason: why.trim() });
+    setBusy(false);
+    if (error) { setFormErr(error.message); return; }
+    const r = data as Record<string, unknown>;
+    await load();
+    const fresh = (await supabase.from("v_stock_lots").select("*").eq("id", open.id).maybeSingle()).data as Lot | null;
+    if (fresh) await openLot(fresh);
+    setFormErr(`${String(r.job)} undone — ${String(r.returned_to_lot)} ${open.unit} back in the lot.`);
   }
 
   const entered = lines.reduce((t, l) => t + (parseFloat(l.quantity) || 0), 0) + (parseFloat(variance) || 0);
@@ -234,10 +254,20 @@ export default function SortingPage() {
               <div className="rounded-xl2 bg-canvas p-3.5">
                 <p className="mb-2 text-[11.5px] font-semibold uppercase tracking-wide text-muted">Earlier sessions</p>
                 {jobs.map((j) => (
-                  <p key={j.id} className="text-[12.5px] text-ink/75">
-                    {j.job_number} · {new Date(j.sorted_at).toLocaleDateString()} · {j.employees?.name ?? "no supervisor"}
-                    {Number(j.variance_qty) > 0 && ` · lost ${j.variance_qty} (${j.variance_reason ?? "no reason given"})`}
-                  </p>
+                  <div key={j.id} className="flex items-start justify-between gap-3 py-0.5">
+                    <p className={`text-[12.5px] ${j.voided_at ? "text-muted line-through" : "text-ink/75"}`}>
+                      {j.job_number} · {new Date(j.sorted_at).toLocaleDateString()} · {j.employees?.name ?? "no supervisor"}
+                      {Number(j.variance_qty) > 0 && ` · lost ${j.variance_qty} (${j.variance_reason ?? "no reason given"})`}
+                    </p>
+                    {j.voided_at ? (
+                      <span className="shrink-0 text-[11.5px] font-semibold text-muted">undone — {j.void_reason}</span>
+                    ) : (
+                      <button onClick={() => undo(j)} disabled={busy}
+                        className="flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold text-ink/70 hover:bg-panel disabled:opacity-40">
+                        <Undo2 size={12} /> Undo
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
