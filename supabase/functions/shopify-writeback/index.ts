@@ -61,11 +61,47 @@ const json = (b: unknown, s = 200) =>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function store(code: string) {
+/* CREDENTIALS THE SAME WAY shopify-sync GETS THEM.
+   This only looked for SHOPIFY_{store}_TOKEN. Stores that authenticate by
+   client credentials have no fixed token, so store() returned null and every
+   one of their parcels was quietly skipped as "no credentials" — 27 of 69 in
+   one settlement, and #TS2181 among them. Nothing failed and nothing was
+   logged, because a skip is not an error; the run simply reported a smaller
+   number than the panel had promised.
+
+   Copied from shopify-sync rather than reimplemented: it already works against
+   all three of these stores, and a second version of an auth path is a second
+   thing to get subtly wrong. */
+async function store(code: string): Promise<{ domain: string; token: string } | null> {
   const s = code.toUpperCase();
   const domain = env(`SHOPIFY_${s}_DOMAIN`).replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  const token = env(`SHOPIFY_${s}_TOKEN`);
-  return domain && token ? { domain, token } : null;
+  if (!domain) return null;
+
+  const fixed = env(`SHOPIFY_${s}_TOKEN`);
+  if (fixed) return { domain, token: fixed };
+
+  const cid = env(`SHOPIFY_${s}_CLIENT_ID`);
+  const sec = env(`SHOPIFY_${s}_SECRET`);
+  if (!cid || !sec) return null;
+
+  try {
+    const r = await fetch(`https://${domain}/admin/oauth/access_token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: cid, client_secret: sec, grant_type: "client_credentials" }),
+    });
+    if (!r.ok) return null;
+    const { access_token } = await r.json();
+    return access_token ? { domain, token: access_token } : null;
+  } catch { return null; }
+}
+
+// One exchange per store per run, not one per parcel.
+const tokenCache = new Map<string, { domain: string; token: string } | null>();
+async function storeCached(code: string) {
+  const k = code.toUpperCase();
+  if (!tokenCache.has(k)) tokenCache.set(k, await store(k));
+  return tokenCache.get(k) ?? null;
 }
 
 Deno.serve(async (req) => {
@@ -215,8 +251,8 @@ Deno.serve(async (req) => {
     let closed = 0, skipped = 0, failed = 0;
 
     for (const r of rows) {
-      const st = store(String(r.store_code));
-      if (!st) { skipped++; results.push({ order: r.order_number, skipped: "no credentials for this store" }); continue; }
+      const st = await storeCached(String(r.store_code));
+      if (!st) { skipped++; results.push({ order: r.order_number, store: r.store_code, skipped: "no Shopify credentials for this store — check SHOPIFY_" + String(r.store_code).toUpperCase() + "_DOMAIN and _TOKEN or _CLIENT_ID/_SECRET" }); continue; }
 
       if (alreadyDone.has(`${r.store_code}|${r.order_number}`)) {
         skipped++; results.push({ order: r.order_number, skipped: "already done in an earlier run" }); continue;

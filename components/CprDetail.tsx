@@ -273,13 +273,29 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   const netTotal = row.net_total ?? row.amount;
   const gap = n(netTotal) - n(row.matched_total);
 
-  const lines: [string, string, boolean][] = [
-    ["Total", money(row.gross_total), false],
-    ["Shipping Charges", less(row.shipping_charges), true],
-    ["GST", less(row.gst), true],
-    ["WH Income Tax (2%)", less(row.wh_income_tax), true],
-    ["WH Sales Tax (2%)", less(row.wh_sales_tax), true],
-  ];
+  /* EACH COURIER DEDUCTS DIFFERENT THINGS, SO NAME THEM DIFFERENTLY.
+     PostEx deducts GST and withholds income and sales tax. OwnEx charges a fuel
+     surcharge and withholds nothing — but the panel printed "GST" over the fuel
+     figure and then two withholding rows reading "—" on every single invoice.
+
+     A row that is always empty is worse than no row: the reader has to look at
+     it, work out that it means nothing here, and do that again next time. And a
+     number under the wrong heading is worse still, because it is quietly
+     believed. */
+  const isOwnEx = String(row.courier ?? "") === "OwnEx";
+  const lines: [string, string, boolean][] = isOwnEx
+    ? [
+        ["Total", money(row.gross_total), false],
+        ["Delivery Charges", less(row.shipping_charges), true],
+        ["Fuel Surcharge", less(row.gst), true],
+      ]
+    : [
+        ["Total", money(row.gross_total), false],
+        ["Shipping Charges", less(row.shipping_charges), true],
+        ["GST", less(row.gst), true],
+        ["WH Income Tax (2%)", less(row.wh_income_tax), true],
+        ["WH Sales Tax (2%)", less(row.wh_sales_tax), true],
+      ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
