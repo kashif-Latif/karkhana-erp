@@ -205,7 +205,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
       )}
 
       <p className="mt-3 text-[12px] leading-relaxed text-hint dark:text-[#8a8175]">
-        Payable = counted days × salary ÷ 30 − advances.
+        Payable = counted days ÷ days in the month × salary − advances. A full month worked pays the full salary, in February as in August.
         Sundays and public holidays are paid for everyone; working a day off adds one extra day.
         Approved leave is paid in full; an absent day is not counted, and "Lost" is what it would have paid.
         {isCurrentMonth && " This month counts days up to today, so the figure grows as the month goes on."}

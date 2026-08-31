@@ -207,7 +207,7 @@ export default function EmployeeMonthDetail({
           <div className="mb-1.5 font-semibold text-ink dark:text-[#f4f1ea]">Payable breakdown</div>
           <div className="space-y-1 text-muted dark:text-[#a89f93]">
             <div className="flex justify-between">
-              <span>Earned over {row.counted_days} counted days, each at that day&rsquo;s rate ÷ 30</span>
+              <span>Earned over {row.counted_days} counted days, at each day&rsquo;s own rate</span>
               <span className="tabular-nums">{rs(gross)}</span>
             </div>
             {Number(row.extra_days) > 0 && (
