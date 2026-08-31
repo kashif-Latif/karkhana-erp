@@ -71,17 +71,35 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     if (!supabase || parcels.length === 0) return;
     const nums = [...new Set(parcels.map((p) => p.order_number).filter(Boolean))] as string[];
     if (!nums.length) return;
-    const { data } = await supabase.from("online_orders")
-      .select("order_number,store_code,cancelled_at").in("order_number", nums);
-    const cancelled = new Set((data ?? [])
-      .filter((o) => o.cancelled_at)
-      .map((o) => `${o.store_code}|${o.order_number}`));
+    /* "STILL OPEN IN SHOPIFY" HAS TO INCLUDE WHAT WE ALREADY DID.
+       This counted only orders with no cancelled_at. But CLOSING an order
+       archives it and never sets cancelled_at — so pressing Close could not
+       possibly remove anything from this list, and the same parcels came back
+       every time. Cancelling does set it, but our copy only learns that on the
+       next sync, so those reappeared too until the sync caught up.
+
+       The list now also excludes anything this system has successfully closed
+       or cancelled. What is left is what genuinely still needs a decision. */
+    const [{ data }, { data: done }] = await Promise.all([
+      supabase.from("online_orders")
+        .select("order_number,store_code,cancelled_at").in("order_number", nums),
+      supabase.from("online_shopify_writebacks")
+        .select("order_number,store_code")
+        .in("order_number", nums)
+        .eq("succeeded", true)
+        .in("action", ["close", "cancel"]),
+    ]);
+    const handled = new Set([
+      ...(data ?? []).filter((o) => o.cancelled_at)
+        .map((o) => `${o.store_code}|${o.order_number}`),
+      ...(done ?? []).map((d) => `${d.store_code}|${d.order_number}`),
+    ]);
     const open: { order: string; store: string; cod: number }[] = [];
     let delivered = 0;
     for (const p of parcels) {
       const key = `${p.store_code}|${p.order_number}`;
       if (p.delivery_status === "Returned" || p.delivery_status === "RTS") {
-        if (!cancelled.has(key)) {
+        if (!handled.has(key)) {
           open.push({ order: String(p.order_number ?? "—"),
                       store: String(p.store_code ?? "—"),
                       cod: Number(p.cod_amount ?? 0) });

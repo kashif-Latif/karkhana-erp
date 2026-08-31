@@ -252,7 +252,7 @@ export default function ReturnsPage() {
               <th className="px-4 py-3 text-right font-semibold">Age</th>
               {isReturns
                 ? <><th className="px-4 py-3 font-semibold">Stage</th><th className="px-4 py-3 font-semibold">Reason</th></>
-                : <><th className="px-4 py-3 font-semibold">Customer</th><th className="px-4 py-3 font-semibold">CPR</th></>}
+                : <th className="px-4 py-3 font-semibold">Customer</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-line dark:divide-white/[0.06]">
@@ -308,7 +308,6 @@ export default function ReturnsPage() {
                       </>
                     : <>
                         <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{up.customer_name ?? "—"}</td>
-                        <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{up.cpr_number ?? "—"}</td>
                       </>}
                 </tr>
               );
