@@ -27,6 +27,9 @@ function deliveryClass(s: string) {
     case "Delivered": return "bg-success-soft text-success dark:bg-white/[0.08] dark:text-success";
     case "RTS": case "Returned": return "bg-danger-soft text-danger dark:bg-white/[0.08] dark:text-danger";
     case "In Transit": return "bg-periwinkle-soft text-periwinkle-strong dark:bg-white/[0.08] dark:text-periwinkle";
+    // Amber, not blue: an unbooked parcel is waiting on somebody here, not on
+    // the courier. It should not look like the ones that need nothing.
+    case "Unbooked": return "bg-amber-soft text-amber-900 dark:bg-amber-400/15 dark:text-amber-200";
     case "Cancelled": return "bg-panel text-muted dark:bg-white/[0.06] dark:text-[#a89f93]";
     default: return "bg-amber-soft text-amber-strong dark:bg-white/[0.08] dark:text-amber";
   }
@@ -224,6 +227,7 @@ export default function LogisticsPage() {
       active: filtered.length - cancelled,
       transit: filtered.filter((l) => l.delivery_status === "In Transit").length,
       transitPortal: filtered.filter((l) => l.delivery_status === "In Transit").length,
+      unbooked: filtered.filter((l) => l.delivery_status === "Unbooked").length,
       delivered, rts, returnedReceived: rts, outForReturn: 0, cancelled,
       rate: settled ? (delivered / settled) * 100 : 0,
       cod: filtered.filter((l) => l.delivery_status === "Delivered").reduce((a, l) => a + num(l.cod_amount), 0),
@@ -250,6 +254,9 @@ export default function LogisticsPage() {
 
   const cards = [
     { label: "Active shipments", value: M.active.toLocaleString(), sub: M.cancelled ? `${M.total.toLocaleString()} incl. cancelled` : undefined, Icon: Package, bg: "bg-periwinkle-soft" },
+    { label: "Not collected", filter: "Unbooked", value: (M.unbooked ?? 0).toLocaleString(),
+      sub: (M.unbooked ?? 0) ? "still with us — chase the pickup" : undefined,
+      Icon: Package, bg: "bg-amber-soft" },
     { label: "In transit", filter: "In Transit", value: (M.transitPortal || M.transit).toLocaleString(),
       sub: M.outForReturn ? `incl. ${M.outForReturn} coming back` : undefined,
       Icon: Truck, bg: "bg-amber-soft" },

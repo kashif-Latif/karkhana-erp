@@ -8,7 +8,7 @@ import { parseCsv, matchHeader, toNum, toDate } from "@/lib/csv";
 type Result = { ok: boolean; msg: string } | null;
 const STORES = ["LM", "TS", "TRZ"];
 const COURIERS = ["PostEx", "OwnEx"];
-const DSTATUS = ["In Transit", "Delivered", "Returned", "RTS", "Cancelled"];
+const DSTATUS = ["Unbooked", "In Transit", "Delivered", "Returned", "RTS", "Cancelled"];
 
 /** A courier file usually holds every store mixed together, and the tracking
  *  number already says which courier it is — so both can be worked out per row

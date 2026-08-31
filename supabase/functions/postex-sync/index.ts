@@ -47,7 +47,19 @@ function classify(raw: string): { delivery_status: string; needs_review: boolean
   // everything still moving. Includes wordings the v4.1.9 PDF never lists but
   // the live API really sends: Transferred, In Stock, Ready for Delivery,
   // In-Transit (hyphenated), and "Reason - REFUSED TO RECEIVE".
-  if (/unbooked|booked|warehouse|in stock|transferred|ready for delivery|out for delivery|picked|attempt|refus|en.?route|in.?transit|transit|on root|under review|shipper advice|hold/.test(s))
+  /* NOT YET COLLECTED IS NOT THE SAME AS MOVING.
+     "Unbooked" was in the same bucket as "In Transit", so a parcel PostEx has
+     never picked up displayed as though it were on its way to the customer.
+     43 TRZ and TS parcels showed In Transit this morning while PostEx's own
+     portal said Unbooked for every one of them — they were sitting in the
+     warehouse.
+
+     The distinction is operational, not cosmetic: an unbooked parcel needs
+     somebody to chase the pickup, and an in-transit one needs nothing. Merging
+     them hides the only one that requires action. Checked before the general
+     rule below, because "unbooked" contains "booked". */
+  if (/un-?booked|not.?booked/.test(s))           return { delivery_status: "Unbooked",   needs_review: false };
+  if (/booked|warehouse|in stock|transferred|ready for delivery|out for delivery|picked|attempt|refus|en.?route|in.?transit|transit|on root|under review|shipper advice|hold/.test(s))
                                                   return { delivery_status: "In Transit", needs_review: false };
   return { delivery_status: "In Transit", needs_review: true };   // truly unknown -> flag, never guess
 }
