@@ -19,10 +19,17 @@ import { useLiveTables } from "@/lib/useLiveTables";
    Pending returns is deliberately oldest-first: couriers stop honouring claims
    after a while, so the row most likely to cost money is the one at the top. */
 
-type Section = "pending_returns" | "delivered_unpaid";
+type Section = "pending_returns" | "closed_returns" | "delivered_unpaid";
 
 const TABS: { key: Section; label: string; hint: string }[] = [
   { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Newest first; the AGE column flags the ones going stale." },
+  /* A CLOSED RETURN HAD NOWHERE TO LIVE.
+     Pending filters needs_chasing, and a return closed by the nightly job or by
+     a settlement no longer needs chasing. The other tab is delivered parcels.
+     So a real parcel — #4715, returned in May 2025, closed correctly — could not
+     be seen anywhere in this screen, and searching for it said "Nothing here."
+     which reads as "this does not exist". */
+  { key: "closed_returns",   label: "Closed returns",   hint: "Came back and no longer being chased — received, settled by a CPR, or closed automatically after nine days. The reason is on each row." },
   { key: "delivered_unpaid", label: "Returns Delivered", hint: "Delivered to the customer, but the COD has not reached you. This is the receivable." },
 ];
 
@@ -76,7 +83,7 @@ export default function ReturnsPage() {
     setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
 
-    const view = tab === "delivered_unpaid" ? "v_delivered_unpaid" : "v_returns_all";
+    const view = tab === "delivered_unpaid" ? "v_delivered_unpaid" : "v_returns_all";  // closed returns come from the same view, filtered below
     const dateCol = tab === "delivered_unpaid" ? "delivery_date" : "return_date";
     /* OLDEST FIRST, on both tabs.
        A chase list is worked from the top, and the oldest parcel is the one
@@ -86,7 +93,9 @@ export default function ReturnsPage() {
 
        This was newest-first briefly at Zeeshan's request and has been changed
        back deliberately. */
-    const ascending = true;
+    // Oldest first on the chase list, because the top row is the one closest to
+    // being written off. Closed returns are history — newest first there.
+    const ascending = tab !== "closed_returns";
 
     /* Same fix as Orders: a search asks the database, not the 1,000 rows the
        page happens to hold. #4715 is a real parcel that has been in this table
@@ -101,7 +110,15 @@ export default function ReturnsPage() {
     }
     // the same flag hub_returns_sections() counts, so the card and the list can
     // never disagree — a return acknowledged by cancelling in Shopify drops out
-    if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
+    /* A SEARCH LOOKS EVERYWHERE, NOT JUST IN THIS TAB.
+       Typing an order number is asking for that parcel. Filtering the answer by
+       whichever tab happened to be open is how #4715 — a real, correctly closed
+       return — produced "Nothing here." on both tabs in turn. With a term, the
+       chase filter comes off and the row is shown with its own status. */
+    if (!term) {
+      if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
+      if (tab === "closed_returns")  rq = rq.eq("needs_chasing", false);
+    }
     // A search ignores the date window, for the same reason as Orders.
     if (!term) {
       if (from) rq = rq.gte(dateCol, from);
@@ -214,7 +231,7 @@ export default function ReturnsPage() {
         <select value={courier} onChange={(e) => setCourier(e.target.value)} className="rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white">
           {["All couriers", "PostEx", "OwnEx"].map((c) => <option key={c}>{c}</option>)}
         </select>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search order or tracking"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search order or tracking — looks everywhere"
           className="min-w-[200px] flex-1 rounded-full border border-line bg-surface px-4 py-2 text-[13px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
       </div>
 
@@ -268,7 +285,17 @@ export default function ReturnsPage() {
           </thead>
           <tbody className="divide-y divide-line dark:divide-white/[0.06]">
             {loading && <tr><td colSpan={11} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">Loading…</td></tr>}
-            {!loading && !filtered.length && <tr><td colSpan={11} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">Nothing here.</td></tr>}
+            {/* "Nothing here." after a search reads as "this parcel does not
+                exist", which is the wrong conclusion and the one that cost an
+                afternoon. Say what was actually searched. */}
+            {!loading && !filtered.length && (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">
+                {q.trim()
+                  ? <>No parcel matches <b className="text-ink dark:text-[#f4f1ea]">{q.trim()}</b> in any return, on any date.
+                     <span className="mt-1 block text-[12px] text-hint">Checked every tab and the whole date range, not just this view.</span></>
+                  : "Nothing here."}
+              </td></tr>
+            )}
             {!loading && filtered.map((r) => {
               const ret = r as ReturnRow;
               const up = r as UnpaidRow;
