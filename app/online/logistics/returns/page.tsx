@@ -168,10 +168,27 @@ export default function ReturnsPage() {
   useLiveTables(["online_logistics"], useCallback(() => load({ silent: true, figuresOnly: true }), [load]));
 
   const find = (k: string) => counts.find((c) => c.section === k);
+  /* Closed = every return, minus the ones still being chased. Counted from the
+     same RPC rather than a second query, so the three cards can never disagree
+     about how many returns exist. */
+  const closedCount = Math.max(0, (find("all_returns")?.n ?? 0) - (find("pending_returns")?.n ?? 0));
+  const closedValue = Math.max(0, (find("all_returns")?.value ?? 0) - (find("pending_returns")?.value ?? 0));
+
   const cards = [
     { key: "pending_returns" as Section, label: "Pending returns", Icon: Undo2, bg: "bg-amber-soft",
       n: find("pending_returns")?.n ?? 0, v: find("pending_returns")?.value ?? 0,
       sub: find("pending_returns")?.oldest_days ? `oldest ${find("pending_returns")?.oldest_days}d` : undefined },
+    /* THE CLOSED TAB HAD NO CARD.
+       I added a third tab and left the card row at two, so switching to Closed
+       returns highlighted nothing and the Pending card — still showing 26 —
+       read as the selected one. A parcel correctly moved to Closed looked like
+       it was still stuck in Pending, which is the exact confusion the tab was
+       added to remove.
+
+       The count comes from the same figures the RPC already returns: everything
+       that came back, less what is still chased. */
+    { key: "closed_returns" as Section, label: "Closed returns", Icon: PackageCheck, bg: "bg-periwinkle-soft",
+      n: closedCount, v: closedValue, sub: "no longer chased" },
     { key: "delivered_unpaid" as Section, label: "Returns Delivered", Icon: Wallet, bg: "bg-success-soft",
       n: find("delivered_unpaid")?.n ?? 0, v: find("delivered_unpaid")?.value ?? 0,
       sub: find("delivered_unpaid")?.oldest_days ? `oldest ${find("delivered_unpaid")?.oldest_days}d` : undefined },
