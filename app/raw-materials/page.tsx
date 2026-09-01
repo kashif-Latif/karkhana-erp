@@ -20,6 +20,9 @@ type Family = "cloth" | "other";
 export default function RawMaterialsPage() {
   const [tab, setTab] = useState<Tab>("Items");
   const [family, setFamily] = useState<Family>("cloth");
+  /* Switching to Cloth while Sizes is open would leave a tab selected that is
+     no longer on screen, and the page would look blank. */
+  useEffect(() => { if (family === "cloth" && tab === "Sizes") setTab("Items"); }, [family, tab]);
   const [canManage, setCanManage] = useState(false);
   const [catGroups, setCatGroups] = useState<{ value: string; label: string }[]>([]);
 
@@ -53,7 +56,9 @@ export default function RawMaterialsPage() {
             </p>
 
             <div className="mb-5 flex flex-wrap gap-2">
-              {TABS.map((t) => (
+              {/* Cloth has no sizes — Fabric is category and colour only, so a
+                  Sizes tab there is a dead end. Sizes belong to Zip. */}
+              {TABS.filter((t) => !(family === "cloth" && t === "Sizes")).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === t ? "bg-ink text-white" : "bg-surface text-muted hover:bg-panel"}`}>
                   {t}

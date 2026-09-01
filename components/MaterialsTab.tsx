@@ -31,7 +31,7 @@ export default function MaterialsTab({ canManage, family, clothGroups }:
     const list = ((g.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
       const gu = (r.group_units as { units: { id: string; symbol: string } | null }[]) ?? [];
       return {
-        id: r.id as string, name: r.name as string,
+        id: r.id as string, code: r.code as string, name: r.name as string,
         has_category: !!r.has_category, has_color: !!r.has_color, has_size: !!r.has_size,
         units: gu.map((x) => x.units).filter(Boolean) as { id: string; symbol: string }[],
       };
@@ -81,7 +81,13 @@ export default function MaterialsTab({ canManage, family, clothGroups }:
           <div key={g.id} className="rounded-card bg-surface p-5 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="text-[16px] font-extrabold text-ink">{g.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-[16px] font-extrabold text-ink">{g.name}</h3>
+                  {/* The material's own code. Every item created under it inherits
+                      this prefix, so seeing FAB here explains where MAT codes and
+                      the recipes get their family from. */}
+                  {g.code && <span className="rounded-full bg-panel px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">{g.code}</span>}
+                </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted">
                   Received in
                   {g.units.length ? g.units.map((u) => <span key={u.id} className="rounded-full bg-panel px-2 py-0.5 text-[11px] font-semibold normal-case text-ink/70">{u.symbol}</span>) : <span className="text-hint">—</span>}
