@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { Boxes, PackagePlus, Loader2, FileText, Ban, AlertTriangle, X, Pencil, Trash2 } from "lucide-react";
+import { Boxes, PackagePlus, Loader2, FileText, Ban, AlertTriangle, X, Pencil } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -25,9 +25,6 @@ export default function InventoryPage() {
   const [grns, setGrns] = useState<GrnRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [canVoid, setCanVoid] = useState(false);
-  /* delete_grn is super-admin only in the database (0016), so the button is
-     shown only to a super admin rather than offered and then refused. */
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [confirm, setConfirm] = useState<{ mode: "void" | "delete"; id: string; num: string } | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,8 +54,6 @@ export default function InventoryPage() {
     setGrns((g.data as unknown as GrnRow[]) ?? []);
     const { data: cv } = await supabase.rpc("has_permission", { p_permission_code: "inventory.adjust" });
     setCanVoid(!!cv);
-    const { data: sa } = await supabase.rpc("is_super_admin");
-    setIsSuperAdmin(!!sa);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -169,19 +164,7 @@ export default function InventoryPage() {
                         <td className="px-5 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
                             {voided ? (
-                              /* A voided receipt has already been reversed, so its net
-                                 contribution to stock is zero and deleting it cannot put a
-                                 balance wrong. It is the one case where permanent deletion
-                                 is safe — and until now there was no way to reach it. */
-                              <>
-                                <span className="rounded-full bg-panel px-2.5 py-0.5 text-[11px] font-semibold text-muted">Voided</span>
-                                {isSuperAdmin && (
-                                  <button onClick={() => openConfirm("delete", g.id as string, g.grn_number as string)}
-                                    className="inline-flex items-center gap-1 rounded-full border border-danger/40 px-2.5 py-1 text-[12px] font-semibold text-danger hover:bg-danger-soft">
-                                    <Trash2 size={12} /> Delete
-                                  </button>
-                                )}
-                              </>
+                              <span className="rounded-full bg-panel px-2.5 py-0.5 text-[11px] font-semibold text-muted">Voided</span>
                             ) : canVoid ? (
                               <>
                                 <Link href={`/inventory/receive?edit=${g.id}`}

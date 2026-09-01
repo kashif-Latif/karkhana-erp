@@ -20,7 +20,6 @@ const NAV: NavItem[] = [
   { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
   { label: "Inventory", Icon: Boxes, children: [
     { label: "Raw Material", href: "/inventory" },
-    { label: "Sorting", href: "/inventory/sorting" },
     { label: "Final Product", href: "/inventory/final-products" },
   ] },
   { label: "Movements", href: "/movements", Icon: ArrowLeftRight },

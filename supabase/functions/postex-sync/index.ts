@@ -539,9 +539,20 @@ Deno.serve(async (req) => {
       const tracking = String(d.trackingNumber ?? "");
       if (!tracking) return json({ error: "no tracking number returned", detail: res.body }, 502);
 
+      /* CLASSIFY THE STATUS POSTEX ACTUALLY RETURNED, do not assert one.
+         This wrote delivery_status: "In Transit" as a literal while storing the
+         real status beside it, so a parcel booked seconds ago — which PostEx
+         reports as UnBooked, because nobody has collected it — appeared to be
+         on its way to the customer. The raw value was right there in the same
+         object and was ignored.
+
+         93 parcels showed In Transit this morning with 0 Not collected, even
+         after the classifier was fixed, because they were inserted here rather
+         than read by the tracking sync. */
+      const bookedRaw = String(d.orderStatus ?? "UnBooked");
       await db.from("online_logistics").upsert({
         tracking_id: tracking, order_number: String(o.orderRefNumber), store_code: store,
-        courier: "PostEx", delivery_status: "In Transit", status: String(d.orderStatus ?? "UnBooked"),
+        courier: "PostEx", delivery_status: classify(bookedRaw).delivery_status, status: bookedRaw,
         dispatch_date: new Date().toISOString().slice(0, 10),
         cod_amount: Number(o.invoicePayment), payment_status: "Pending",
       }, { onConflict: "tracking_id" });
