@@ -58,6 +58,8 @@ const PAGE = 500;
 
 export default function ReturnsPage() {
   const [tab, setTab] = useState<Section>("pending_returns");
+  // Which tab a search moved us to, so the jump is explained rather than silent.
+  const [jumped, setJumped] = useState("");
   const [rows, setRows] = useState<(ReturnRow | UnpaidRow)[]>([]);
   const [counts, setCounts] = useState<SectionCount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +142,22 @@ export default function ReturnsPage() {
     if (r.error) setErr(r.error.message);
     // figuresOnly refreshes the counts and leaves the list alone
     if (!opts?.figuresOnly) setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
+
+    /* A SEARCH GOES TO THE TAB THE PARCEL IS ACTUALLY IN.
+       Searching across tabs stopped "Nothing here." for a parcel that exists,
+       but it then displayed a received return underneath a heading that says
+       "still needs chasing" — which is its own kind of wrong answer. If every
+       match belongs somewhere else, move there rather than describing it. */
+    if (!term) setJumped("");
+    if (term && !opts?.figuresOnly && tab !== "delivered_unpaid") {
+      const found = (r.data as ReturnRow[]) ?? [];
+      if (found.length) {
+        const allClosed  = found.every((x) => x.needs_chasing === false);
+        const allChasing = found.every((x) => x.needs_chasing === true);
+        if (tab === "pending_returns" && allClosed)  { setJumped("Closed returns");  setTab("closed_returns"); }
+        if (tab === "closed_returns"  && allChasing) { setJumped("Pending returns"); setTab("pending_returns"); }
+      }
+    }
     setCounts((c.data as SectionCount[]) ?? []);
     setLoading(false);
   }, [tab, preset, cf, ct, store, courier, q]);
@@ -319,19 +337,7 @@ export default function ReturnsPage() {
                         onChange={(e) => setPicked((p) => e.target.checked ? [...p, r.tracking_id] : p.filter((x) => x !== r.tracking_id))} />
                     </td>
                   )}
-                  {/* A SEARCH SHOWS ROWS FROM EVERY TAB, SO IT MUST SAY WHICH.
-                      Widening the search fixed "Nothing here." for parcels
-                      sitting in another tab — but an already-received return
-                      then appeared inside Pending with nothing marking it,
-                      which reads as "this one is stuck". */}
-                  <td className="px-4 py-3 font-semibold text-ink dark:text-[#f4f1ea]">
-                    {r.order_number ?? "—"}
-                    {q.trim() && isReturns && !ret.needs_chasing && (
-                      <span className="ml-2 rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                        closed
-                      </span>
-                    )}
-                  </td>
+                  <td className="px-4 py-3 font-semibold text-ink dark:text-[#f4f1ea]">{r.order_number ?? "—"}</td>
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.store_code ?? "—"}</td>
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.courier ?? "—"}</td>
                   <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">{r.tracking_id}</td>
