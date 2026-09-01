@@ -70,7 +70,10 @@ export default function SortingPage() {
       supabase.from("material_categories").select("id,name").order("name"),
       supabase.from("colors").select("id,name").order("name"),
       supabase.from("sizes").select("id,name").order("name"),
-      supabase.from("employees").select("id,name").eq("is_active", true).order("name"),
+      /* Only factory floors. `employees` is shared — the Hub's seven people live
+         in the same table (0093), and a sorting supervisor is never one of them. */
+      supabase.from("employees").select("id,name,departments!inner(kind)")
+        .eq("is_active", true).eq("departments.kind", "section").order("name"),
     ]);
     if (l.error) setErr(l.error.message);
     setLots((l.data as Lot[]) ?? []);

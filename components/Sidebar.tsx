@@ -26,7 +26,13 @@ const NAV: NavItem[] = [
     { label: "Final Product", href: "/inventory/final-products" },
   ] },
   { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
-  { label: "Movements", href: "/movements", Icon: ArrowLeftRight },
+  /* Cutting, stitching and clipping sit inside one box. The stages are labels
+     on the work, not gates a piece passes through one at a time — what matters
+     is how many of the order are still out on the floor. */
+  { label: "Process", Icon: ArrowLeftRight, children: [
+    { label: "Work & wages", href: "/process" },
+    { label: "Stock movements", href: "/movements" },
+  ] },
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Orders", href: "/orders", Icon: ClipboardList },
   { label: "Articles", href: "/articles", Icon: Shirt },
