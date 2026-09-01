@@ -36,6 +36,8 @@
 //   cancel   permanent, refuses without confirm:"CANCEL PERMANENTLY"
 //   deliver  mark a DELIVERED parcel's fulfillment as delivered in Shopify, so
 //            the shop agrees with what the courier reported
+//   open     un-archive an order closed by mistake. The undo for `close`, and
+//            the reason `close` was chosen over `cancel` in the first place.
 //   paid     record the COD cash against the order, so Shopify stops showing it
 //            as payment pending. This is the one that makes Shopify's revenue
 //            reports agree with the money the courier actually settled.
@@ -180,12 +182,20 @@ Deno.serve(async (req) => {
        the batching, the audit log, the rate limit — is the same either way,
        because the dangerous parts are dangerous whichever direction the write
        goes. */
+    /* `open` is the undo, so it must not filter by delivery status at all —
+       the orders being reopened were archived precisely because a parcel was
+       wrongly attached to them, and that parcel's status is irrelevant to
+       whether the ORDER should be open. Callers name the orders explicitly. */
     const wantStatuses = (action === "deliver" || action === "paid")
       ? ["Delivered"] : ["Returned", "RTS"];
 
     let q = db.from("online_logistics")
       .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at")
-      .in("delivery_status", wantStatuses)
+      // `open` reverses a mistake, so it must reach every named order — the
+      // whole point is that the parcel attached to it was the wrong one.
+      .in("delivery_status", action === "open"
+          ? ["Returned","RTS","Delivered","In Transit","Unbooked","Cancelled"]
+          : wantStatuses)
       .in("store_code", stores)
       .limit(max);
 
@@ -254,14 +264,14 @@ Deno.serve(async (req) => {
       const st = await storeCached(String(r.store_code));
       if (!st) { skipped++; results.push({ order: r.order_number, store: r.store_code, skipped: "no Shopify credentials for this store — check SHOPIFY_" + String(r.store_code).toUpperCase() + "_DOMAIN and _TOKEN or _CLIENT_ID/_SECRET" }); continue; }
 
-      if (alreadyDone.has(`${r.store_code}|${r.order_number}`)) {
+      if (action !== "open" && alreadyDone.has(`${r.store_code}|${r.order_number}`)) {
         skipped++; results.push({ order: r.order_number, skipped: "already done in an earlier run" }); continue;
       }
 
       const o = orders.get(`${r.store_code}|${r.order_number}`);
       if (!o) { skipped++; results.push({ order: r.order_number, skipped: "no matching Shopify order" }); continue; }
       // Already cancelled in Shopify by an agent — leave it alone.
-      if (o.cancelled_at) { skipped++; results.push({ order: r.order_number, skipped: "already cancelled in Shopify" }); continue; }
+      if (o.cancelled_at && action !== "open") { skipped++; results.push({ order: r.order_number, skipped: "already cancelled in Shopify" }); continue; }
       const gid = o.shopify_order_id;
       if (!gid) { skipped++; results.push({ order: r.order_number, skipped: "no Shopify id on this parcel" }); continue; }
 
@@ -421,6 +431,8 @@ Deno.serve(async (req) => {
 
       const url = action === "cancel"
         ? `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/cancel.json`
+        : action === "open"
+        ? `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/open.json`
         : `https://${st.domain}/admin/api/${API_VERSION}/orders/${id}/close.json`;
 
       /* ONE BAD ROW MUST NOT END THE RUN.
