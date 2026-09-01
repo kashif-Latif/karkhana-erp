@@ -56,9 +56,7 @@ export default function Movements() {
     const [mi, sb, dp, mv, pm, em, dh] = await Promise.all([
       supabase.from("material_items").select("id, material_groups(name), material_categories(name), colors(name), sizes(name), units(symbol,name)").eq("is_active", true),
       supabase.from("stock_balances").select("item_id, balance"),
-      /* kind='section' is a factory floor. kind='business_unit' is Hub, FS Traders,
-         Inventory and Karkhana itself (0091) — none of which material is issued to. */
-      supabase.from("departments").select("id, name").eq("kind", "section").order("name"),
+      supabase.from("departments").select("id, name").order("name"),
       supabase.from("stock_movements").select("id, movement_number, type, status, reason, moved_at, departments(name), employees(name)").order("created_at", { ascending: false }).limit(20),
       supabase.rpc("my_permissions"),
       supabase.from("employees").select("id, name, department_id").eq("is_active", true).order("name"),
