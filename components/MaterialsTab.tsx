@@ -4,9 +4,10 @@ import { supabase } from "@/lib/supabase";
 import { Plus, Pencil, Loader2, X, Check } from "lucide-react";
 
 type Unit = { id: string; name: string; symbol: string };
-type Group = { id: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean; units: { id: string; symbol: string }[] };
+type Group = { id: string; code?: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean; units: { id: string; symbol: string }[] };
 
-export default function MaterialsTab({ canManage }: { canManage: boolean }) {
+export default function MaterialsTab({ canManage, family, clothGroups }:
+  { canManage: boolean; family?: "cloth" | "other"; clothGroups?: string[] }) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +25,7 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
     if (!supabase) return;
     setLoading(true);
     const [g, u] = await Promise.all([
-      supabase.from("material_groups").select("id,name,has_category,has_color,has_size, group_units(unit_id, units(id,symbol))").eq("is_active", true).order("name"),
+      supabase.from("material_groups").select("id,code,name,has_category,has_color,has_size, group_units(unit_id, units(id,symbol))").eq("is_active", true).order("name"),
       supabase.from("units").select("id,name,symbol").eq("is_active", true).order("name"),
     ]);
     const list = ((g.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
@@ -70,7 +71,13 @@ export default function MaterialsTab({ canManage }: { canManage: boolean }) {
       </div>
 
       <div className="space-y-3">
-        {groups.map((g) => (
+        {groups
+          .filter((g) => {
+            const cloth = clothGroups ?? ["FAB"];
+            if (!family) return true;
+            return family === "cloth" ? cloth.includes(g.code ?? "") : !cloth.includes(g.code ?? "");
+          })
+          .map((g) => (
           <div key={g.id} className="rounded-card bg-surface p-5 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

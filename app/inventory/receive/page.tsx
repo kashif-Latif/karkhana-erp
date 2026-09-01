@@ -270,6 +270,24 @@ export default function ReceiveStock() {
 
                         {g && (
                           <>
+                            {/* Say plainly what this line will do. Leaving an attribute
+                                blank sends the batch to Sorting; filling every one — including
+                                picking a colour literally called "MIX of All" — marks it fully
+                                identified and it never appears there. That distinction is
+                                invisible otherwise, and getting it wrong is silent. */}
+                            {(g.has_category || g.has_color || g.has_size) && (() => {
+                              const bulk = (g.has_category && !l.category_id)
+                                        || (g.has_color && !l.color_id)
+                                        || (g.has_size && !l.size_id);
+                              return (
+                                <div className={`mt-2.5 rounded-xl2 px-3 py-2 text-[12px] leading-snug ${bulk ? "bg-amber-soft text-ink" : "bg-canvas text-muted"}`}>
+                                  {bulk
+                                    ? "Goes to Sorting. Leave the blank fields empty when the cartons have not been opened — the breakdown is recorded there later."
+                                    : "Fully identified — this will NOT appear in Sorting. Clear the colour or category if the breakdown is not known yet."}
+                                </div>
+                              );
+                            })()}
+
                             {(g.has_category || g.has_color || g.has_size) && (
                               <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
                                 {g.has_category && (

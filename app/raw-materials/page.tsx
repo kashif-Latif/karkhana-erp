@@ -9,8 +9,17 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 const TABS = ["Items", "Materials", "Categories", "Colours", "Sizes", "Units"] as const;
 type Tab = (typeof TABS)[number];
 
+/* Cloth is its own world. Fabric is bought by weight or by the metre, sorted
+   by colour, and consumes most of the money. Zips, thread, stickers and
+   shoppers are bought by the piece and behave nothing like it. Showing them
+   in one list means a storekeeper looking for a fabric category wades past
+   sticker sizes. FAB is the cloth family; everything else is trims. */
+const CLOTH_GROUPS = ["FAB"];
+type Family = "cloth" | "other";
+
 export default function RawMaterialsPage() {
   const [tab, setTab] = useState<Tab>("Items");
+  const [family, setFamily] = useState<Family>("cloth");
   const [canManage, setCanManage] = useState(false);
   const [catGroups, setCatGroups] = useState<{ value: string; label: string }[]>([]);
 
@@ -29,6 +38,20 @@ export default function RawMaterialsPage() {
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage raw materials.</div>
         ) : (
           <>
+            <div className="mb-4 inline-flex rounded-full bg-surface p-1 shadow-soft">
+              {([["cloth", "Cloth"], ["other", "Other materials"]] as [Family, string][]).map(([f, label]) => (
+                <button key={f} onClick={() => setFamily(f)}
+                  className={`rounded-full px-5 py-2 text-[13px] font-semibold transition ${family === f ? "bg-ink text-white" : "text-muted hover:text-ink"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mb-4 text-[12.5px] text-muted">
+              {family === "cloth"
+                ? "Fabric and its categories — bought by weight or by the metre, sorted by colour."
+                : "Zip, Thread, Sticker and Packing Shopper — their categories and sizes."}
+            </p>
+
             <div className="mb-5 flex flex-wrap gap-2">
               {TABS.map((t) => (
                 <button key={t} onClick={() => setTab(t)}
@@ -38,8 +61,8 @@ export default function RawMaterialsPage() {
               ))}
             </div>
 
-            {tab === "Items" && <ItemsTab canManage={canManage} />}
-            {tab === "Materials" && <MaterialsTab canManage={canManage} />}
+            {tab === "Items" && <ItemsTab canManage={canManage} family={family} clothGroups={CLOTH_GROUPS} />}
+            {tab === "Materials" && <MaterialsTab canManage={canManage} family={family} clothGroups={CLOTH_GROUPS} />}
 
             {tab === "Categories" && (
               <MasterTab table="material_categories" singular="Category" canManage={canManage}
