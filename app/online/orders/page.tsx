@@ -92,6 +92,7 @@ export default function OrdersPage() {
     if (!opts?.silent) setLoading(true);
     setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
+    const term = q.trim();
     let q2 = supabase.from("online_orders")
       .select("id,order_number,store_code,order_date,customer_name,phone,city,amount,status,financial_status")
       // Newest first, and genuinely so. order_date alone is a DATE, so a day's
@@ -101,9 +102,21 @@ export default function OrdersPage() {
       .order("order_date", { ascending: false, nullsFirst: false })
       .order("shopify_created_at", { ascending: false, nullsFirst: false })
       .limit(1000);
-    if (from) q2 = q2.gte("order_date", from);
-    if (to) q2 = q2.lte("order_date", to);
+    // A search ignores the date window. Somebody typing an order number wants
+    // that order, not that order if it happens to fall in the selected period —
+    // and an order from 2025 falls outside every preset except All time.
+    if (!term) {
+      if (from) q2 = q2.gte("order_date", from);
+      if (to) q2 = q2.lte("order_date", to);
+    }
     if (store !== "ALL") q2 = q2.eq("store_code", store);
+
+    if (term) {
+      // Strip a leading # so "#4715" and "4715" both find the order, and match
+      // the number anywhere so "TRZ1153" finds "#TRZ1153".
+      const bare = term.replace(/^#/, "");
+      q2 = q2.or(`order_number.ilike.%${bare}%,customer_name.ilike.%${bare}%,phone.ilike.%${bare}%,city.ilike.%${bare}%`);
+    }
 
     const [rowsRes, sumRes] = await Promise.all([
       opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : q2,
@@ -117,7 +130,7 @@ export default function OrdersPage() {
     if (!opts?.figuresOnly) setOrders((rowsRes.data as Order[]) ?? []);
     setSummary((sumRes.data as OrdersSummary[])?.[0] ?? null);
     setLoading(false);
-  }, [preset, cf, ct, store]);
+  }, [preset, cf, ct, store, q]);
   useEffect(() => { load(); }, [load]);
 
   /* Shopify pushes order, payment and fulfilment changes to shopify-webhook,
@@ -131,6 +144,16 @@ export default function OrdersPage() {
      the part that changes least. Refresh, or any filter change, pulls rows. */
   useLiveTables(["online_orders"], useCallback(() => load({ silent: true, figuresOnly: true }), [load]));
 
+  /* SEARCH HAS TO ASK THE DATABASE, NOT THE PAGE.
+     This filtered the rows already loaded, and PostgREST returns at most 1,000
+     whatever is asked for. With 2,080 orders, searching for one that happened
+     to sit outside the first 1,000 returned "Nothing matches these filters" —
+     indistinguishable from the order not existing. Two real orders were
+     reported missing that way, and both were in the table all along.
+
+     Now a search term goes to the server and the date window is dropped with
+     it: somebody typing an order number is looking for that order, not for
+     that order within the last 30 days. */
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
     return orders.filter((o) =>

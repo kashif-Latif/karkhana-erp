@@ -59,7 +59,7 @@ function classify(raw: string): { delivery_status: string; needs_review: boolean
      them hides the only one that requires action. Checked before the general
      rule below, because "unbooked" contains "booked". */
   if (/un-?booked|not.?booked/.test(s))           return { delivery_status: "Unbooked",   needs_review: false };
-  if (/booked|warehouse|in stock|transferred|ready for delivery|out for delivery|picked|attempt|refus|en.?route|in.?transit|transit|on root|under review|shipper advice|hold/.test(s))
+  if (/booked|warehouse|in stock|transferred|ready for delivery|out for delivery|picked|attempt|refus|en.?route|in.?transit|transit|on root|under review|under verification|verifying|shipper advice|waiting for advice|hold/.test(s))
                                                   return { delivery_status: "In Transit", needs_review: false };
   return { delivery_status: "In Transit", needs_review: true };   // truly unknown -> flag, never guess
 }
@@ -552,7 +552,13 @@ Deno.serve(async (req) => {
       const bookedRaw = String(d.orderStatus ?? "UnBooked");
       await db.from("online_logistics").upsert({
         tracking_id: tracking, order_number: String(o.orderRefNumber), store_code: store,
-        courier: "PostEx", delivery_status: classify(bookedRaw).delivery_status, status: bookedRaw,
+        courier: "PostEx", delivery_status: classify(bookedRaw).delivery_status,
+        // raw_status, not status. Every other path in this file writes the
+        // courier's own wording to raw_status; this one wrote it to `status`,
+        // which is a different field holding our own queue state ("Queued" on
+        // all 15,000 rows). So the courier's answer was stored where nothing
+        // reads it, and every check comparing the two came back empty.
+        raw_status: bookedRaw,
         dispatch_date: new Date().toISOString().slice(0, 10),
         cod_amount: Number(o.invoicePayment), payment_status: "Pending",
       }, { onConflict: "tracking_id" });

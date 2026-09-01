@@ -88,14 +88,25 @@ export default function ReturnsPage() {
        back deliberately. */
     const ascending = true;
 
+    /* Same fix as Orders: a search asks the database, not the 1,000 rows the
+       page happens to hold. #4715 is a real parcel that has been in this table
+       since May 2025, and searching for it returned "Nothing here." */
+    const term = q.trim();
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })
       .limit(PAGE);
+    if (term) {
+      const bare = term.replace(/^#/, "");
+      rq = rq.or(`order_number.ilike.%${bare}%,tracking_id.ilike.%${bare}%`);
+    }
     // the same flag hub_returns_sections() counts, so the card and the list can
     // never disagree — a return acknowledged by cancelling in Shopify drops out
     if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
-    if (from) rq = rq.gte(dateCol, from);
-    if (to) rq = rq.lte(dateCol, to);
+    // A search ignores the date window, for the same reason as Orders.
+    if (!term) {
+      if (from) rq = rq.gte(dateCol, from);
+      if (to) rq = rq.lte(dateCol, to);
+    }
     if (store !== "ALL") rq = rq.eq("store_code", store);
     if (courier !== "All couriers") rq = rq.eq("courier", courier);
 
@@ -114,7 +125,7 @@ export default function ReturnsPage() {
     if (!opts?.figuresOnly) setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
     setCounts((c.data as SectionCount[]) ?? []);
     setLoading(false);
-  }, [tab, preset, cf, ct, store, courier]);
+  }, [tab, preset, cf, ct, store, courier, q]);
 
   useEffect(() => { load(); }, [load]);
   /* Figures only on a live tick — the same reason as Orders and Logistics.
