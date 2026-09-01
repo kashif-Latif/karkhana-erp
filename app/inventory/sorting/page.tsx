@@ -66,7 +66,7 @@ export default function SortingPage() {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
     const [l, c, co, sz, e] = await Promise.all([
-      supabase.from("v_stock_lots").select("*").order("received_at", { ascending: true }),
+      supabase.from("v_stock_lots").select("*").eq("needs_sorting", true).order("received_at", { ascending: true }),
       supabase.from("material_categories").select("id,name").order("name"),
       supabase.from("colors").select("id,name").order("name"),
       supabase.from("sizes").select("id,name").order("name"),
@@ -194,7 +194,7 @@ export default function SortingPage() {
                 <p className="px-5 pb-5 text-[13px] text-muted">Loading…</p>
               ) : visible.length === 0 ? (
                 <p className="px-5 pb-5 text-[13px] text-muted">
-                  Nothing waiting. A lot appears here when material is received with its colour, category or size left blank.
+                  Nothing waiting. Every receipt gets a batch number, but only batches received without a colour, category or size appear here — the rest arrive already identified.
                 </p>
               ) : (
                 <div className="overflow-x-auto">

@@ -12,7 +12,7 @@ type Cat = { id: string; group_id: string; name: string };
 type Named = { id: string; name: string };
 type Unit = { id: string; name: string; symbol: string | null };
 type GU = { group_id: string; unit_id: string };
-type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string };
+type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string; unsorted?: boolean };
 
 const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "" };
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
@@ -151,9 +151,17 @@ export default function ReceiveStock() {
     for (const l of lines) {
       if (!l.group_id) continue;
       const g = groupById(l.group_id)!;
-      if (g.has_category && !l.category_id) { setError(`Choose a category for ${g.name}.`); return; }
-      if (g.has_color && !l.color_id) { setError(`Choose a colour for ${g.name}.`); return; }
-      if (g.has_size && !l.size_id) { setError(`Choose a size for ${g.name}.`); return; }
+      /* Attributes may be left blank on purpose. Fabric arrives in sealed
+         cartons and nobody knows the colour breakdown until the cartons are
+         opened days later. Forcing a colour here is what pushed people into
+         inventing a colour called "Mixed" that then lived in the master list
+         forever. A blank attribute creates a LOT, and the Sorting screen
+         resolves it. See migration 0109. */
+      if (!l.unsorted) {
+        if (g.has_category && !l.category_id) { setError(`Choose a category for ${g.name}, or tick "colours not known yet".`); return; }
+        if (g.has_color && !l.color_id) { setError(`Choose a colour for ${g.name}, or tick "colours not known yet".`); return; }
+        if (g.has_size && !l.size_id) { setError(`Choose a size for ${g.name}, or tick "colours not known yet".`); return; }
+      }
       if (!l.unit_id) { setError(`Choose a unit for ${g.name}.`); return; }
       if (!(parseFloat(l.quantity) > 0)) { setError(`Enter a quantity for ${g.name}.`); return; }
       if (l.rate === "" || parseFloat(l.rate) < 0) { setError(`Enter a rate for ${g.name}.`); return; }
@@ -265,6 +273,20 @@ export default function ReceiveStock() {
                         {g && (
                           <>
                             {(g.has_category || g.has_color || g.has_size) && (
+                              <label className="mt-2.5 flex cursor-pointer items-start gap-2 rounded-xl2 bg-amber-soft/60 px-3 py-2.5">
+                                <input type="checkbox" checked={!!l.unsorted}
+                                  onChange={(e) => setLine(i, { unsorted: e.target.checked, category_id: "", color_id: "", size_id: "" })}
+                                  className="mt-0.5 h-4 w-4 accent-[#141414]" />
+                                <span className="min-w-0">
+                                  <span className="block text-[12.5px] font-semibold text-ink">Arrived mixed — breakdown not known yet</span>
+                                  <span className="mt-0.5 block text-[11.5px] leading-snug text-muted">
+                                    Sealed cartons. Receive and pay now; a lot is created and the Sorting screen records the breakdown once they are opened.
+                                  </span>
+                                </span>
+                              </label>
+                            )}
+
+                            {(g.has_category || g.has_color || g.has_size) && !l.unsorted && (
                               <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
                                 {g.has_category && (
                                   <Field label="Category">
