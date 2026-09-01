@@ -292,6 +292,11 @@ export default function ReturnsPage() {
             {/* "Nothing here." after a search reads as "this parcel does not
                 exist", which is the wrong conclusion and the one that cost an
                 afternoon. Say what was actually searched. */}
+            {/* A SEARCH SHOWS ROWS FROM EVERY TAB, SO IT MUST SAY WHICH.
+                Widening the search fixed "Nothing here." for parcels sitting in
+                another tab — but an already-received return then appeared inside
+                Pending with nothing to mark it, which reads as "this is stuck".
+                Each row now carries where it actually belongs. */}
             {!loading && !filtered.length && (
               <tr><td colSpan={11} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">
                 {q.trim()
@@ -314,7 +319,19 @@ export default function ReturnsPage() {
                         onChange={(e) => setPicked((p) => e.target.checked ? [...p, r.tracking_id] : p.filter((x) => x !== r.tracking_id))} />
                     </td>
                   )}
-                  <td className="px-4 py-3 font-semibold text-ink dark:text-[#f4f1ea]">{r.order_number ?? "—"}</td>
+                  {/* A SEARCH SHOWS ROWS FROM EVERY TAB, SO IT MUST SAY WHICH.
+                      Widening the search fixed "Nothing here." for parcels
+                      sitting in another tab — but an already-received return
+                      then appeared inside Pending with nothing marking it,
+                      which reads as "this one is stuck". */}
+                  <td className="px-4 py-3 font-semibold text-ink dark:text-[#f4f1ea]">
+                    {r.order_number ?? "—"}
+                    {q.trim() && isReturns && !ret.needs_chasing && (
+                      <span className="ml-2 rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                        closed
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.store_code ?? "—"}</td>
                   <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{r.courier ?? "—"}</td>
                   <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">{r.tracking_id}</td>
