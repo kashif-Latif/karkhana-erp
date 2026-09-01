@@ -181,10 +181,14 @@ export default function ReturnsPage() {
      function with that shape. */
   async function receive(f: { date: string; by: string; condition: string; notes: string }) {
     if (!supabase || !picked.length) return;
+    /* Send today when the field is blank, rather than null. The function now
+       defends against this too, but a page that sends null to a date column
+       deciding whether a parcel is still chased should not rely on the other
+       side catching it. */
     setBusy(true);
     const { error } = await supabase.rpc("mark_return_received", {
       p_tracking_ids: picked,
-      p_received_at: f.date || null,
+      p_received_at: f.date || new Date().toISOString().slice(0, 10),
       p_received_by: f.by || null,
       p_condition: f.condition,
       p_notes: f.notes || null,
