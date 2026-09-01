@@ -12,9 +12,9 @@ type Cat = { id: string; group_id: string; name: string };
 type Named = { id: string; name: string };
 type Unit = { id: string; name: string; symbol: string | null };
 type GU = { group_id: string; unit_id: string };
-type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string };
+type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string; packages: string; package_unit: string };
 
-const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "" };
+const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "", packages: "", package_unit: "" };
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = dateStr.split("-").map(Number); return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString(); }
 function toDateInput(iso: string) { const d = new Date(iso); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
@@ -151,9 +151,13 @@ export default function ReceiveStock() {
     for (const l of lines) {
       if (!l.group_id) continue;
       const g = groupById(l.group_id)!;
-      if (g.has_category && !l.category_id) { setError(`Choose a category for ${g.name}.`); return; }
-      if (g.has_color && !l.color_id) { setError(`Choose a colour for ${g.name}.`); return; }
-      if (g.has_size && !l.size_id) { setError(`Choose a size for ${g.name}.`); return; }
+      /* Attributes are OPTIONAL, deliberately. Fabric arrives in sealed
+         cartons and nobody knows the colour breakdown until somebody opens
+         them days later. Demanding a colour at the gate is what pushed
+         people into inventing a colour called "Mixed" that then lived in
+         the master list forever. Blank means "not known yet": the line
+         still receives, still gets a batch number, and appears in Sorting
+         for the breakdown to be recorded later. See 0109 and 0114. */
       if (!l.unit_id) { setError(`Choose a unit for ${g.name}.`); return; }
       if (!(parseFloat(l.quantity) > 0)) { setError(`Enter a quantity for ${g.name}.`); return; }
       if (l.rate === "" || parseFloat(l.rate) < 0) { setError(`Enter a rate for ${g.name}.`); return; }
@@ -165,6 +169,8 @@ export default function ReceiveStock() {
     const p_lines = clean.map((l) => ({
       group_id: l.group_id, category_id: l.category_id || null, color_id: l.color_id || null,
       size_id: l.size_id || null, unit_id: l.unit_id, quantity: parseFloat(l.quantity), rate: parseFloat(l.rate),
+      packages: l.packages ? parseInt(l.packages) : null,
+      package_unit: l.package_unit || null,
     }));
     if (editId) {
       const { error } = await supabase.rpc("edit_grn", {
@@ -264,6 +270,24 @@ export default function ReceiveStock() {
 
                         {g && (
                           <>
+                            {/* Say plainly what this line will do. Leaving an attribute
+                                blank sends the batch to Sorting; filling every one — including
+                                picking a colour literally called "MIX of All" — marks it fully
+                                identified and it never appears there. That distinction is
+                                invisible otherwise, and getting it wrong is silent. */}
+                            {(g.has_category || g.has_color || g.has_size) && (() => {
+                              const bulk = (g.has_category && !l.category_id)
+                                        || (g.has_color && !l.color_id)
+                                        || (g.has_size && !l.size_id);
+                              return (
+                                <div className={`mt-2.5 rounded-xl2 px-3 py-2 text-[12px] leading-snug ${bulk ? "bg-amber-soft text-ink" : "bg-canvas text-muted"}`}>
+                                  {bulk
+                                    ? "Goes to Sorting. Leave the blank fields empty when the cartons have not been opened — the breakdown is recorded there later."
+                                    : "Fully identified — this will NOT appear in Sorting. Clear the colour or category if the breakdown is not known yet."}
+                                </div>
+                              );
+                            })()}
+
                             {(g.has_category || g.has_color || g.has_size) && (
                               <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
                                 {g.has_category && (
@@ -307,6 +331,27 @@ export default function ReceiveStock() {
                               <Field label="Quantity"><input type="number" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} placeholder="0" className={inpSm} /></Field>
                               <Field label="Rate (Rs)"><input type="number" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} placeholder="0" className={inpSm} /></Field>
                               <Field label="Line total"><div className="px-1 py-2 text-[13.5px] font-bold tnum text-ink">{fmt(lineTotal(l))}</div></Field>
+                              {/* How many physical pieces arrived. Fabric comes as than or
+                                  cartons, not as a bare weight — the weight is what the ledger
+                                  needs, the count is what the storekeeper counts at the gate
+                                  and what the sorter works through. Optional; nothing is
+                                  calculated from it. */}
+                              <Field label="Packages (optional)">
+                                <input type="number" value={l.packages}
+                                  onChange={(e) => setLine(i, { packages: e.target.value })}
+                                  placeholder="e.g. 4" className={inpSm} />
+                              </Field>
+                              <Field label="Counted as">
+                                <select value={l.package_unit} onChange={(e) => setLine(i, { package_unit: e.target.value })} className={inpSm}>
+                                  <option value="">—</option>
+                                  <option value="than">Than</option>
+                                  <option value="carton">Carton</option>
+                                  <option value="roll">Roll</option>
+                                  <option value="bag">Bag</option>
+                                  <option value="bale">Bale</option>
+                                  <option value="box">Box</option>
+                                </select>
+                              </Field>
                             </div>
                             {labelOf(l) && <p className="mt-2 text-[11.5px] text-hint">Receiving: <span className="font-medium text-muted">{labelOf(l)}</span></p>}
                           </>

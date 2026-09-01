@@ -4,7 +4,7 @@ import { Plus, Pencil, X, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useConfirm } from "@/components/ConfirmDialog";
 
-type Group = { id: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean };
+type Group = { id: string; code?: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean };
 type Opt = { id: string; name: string };
 type CatOpt = Opt & { group_id: string };
 type Unit = { id: string; name: string; symbol: string | null };
@@ -16,7 +16,8 @@ type FormState = {
 };
 const EMPTY: FormState = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", name: "", is_active: true };
 
-export default function ItemsTab({ canManage }: { canManage: boolean }) {
+export default function ItemsTab({ canManage, family, clothGroups }:
+  { canManage: boolean; family?: "cloth" | "other"; clothGroups?: string[] }) {
   const confirm = useConfirm();
   const [items, setItems] = useState<Item[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -43,7 +44,7 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
     if (!supabase) { setLoading(false); return; }
     (async () => {
       const [g, c, col, sz, gu] = await Promise.all([
-        supabase.from("material_groups").select("id,name,has_category,has_color,has_size").eq("is_active", true).order("name"),
+        supabase.from("material_groups").select("id,code,name,has_category,has_color,has_size").eq("is_active", true).order("name"),
         supabase.from("material_categories").select("id,name,group_id").eq("is_active", true).order("name"),
         supabase.from("colors").select("id,name").eq("is_active", true).order("name"),
         supabase.from("sizes").select("id,name").eq("is_active", true).order("sort_order"),
@@ -62,6 +63,15 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
       setLoading(false);
     })();
   }, [loadItems]);
+
+  /* Which materials belong to the family being viewed. Passing no family
+     (any other caller) keeps every group, so this stays additive. */
+  const cloth = clothGroups ?? ["FAB"];
+  const inFamily = (code?: string) =>
+    !family || (family === "cloth" ? cloth.includes(code ?? "") : !cloth.includes(code ?? ""));
+  const visibleGroups = groups.filter((g) => inFamily(g.code));
+  const visibleIds = new Set(visibleGroups.map((g) => g.id));
+  const shownItems = items.filter((it) => visibleIds.has(it.group_id as string));
 
   const grp = groups.find((g) => g.id === form.group_id);
   const catOpts = categories.filter((c) => c.group_id === form.group_id);
@@ -138,7 +148,7 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
       <div className="overflow-hidden rounded-card bg-surface shadow-card">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-14 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
-        ) : items.length === 0 ? (
+        ) : shownItems.length === 0 ? (
           <div className="py-14 text-center text-[13px] text-muted">No items yet{canManage ? " — add your first one." : "."}</div>
         ) : (
           <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13px]">
@@ -154,7 +164,7 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
+              {shownItems.map((it) => (
                 <tr key={it.id as string} className="border-b border-line/60 last:border-0 hover:bg-canvas/60">
                   <td className="px-5 py-3 font-mono text-[12px] tnum text-muted">{it.code as string}</td>
                   <td className="px-5 py-3 font-semibold text-ink">{rel(it, "material_groups")}</td>
@@ -175,7 +185,7 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
           </table></div>
         )}
       </div>
-      <p className="mt-3 text-[12px] text-muted">{items.length} item(s)</p>
+      <p className="mt-3 text-[12px] text-muted">{shownItems.length} item(s)</p>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !saving && setOpen(false)}>
@@ -187,7 +197,7 @@ export default function ItemsTab({ canManage }: { canManage: boolean }) {
 
             <div className="space-y-3">
               <Sel label="Material *" value={form.group_id} onChange={pickGroup}
-                options={groups.map((g) => ({ value: g.id, label: g.name }))} placeholder="Choose a material…" />
+                options={visibleGroups.map((g) => ({ value: g.id, label: g.name }))} placeholder="Choose a material…" />
 
               {grp?.has_category && (
                 <Sel label="Category *" value={form.category_id} onChange={(v) => setForm((f) => ({ ...f, category_id: v }))}

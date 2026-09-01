@@ -17,12 +17,22 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
-  { label: "Inventory", Icon: Boxes, children: [
-    { label: "Raw Material", href: "/inventory" },
+  /* Receiving comes before the material catalogue: stock arriving is the
+     daily job, and the catalogue is the reference you consult while doing
+     it. "Inventory" said nothing about what the section was for. */
+  { label: "Receiving Stock", Icon: Boxes, children: [
+    { label: "Received", href: "/inventory" },
+    { label: "Sorting", href: "/inventory/sorting" },
     { label: "Final Product", href: "/inventory/final-products" },
   ] },
-  { label: "Movements", href: "/movements", Icon: ArrowLeftRight },
+  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
+  /* Cutting, stitching and clipping sit inside one box. The stages are labels
+     on the work, not gates a piece passes through one at a time — what matters
+     is how many of the order are still out on the floor. */
+  { label: "Process", Icon: ArrowLeftRight, children: [
+    { label: "Work & wages", href: "/process" },
+    { label: "Stock movements", href: "/movements" },
+  ] },
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Orders", href: "/orders", Icon: ClipboardList },
   { label: "Articles", href: "/articles", Icon: Shirt },
