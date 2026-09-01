@@ -685,8 +685,17 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // seed only — an existing parcel is never overwritten, so the courier
-        // syncs keep ownership of everything they already track.
+        /* SEED ONLY — an existing parcel is never overwritten, so the courier
+           syncs keep ownership of everything they already track.
+
+           But ignoreDuplicates also means the FIRST order to claim a tracking
+           number keeps it forever, and a later order carrying the same number
+           is discarded without a word. That is right for status and wrong for
+           identity: 307 parcels ended up holding an order from two years
+           earlier, disagreeing with it by Rs 556,500, and nothing said so.
+
+           The collision is now recorded, so it surfaces on the day it happens
+           instead of being found by hand much later. */
         // The same tracking number can appear on more than one fulfillment
         // line; Postgres rejects a batch that hits the same conflict target twice.
         const uniqueParcels = [...new Map(parcels.map((p) => [p.tracking_id, p])).values()];
@@ -698,6 +707,20 @@ Deno.serve(async (req) => {
             .select("id");
           if (e2) { writeError = e2.message; break; }
           inserted += (data ?? []).length;
+
+          const batch = uniqueParcels.slice(i, i + 300);
+          const written = new Set((data ?? []).map((d: { id: string }) => d.id));
+          if (batch.length !== written.size) {
+            // Some rows were silently skipped: their tracking number already
+            // existed on a different order. Log which, rather than lose them.
+            const skippedNums = batch.map((p) => p.tracking_id);
+            await db.from("online_courier_events").insert(
+              skippedNums.map((tn) => ({
+                courier: "Shopify", tracking_id: tn,
+                raw_status: "tracking already claimed by another order",
+                payload: { source: "shopify-sync seed", store: st },
+              }))).select("id").then(() => {}, () => {});
+          }
         }
         if (writeError) { summary.push({ store: st, ok: false, error: writeError, inserted }); continue; }
 
