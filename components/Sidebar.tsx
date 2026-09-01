@@ -17,11 +17,15 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
-  { label: "Inventory", Icon: Boxes, children: [
-    { label: "Raw Material", href: "/inventory" },
+  /* Receiving comes before the material catalogue: stock arriving is the
+     daily job, and the catalogue is the reference you consult while doing
+     it. "Inventory" said nothing about what the section was for. */
+  { label: "Receiving Stock", Icon: Boxes, children: [
+    { label: "Received", href: "/inventory" },
+    { label: "Sorting", href: "/inventory/sorting" },
     { label: "Final Product", href: "/inventory/final-products" },
   ] },
+  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
   { label: "Movements", href: "/movements", Icon: ArrowLeftRight },
   { label: "Production", href: "/production", Icon: Factory },
   { label: "Orders", href: "/orders", Icon: ClipboardList },
