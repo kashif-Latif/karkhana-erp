@@ -6,7 +6,16 @@ import Modal, { Field, inputCls, btnPrimary, btnGhost } from "@/components/Modal
 import { parseCsv, matchHeader, toNum, toDate } from "@/lib/csv";
 
 type Result = { ok: boolean; msg: string } | null;
-const STORES = ["LM", "TS", "TRZ"];
+/* DIRECT is a real answer, not a missing one.
+   Some parcels never came from a Shopify store — a one-off sent to somebody the
+   owner knows, a replacement, a sample. Forcing those into LM, TS or TRZ makes
+   the row lie: no Shopify order will ever match it, so it gets flagged as a
+   broken link forever and somebody keeps trying to fix what was never wrong.
+
+   DIRECT says the parcel is real and has no online order behind it. It still
+   ships, still settles, still counts. It simply stops pretending to belong to a
+   shop it never touched. */
+const STORES = ["LM", "TS", "TRZ", "DIRECT"];
 const COURIERS = ["PostEx", "OwnEx"];
 const DSTATUS = ["Unbooked", "In Transit", "Delivered", "Returned", "RTS", "Cancelled"];
 
@@ -37,7 +46,12 @@ export function AddShipment({ onDone }: { onDone: () => void }) {
     if (!supabase || !f.order_number.trim()) { setRes({ ok: false, msg: "Order number is required." }); return; }
     setBusy(true); setRes(null);
     const payload = {
-      order_number: f.order_number.trim(), store_code: f.store_code, courier: f.courier,
+      order_number: f.order_number.trim(), store_code: f.store_code,
+      /* The tracking number knows which courier issued it — an OwnEx number
+         starts 3120. When the person picked the other one, the number wins:
+         a wrong courier sends the wrong sync chasing it, stops settlements
+         matching, and applies the wrong return rule. */
+      courier: courierFromTracking(f.tracking_id.trim()) ?? f.courier,
       tracking_id: f.tracking_id.trim() || null, dispatch_date: f.dispatch_date || null,
       delivery_status: f.delivery_status, cod_amount: f.cod_amount ? Number(f.cod_amount) : null,
     };
@@ -58,7 +72,13 @@ export function AddShipment({ onDone }: { onDone: () => void }) {
       <Modal open={open} onClose={() => setOpen(false)} title="Add / update shipment" subtitle="Saves by order number — re-adding the same order updates it instead of duplicating.">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Order number *"><input className={inputCls} value={f.order_number} onChange={(e) => setF({ ...f, order_number: e.target.value })} placeholder="#1001" /></Field>
-          <Field label="Store"><select className={inputCls} value={f.store_code} onChange={(e) => setF({ ...f, store_code: e.target.value })}>{STORES.map((s) => <option key={s}>{s}</option>)}</select></Field>
+          <Field label="Store"><select className={inputCls} value={f.store_code} onChange={(e) => setF({ ...f, store_code: e.target.value })}>{STORES.map((s) => <option key={s}>{s}</option>)}</select>
+            {f.store_code === "DIRECT" && (
+              <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+                No Shopify order. Use for one-off shipments — a replacement, a sample,
+                something sent to somebody directly.
+              </p>
+            )}</Field>
           <Field label="Courier"><select className={inputCls} value={f.courier} onChange={(e) => setF({ ...f, courier: e.target.value })}>{COURIERS.map((s) => <option key={s}>{s}</option>)}</select></Field>
           <Field label="Tracking number"><input className={inputCls} value={f.tracking_id} onChange={(e) => setF({ ...f, tracking_id: e.target.value })} /></Field>
           <Field label="Dispatch date"><input type="date" className={inputCls} value={f.dispatch_date} onChange={(e) => setF({ ...f, dispatch_date: e.target.value })} /></Field>
