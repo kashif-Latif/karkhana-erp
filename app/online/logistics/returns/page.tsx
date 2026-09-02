@@ -106,9 +106,21 @@ export default function ReturnsPage() {
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })
       .limit(PAGE);
+    /* A SEARCH ASKS POSTGRES, NOT THE PAGE.
+       Even with .or() the query is still capped at 1,000 rows and still bound
+       to one tab. hub_find_return searches the whole table — tracking number,
+       order number, customer, phone — across every store, any date, any state,
+       and says which state each result is in.
+
+       The tracking number is matched exactly first, because it is the only
+       identifier a courier issues rather than a person types. */
     if (term) {
-      const bare = term.replace(/^#/, "");
-      rq = rq.or(`order_number.ilike.%${bare}%,tracking_id.ilike.%${bare}%`);
+      const { data: found, error: fe } = await supabase.rpc("hub_find_return", { p_q: term });
+      setLoading(false);
+      if (fe) { setErr(fe.message); return; }
+      setRows((found as unknown as (ReturnRow | UnpaidRow)[]) ?? []);
+      setJumped("");
+      return;
     }
     // the same flag hub_returns_sections() counts, so the card and the list can
     // never disagree — a return acknowledged by cancelling in Shopify drops out
