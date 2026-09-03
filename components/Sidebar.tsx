@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Boxes, Layers, Factory, Truck, Shirt, ClipboardList,
   FileBarChart, CheckSquare, Gem, LogOut, Wallet, ArrowLeftRight,
+  Warehouse, PackageCheck,
   ChevronDown, ArrowLeft, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
@@ -23,19 +24,31 @@ const NAV: NavItem[] = [
   { label: "Receiving Stock", Icon: Boxes, children: [
     { label: "Received", href: "/inventory" },
     { label: "Sorting", href: "/inventory/sorting" },
-    { label: "Final Product", href: "/inventory/final-products" },
   ] },
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
-  /* Cutting, stitching and clipping sit inside one box. The stages are labels
-     on the work, not gates a piece passes through one at a time — what matters
-     is how many of the order are still out on the floor. */
-  { label: "Process", Icon: ArrowLeftRight, children: [
+  /* Raw material that has been received and sorted, grouped the way it sits
+     on the shelf: material, then category, then size. */
+  { label: "Stock", href: "/stock", Icon: Warehouse },
+  /* An article and an order are the same conversation — what we make, and how
+     many of it. They were two separate menu entries for no reason. */
+  { label: "Order", Icon: ClipboardList, children: [
+    { label: "Articles", href: "/articles" },
+    { label: "Orders", href: "/orders" },
+  ] },
+  /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
+     are labels on the work, not gates a piece passes through one at a time —
+     what matters is how many of the order are still out on the floor, and that
+     count lives on the unit. */
+  { label: "Main Factory Stitching Unit", Icon: Factory, children: [
     { label: "Work & wages", href: "/process" },
     { label: "Stock movements", href: "/movements" },
   ] },
-  { label: "Production", href: "/production", Icon: Factory },
-  { label: "Orders", href: "/orders", Icon: ClipboardList },
-  { label: "Articles", href: "/articles", Icon: Shirt },
+  /* Finished garments. Not the same thing as Stock above, and named so the
+     difference is obvious: Stock is what you buy, Inventory is what you make. */
+  { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
+  /* Not a step in the run — the catalogue you open when a material you have
+     never bought before turns up and needs adding. Below the flow, not inside
+     Receiving, so it is not hidden on the day you need it. */
+  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
   { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
@@ -102,7 +115,11 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
         ) : (
           items.map((item) => {
             if (item.children) {
-              const anyActive = pathname === "/inventory" || pathname.startsWith("/inventory/");
+              /* Was hardcoded to "/inventory", which worked only while
+                 Receiving Stock was the single group in this menu. With three
+                 groups, all three lit up and expanded whenever you opened a
+                 receiving page. Each group now answers for its own children. */
+              const anyActive = item.children.some((c) => childActive(c.href));
               const open = expanded[item.label] ?? anyActive;
               return (
                 <div key={item.label}>

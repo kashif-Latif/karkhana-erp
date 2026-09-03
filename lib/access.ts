@@ -5,8 +5,14 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/": null,
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
-  "/inventory/final-products": ["inventory.view"],
+  /* K119 gave finished garments their own permission. This used to sit under
+     inventory.view, which is the permission for raw material — someone who can
+     see fabric on a shelf is not automatically someone who should see finished
+     output and its value. inventory.view stays listed so nobody currently
+     working loses the page overnight. */
+  "/inventory/final-products": ["finished.view", "inventory.view"],
   "/inventory/sorting": ["inventory.view", "inventory.sort"],
+  "/stock": ["inventory.view"],
   "/process": ["process.view"],
   "/movements": ["inventory.view"],
   "/raw-materials": ["inventory.view"],
