@@ -50,7 +50,7 @@ const rs = (v: unknown) =>
    from the old system. Guessing was worse than not knowing. */
 const blank = {
   name: "", phone: "", cnic: "", designation: "",
-  pay_amount: "", join_date: "",
+  pay_amount: "", join_date: "", pay_from: "",
 };
 
 export default function HubEmployeesPage() {
@@ -164,6 +164,7 @@ export default function HubEmployeesPage() {
       name: e.name ?? "", phone: e.phone ?? "", cnic: e.cnic ?? "",
       designation: e.designations?.name ?? "",
       pay_amount: e.pay_amount == null ? "" : String(e.pay_amount),
+      pay_from: "",
       join_date: e.join_date ?? "",
     });
     setOpen(true);
@@ -223,6 +224,25 @@ export default function HubEmployeesPage() {
       await supabase.from("online_att_employees")
         .update({ name: payload.name, designation: roleText || null, sal: payload.pay_amount })
         .eq("id", editing.id);
+
+      /* A SALARY CHANGE IS A FACT ABOUT A PERSON AND A DATE.
+         Updating only the number left the rate history untouched, so the header
+         said Rs 45,000 while every day was still valued at Rs 35,000 — the page
+         disagreed with itself and nothing said why. Qaswar's September was
+         Rs 2,333 when it should have been Rs 3,000.
+
+         Now the new rate is written to the history from the date given. Days
+         before it keep the old rate, so months already paid never move. */
+      const newSal = Number(payload.pay_amount ?? 0);
+      const oldSal = Number(editing.pay_amount ?? 0);
+      if (newSal > 0 && newSal !== oldSal) {
+        await supabase.from("online_att_salary_history").upsert({
+          emp_id: editing.id,
+          effective_from: form.pay_from || new Date().toISOString().slice(0, 10),
+          sal: newSal,
+          note: oldSal ? `changed from ${oldSal}` : "rate set",
+        }, { onConflict: "emp_id,effective_from" });
+      }
     }
 
     if (error) setErr(error.message);
@@ -380,7 +400,15 @@ export default function HubEmployeesPage() {
                  onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="03xx…" /></Field>
           <Field label="CNIC"><input className={inputCls} value={form.cnic}
                  onChange={(e) => setForm({ ...form, cnic: e.target.value })} placeholder="optional" /></Field>
-          <Field label="Joined"><input type="date" className={inputCls} value={form.join_date}
+          <Field label="Salary applies from">
+              <input type="date" className={inputCls} value={form.pay_from}
+                     onChange={(e) => setForm({ ...form, pay_from: e.target.value })} />
+              <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+                Only needed when you change the salary. Days before this date keep the
+                old rate, so months already paid do not move. Blank means today.
+              </p>
+            </Field>
+            <Field label="Joined"><input type="date" className={inputCls} value={form.join_date}
                  onChange={(e) => setForm({ ...form, join_date: e.target.value })} />
             <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
               Leave blank unless they started this month. A join date stops Sundays
