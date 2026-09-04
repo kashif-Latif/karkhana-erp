@@ -8,6 +8,16 @@ type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
 type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean };
 
+/* What place_production_order (K120) hands back. It either refuses the whole
+   order and lists every short line, or it succeeds and reports what it took
+   out of stock. It never half-does the job. */
+type ShortLine = { material?: string; item?: string; need: number; have: number; short: number; unit?: string };
+type IssuedLine = { material?: string; item?: string; quantity: number };
+type PlaceResult =
+  | { ok: false; guard: string; wrote: number; short: ShortLine[]; meaning: string }
+  | { ok: true; wrote: number; order: string; quantity: number; issued: IssuedLine[];
+      material_cost: number; pending: number; floor: string };
+
 const STATUS: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-panel text-muted" },
   in_production: { label: "In production", cls: "bg-[#EEF2FF] text-[#4338CA]" },
@@ -59,6 +69,7 @@ export default function Orders() {
   const [reqLoading, setReqLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [result, setResult] = useState<PlaceResult | null>(null);
 
   const [detail, setDetail] = useState<Order | null>(null);
   const [detailReqs, setDetailReqs] = useState<Req[] | null>(null);
@@ -96,18 +107,40 @@ export default function Orders() {
     return () => { off = true; };
   }, [articleId, qty]);
 
-  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); }
+  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); setResult(null); }
 
+  /* PLACING AN ORDER IS FOUR THINGS AT ONCE (K120): the recipe multiplies out,
+     the material leaves stock, the order is created, and the floor is handed
+     the pending count. They happen in one transaction so they can never drift
+     apart.
+
+     The old call, create_production_order, only wrote the order row. Material
+     stayed on the shelf and nobody told the floor — so the screen said an
+     order existed while the factory disagreed. */
   async function create() {
-    setErr("");
+    setErr(""); setResult(null);
     if (!supabase) return;
     if (!articleId) { setErr("Choose an article."); return; }
     if (!(parseInt(qty) > 0)) { setErr("Enter a quantity."); return; }
     setSaving(true);
-    const { error } = await supabase.rpc("create_production_order", { p_article_id: articleId, p_quantity: parseInt(qty), p_target_date: targetDate || null, p_notes: notes });
+    const { data, error } = await supabase.rpc("place_production_order", {
+      p_article_id: articleId,
+      p_quantity: parseInt(qty),
+      p_target_date: targetDate || null,
+      p_notes: notes,
+      p_lines: null,
+      p_dry_run: false,
+    });
     setSaving(false);
     if (error) { setErr(error.message); return; }
-    setModal(false); load();
+
+    const r = data as PlaceResult;
+    /* A refusal is not an error. The database looked, found the order could
+       not be made, and deliberately wrote nothing. Showing it as a red crash
+       would teach people to ignore it. */
+    if (!r?.ok) { setResult(r); return; }
+    setResult(r);
+    load();
   }
 
   async function openDetail(o: Order) {
@@ -136,7 +169,7 @@ export default function Orders() {
 
   return (
     <>
-      <Topbar title="Production Orders" subtitle="Make N pieces of an article — material is calculated for you" />
+      <Topbar title="Production Orders" subtitle="Make N pieces of an article — material is deducted and the floor is told" />
       <div className="px-6 pb-12">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage production orders.</div>
@@ -208,9 +241,63 @@ export default function Orders() {
             )}
 
             {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+
+            {/* REFUSED — nothing was written. Every short line is listed, not
+                just the first, so one trip to the store fixes all of them. */}
+            {result && !result.ok && (
+              <div className="mt-4 rounded-xl2 border border-danger/30 bg-danger-soft p-3.5">
+                <p className="flex items-center gap-1.5 text-[13px] font-bold text-danger">
+                  <AlertTriangle size={15} /> Order not placed — {result.guard}
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {result.short?.map((s, i) => (
+                    <li key={i} className="flex justify-between gap-3 text-[12.5px] text-ink/80">
+                      <span className="font-medium">{s.material || s.item}</span>
+                      <span className="tnum">
+                        short {n(s.short)} {s.unit || ""} · need {n(s.need)}, have {n(s.have)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2.5 text-[12px] leading-relaxed text-ink/70">{result.meaning}</p>
+              </div>
+            )}
+
+            {/* PLACED — say exactly what moved, so it can be checked against
+                the shelf rather than taken on trust. */}
+            {result && result.ok && (
+              <div className="mt-4 rounded-xl2 border border-[#166534]/25 bg-success-soft p-3.5">
+                <p className="flex items-center gap-1.5 text-[13px] font-bold text-[#166534]">
+                  <Check size={15} /> {result.order} placed
+                </p>
+                <p className="mt-1 text-[12.5px] text-ink/80">
+                  {n(result.pending)} pieces pending with <b>{result.floor}</b>. Material below has left stock.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {result.issued?.map((l, i) => (
+                    <li key={i} className="flex justify-between gap-3 text-[12.5px] text-ink/80">
+                      <span className="font-medium">{l.material || l.item}</span>
+                      <span className="tnum">−{n(l.quantity)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {result.material_cost > 0 && (
+                  <p className="mt-2 text-[12px] text-ink/70">
+                    Material cost at batch rates: <b className="tnum">Rs {n(result.material_cost)}</b>
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setModal(false)} disabled={saving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
-              <button onClick={create} disabled={saving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={15} className="animate-spin" />}Create order</button>
+              {result?.ok ? (
+                <button onClick={() => setModal(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+              ) : (
+                <>
+                  <button onClick={() => setModal(false)} disabled={saving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+                  <button onClick={create} disabled={saving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={15} className="animate-spin" />}Place order &amp; issue material</button>
+                </>
+              )}
             </div>
           </div>
         </div>
