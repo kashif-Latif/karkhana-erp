@@ -7,7 +7,12 @@ import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "l
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
 type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean;
-             owned: number; awaiting_sorting: number };
+             owned: number; awaiting_sorting: number;
+             /* K128. "You have none" and "you have 560 kg of the wrong kind"
+                need different actions from whoever is at the screen. Showing
+                both as 0 sends them hunting for stock that is right there. */
+             problem: "ok" | "no_item" | "wrong_kind" | "unsorted" | "short";
+             fix: string | null };
 
 type Move = { id: string; movement_number: string; type: string; moved_at: string;
               material: string; item_code: string; quantity: number; unit: string;
@@ -55,20 +60,30 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
         <tbody>
           {reqs.map((r, i) => (
             <tr key={i} className="border-t border-line/60">
-              <td className="px-3 py-2 font-medium text-ink">{r.material_label}</td>
-              <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
-              <td className="px-3 py-2 text-right tnum text-muted">
+              <td className="px-3 py-2 font-medium text-ink">
+                {r.material_label}
+                {/* Each shortage names its own remedy. Without this, "0"
+                    against 560 kg of stickers reads as the system lying. */}
+                {r.fix && <span className="mt-0.5 block text-[11px] font-normal leading-snug text-hint">{r.fix}</span>}
+              </td>
+              <td className="px-3 py-2 align-top text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
+              <td className="px-3 py-2 align-top text-right tnum text-muted">
                 {n(r.available)} {r.unit_symbol}
-                {/* The most confusing shortage in this system is "I have five
-                    tonnes and it says zero". Say why on the row itself. */}
                 {Number(r.awaiting_sorting) > 0 && (
                   <span className="block text-[11px] text-hint">
                     {n(r.owned)} owned · {n(r.awaiting_sorting)} not sorted yet
                   </span>
                 )}
               </td>
-              <td className="px-3 py-2 text-right">
-                {r.enough ? <Check size={15} className="ml-auto text-[#166534]" /> : <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger"><AlertTriangle size={11} /> Short</span>}
+              <td className="px-3 py-2 align-top text-right">
+                {r.enough ? <Check size={15} className="ml-auto text-[#166534]" /> : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger">
+                    <AlertTriangle size={11} />
+                    {r.problem === "no_item" ? "No item" :
+                     r.problem === "wrong_kind" ? "Wrong kind" :
+                     r.problem === "unsorted" ? "Unsorted" : "Short"}
+                  </span>
+                )}
               </td>
             </tr>
           ))}
