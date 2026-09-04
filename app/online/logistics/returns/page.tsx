@@ -323,6 +323,71 @@ export default function ReturnsPage() {
         </div>
       )}
 
+      {/* HOW OFTEN EACH COURIER BRINGS PARCELS BACK.
+          The list says which parcels came back; this says whether that is
+          normal. PostEx has sat near 21% since March — a rate, not a bad month.
+          OwnEx swung 14.5% to 25.2% and back — an incident. Two different
+          problems, and neither was visible before.
+
+          Always shown in full, and deliberately not affected by the filters
+          above: picking "30 days" would empty a table whose whole purpose is
+          the comparison across months. */}
+      {rates.length > 0 && (
+        <div className="mt-4 rounded-card border border-line bg-surface dark:border-white/10 dark:bg-[#201c17]">
+          <div className="px-4 py-3 text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">
+            Return rate month by month
+            <span className="ml-2 text-[11.5px] font-normal text-hint dark:text-[#8a8175]">
+              last 12 months · not affected by the filters above
+            </span>
+          </div>
+          <div className="overflow-x-auto border-t border-line dark:border-white/10">
+            <table className="w-full min-w-[560px] text-left text-[13px]">
+              <thead className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted dark:border-white/[0.06] dark:text-[#a89f93]">
+                <tr>
+                  <th className="px-4 py-2.5 font-semibold">Month</th>
+                  <th className="px-4 py-2.5 font-semibold">Courier</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Delivered</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Returned</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Rate</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Change</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">COD returned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line dark:divide-white/[0.06]">
+                {rates.filter((x) => x.courier === "PostEx" || x.courier === "OwnEx").map((x, i) => {
+                  const pc = Number(x.return_pct ?? 0);
+                  const d  = x.change_pts === null ? null : Number(x.change_pts);
+                  return (
+                    <tr key={`${x.month_label}-${x.courier}-${i}`} className="text-ink dark:text-[#e7e2d8]">
+                      <td className="px-4 py-2.5">
+                        {x.month_label}
+                        {x.is_part_month && (
+                          <span className="ml-2 rounded-full bg-panel px-2 py-0.5 text-[10px] font-semibold text-hint dark:bg-white/[0.06]">
+                            still running
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">{x.courier}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">{x.delivered}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{x.returned}</td>
+                      <td className="px-4 py-2.5 text-right font-bold tabular-nums">{pc.toFixed(1)}%</td>
+                      {/* Fewer returns is better, so a fall is the green one. */}
+                      <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${
+                        d === null ? "text-hint" : d <= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                        {d === null ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(1)}`}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">
+                        {rs(Number(x.cod_returned ?? 0))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 overflow-x-auto rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-white/[0.03]">
         <table className="w-full min-w-[880px] text-left text-[13px]">
           <thead className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted dark:border-white/[0.06] dark:text-[#a89f93]">
