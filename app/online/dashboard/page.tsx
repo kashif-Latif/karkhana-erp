@@ -53,11 +53,16 @@ type DashSummary = {
   cod_received: number; cod_receivable: number; receivable_count: number;
 };
 
+type RateRow = { month_label: string; courier: string; returned: number;
+                 return_pct: number | null; change_pts: number | null;
+                 cod_returned: number | null; is_part_month: boolean };
+
 export default function HubDashboard() {
   const [orders, setOrders] = useState<Row[]>([]);
   const [logi, setLogi] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [rates, setRates] = useState<RateRow[]>([]);
   const [store, setStore] = useState("ALL");
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
@@ -86,17 +91,19 @@ export default function HubDashboard() {
     let lq = supabase.from("online_logistics").select("order_number,store_code,courier,delivery_status,cod_amount,cpr_net_amount,payment_status").limit(1000);
     if (store !== "ALL") lq = lq.eq("store_code", store);
 
-    const [o, l, sum] = await Promise.all([
+    const [o, l, sum, rt] = await Promise.all([
       oq, lq,
       supabase.rpc("hub_dashboard_summary", {
         p_from: from, p_to: to, p_store: store === "ALL" ? null : store,
       }),
+      supabase.rpc("hub_return_rates", { p_months: 3 }),
     ]);
     if (my !== reqId.current) return;          // superseded by a newer request
     if (o.error) setErr(o.error.message);
     setOrders((o.data as Row[]) ?? []);
     setLogi((l.data as Row[]) ?? []);
     setSummary((sum.data as DashSummary[])?.[0] ?? null);
+    setRates((rt.data as RateRow[]) ?? []);
     setLoading(false);
   }, [preset, cf, ct, store]);
 
@@ -155,6 +162,14 @@ export default function HubDashboard() {
   }, [orders, logi]);
 
   const pct = (n: number) => (M.total ? Math.round((n / M.total) * 100) : 0);
+  /* Return rate per courier, this month against last. The dashboard already
+     counts returns; it never said whether the rate was rising or falling, which
+     is the only part anyone can act on. */
+  const rateCards = rates.filter((x) => !x.is_part_month).reduce((acc: RateRow[], r) => {
+    if (acc.filter((a) => a.courier === r.courier).length < 2) acc.push(r);
+    return acc;
+  }, []);
+
   const cards = [
     { label: "Total orders", value: M.total.toLocaleString(), sub: "in period", Icon: ShoppingBag, bg: "bg-periwinkle-soft" },
     { label: "Pending (not dispatched)", value: M.pending.toLocaleString(), sub: `${pct(M.pending)}% of orders`, Icon: Clock, bg: "bg-amber-soft" },
@@ -201,6 +216,45 @@ export default function HubDashboard() {
           </div>
         ))}
       </div>
+
+      {/* RETURN RATE BY COURIER — this month against last.
+          The card above counts returns. This says whether the rate is rising,
+          which is the part anyone can act on: OwnEx ran 14.5% in June, 25.2% in
+          July and 14.9% in August, a swing worth about Rs 190,000. */}
+      {rateCards.length > 0 && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {["PostEx", "OwnEx"].map((cr) => {
+            const rows = rateCards.filter((x) => x.courier === cr);
+            const now = rows[0], prev = rows[1];
+            if (!now) return null;
+            const p = Number(now.return_pct ?? 0);
+            const d = prev ? p - Number(prev.return_pct ?? 0) : null;
+            return (
+              <div key={cr} className="rounded-card border border-line bg-surface p-4 dark:border-white/[0.06] dark:bg-[#201c17]">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] font-bold text-ink dark:text-[#f4f1ea]">{cr} returns</span>
+                  <span className="text-[11.5px] text-hint dark:text-[#8a8175]">{now.month_label}</span>
+                </div>
+                <div className="mt-1.5 flex items-baseline gap-2">
+                  <span className="text-[24px] font-extrabold tabular-nums leading-none text-ink dark:text-[#f4f1ea]">
+                    {loading ? "—" : `${p.toFixed(1)}%`}
+                  </span>
+                  {d !== null && !loading && (
+                    /* Fewer returns is better, so a fall is the green one. */
+                    <span className={`text-[12px] font-bold tabular-nums ${d <= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                      {d > 0 ? "+" : ""}{d.toFixed(1)} pts
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-[11.5px] text-muted dark:text-[#a89f93]">
+                  {now.returned} came back · {rs(Number(now.cod_returned ?? 0))} of COD
+                  {prev && <> · {Number(prev.return_pct ?? 0).toFixed(1)}% in {prev.month_label}</>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* COD money row */}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">

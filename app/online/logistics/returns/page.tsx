@@ -60,6 +60,14 @@ export default function ReturnsPage() {
   const [tab, setTab] = useState<Section>("pending_returns");
   // Which tab a search moved us to, so the jump is explained rather than silent.
   const [jumped, setJumped] = useState("");
+  /* HOW OFTEN EACH COURIER BRINGS PARCELS BACK.
+     The list said which parcels came back; nothing said whether that was
+     normal. OwnEx ran at 14.5% in June, 25.2% in July and 14.9% in August —
+     a swing worth Rs 190,000 that nobody could see. */
+  type Rate = { month_label: string; courier: string; returned: number;
+                return_pct: number | null; change_pts: number | null;
+                cod_returned: number | null; is_part_month: boolean };
+  const [rates, setRates] = useState<Rate[]>([]);
   const [rows, setRows] = useState<(ReturnRow | UnpaidRow)[]>([]);
   const [counts, setCounts] = useState<SectionCount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,8 +149,9 @@ export default function ReturnsPage() {
     if (store !== "ALL") rq = rq.eq("store_code", store);
     if (courier !== "All couriers") rq = rq.eq("courier", courier);
 
-    const [r, c] = await Promise.all([
+    const [r, rt, c] = await Promise.all([
       opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : rq,
+      supabase.rpc("hub_return_rates", { p_months: 3 }),
       supabase.rpc("hub_returns_sections", {
         p_store: store === "ALL" ? null : store,
         p_courier: courier === "All couriers" ? null : courier,
@@ -151,6 +160,7 @@ export default function ReturnsPage() {
     ]);
 
     if (my !== reqId.current) return;      // superseded — discard
+    setRates((rt.data as Rate[]) ?? []);
     if (r.error) setErr(r.error.message);
     // figuresOnly refreshes the counts and leaves the list alone
     if (!opts?.figuresOnly) setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
