@@ -63,6 +63,9 @@ export default function HubDashboard() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [rates, setRates] = useState<RateRow[]>([]);
+  // The two cards answer "is it getting worse". The months answer "what is
+  // normal" — worth having, not worth pushing the rest of the page down.
+  const [showMonths, setShowMonths] = useState(false);
   const [store, setStore] = useState("ALL");
   const [preset, setPreset] = useState("30d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
@@ -253,6 +256,57 @@ export default function HubDashboard() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {rates.length > 0 && (
+        <div className="mt-2">
+          <button onClick={() => setShowMonths((v) => !v)}
+                  className="text-[12.5px] font-semibold text-muted underline-offset-2 transition hover:text-ink hover:underline dark:text-[#a89f93] dark:hover:text-white">
+            {showMonths ? "Hide month by month" : "Return rate month by month"}
+          </button>
+          {showMonths && (
+            <div className="mt-2 overflow-x-auto rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
+              <table className="w-full min-w-[520px] text-left text-[13px]">
+                <thead className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted dark:border-white/[0.06] dark:text-[#a89f93]">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Month</th>
+                    <th className="px-4 py-2.5 font-semibold">Courier</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Returned</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Rate</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Change</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">COD returned</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line dark:divide-white/[0.06]">
+                  {rates.filter((x) => x.courier === "PostEx" || x.courier === "OwnEx").map((x, i) => {
+                    const pc = Number(x.return_pct ?? 0);
+                    const d = x.change_pts === null ? null : Number(x.change_pts);
+                    return (
+                      <tr key={i} className="text-ink dark:text-[#e7e2d8]">
+                        <td className="px-4 py-2.5">
+                          {x.month_label}
+                          {x.is_part_month && (
+                            <span className="ml-2 rounded-full bg-panel px-2 py-0.5 text-[10px] font-semibold text-hint dark:bg-white/[0.06]">still running</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">{x.courier}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{x.returned}</td>
+                        <td className="px-4 py-2.5 text-right font-bold tabular-nums">{pc.toFixed(1)}%</td>
+                        <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${
+                          d === null ? "text-hint" : d <= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                          {d === null ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(1)}`}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-muted dark:text-[#a89f93]">
+                          {rs(Number(x.cod_returned ?? 0))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

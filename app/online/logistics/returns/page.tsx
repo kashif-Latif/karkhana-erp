@@ -69,6 +69,10 @@ export default function ReturnsPage() {
                 return_pct: number | null; change_pts: number | null;
                 cod_returned: number | null; is_part_month: boolean };
   const [rates, setRates] = useState<Rate[]>([]);
+  /* Closed by default. The parcel list is what this page is opened for, and a
+     twelve-row table above it pushed the work below the fold. The rate belongs
+     one click away, not in the way. */
+  const [showRates, setShowRates] = useState(false);
   const [rows, setRows] = useState<(ReturnRow | UnpaidRow)[]>([]);
   const [counts, setCounts] = useState<SectionCount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -334,12 +338,38 @@ export default function ReturnsPage() {
           the comparison across months. */}
       {rates.length > 0 && (
         <div className="mt-4 rounded-card border border-line bg-surface dark:border-white/10 dark:bg-[#201c17]">
-          <div className="px-4 py-3 text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">
-            Return rate month by month
-            <span className="ml-2 text-[11.5px] font-normal text-hint dark:text-[#8a8175]">
-              last 12 months · not affected by the filters above
+          {/* The headline sits in the button itself, so the current rate is
+              readable without opening anything — only the history costs a click. */}
+          <button onClick={() => setShowRates((v) => !v)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-panel dark:hover:bg-white/[0.04]">
+            <span className="text-[13px] font-semibold text-ink dark:text-[#f4f1ea]">
+              Return rate
+              {(() => {
+                const done = rates.filter((x) => !x.is_part_month);
+                return ["PostEx", "OwnEx"].map((cr) => {
+                  const rows = done.filter((x) => x.courier === cr);
+                  const now = rows[0], prev = rows[1];
+                  if (!now) return null;
+                  const pc = Number(now.return_pct ?? 0);
+                  const d = prev ? pc - Number(prev.return_pct ?? 0) : null;
+                  return (
+                    <span key={cr} className="ml-3 text-[12.5px] font-normal text-muted dark:text-[#a89f93]">
+                      {cr} <b className="text-ink dark:text-[#f4f1ea]">{pc.toFixed(1)}%</b>
+                      {d !== null && (
+                        <span className={d <= 0 ? "text-emerald-700" : "text-red-700"}>
+                          {" "}{d > 0 ? "+" : ""}{d.toFixed(1)}
+                        </span>
+                      )}
+                    </span>
+                  );
+                });
+              })()}
             </span>
-          </div>
+            <span className="shrink-0 text-[11.5px] font-semibold text-muted dark:text-[#a89f93]">
+              {showRates ? "Hide months" : "Month by month"}
+            </span>
+          </button>
+          {showRates && (
           <div className="overflow-x-auto border-t border-line dark:border-white/10">
             <table className="w-full min-w-[560px] text-left text-[13px]">
               <thead className="border-b border-line text-[11.5px] uppercase tracking-wide text-muted dark:border-white/[0.06] dark:text-[#a89f93]">
@@ -385,6 +415,7 @@ export default function ReturnsPage() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 
