@@ -9,6 +9,10 @@ type Order = { id: string; order_number: string; quantity: number; status: strin
 type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean;
              owned: number; awaiting_sorting: number };
 
+type Move = { id: string; movement_number: string; type: string; moved_at: string;
+              material: string; item_code: string; quantity: number; unit: string;
+              reason: string | null; department: string | null };
+
 /* K123. Two numbers, both true: what you own, and what you can actually cut.
    Unsorted fabric is yours and it is on your floor — it just cannot be cut
    until somebody opens the Bora. */
@@ -102,6 +106,22 @@ export default function Orders() {
   const [result, setResult] = useState<PlaceResult | null>(null);
 
   const [detail, setDetail] = useState<Order | null>(null);
+
+  /* K125 — issue, return and wastage live on the order now, not on a
+     separate screen. Giving material out and getting it back are two halves
+     of the same sentence: "we gave 25 kg, we got 2 back". Split across two
+     screens with no order attached, that sentence cannot be written down. */
+  const [moves, setMoves] = useState<Move[]>([]);
+  const [mvType, setMvType] = useState<"return" | "wastage">("return");
+  const [mvItem, setMvItem] = useState("");
+  const [mvQty, setMvQty] = useState("");
+  const [mvReason, setMvReason] = useState("");
+  const [mvBusy, setMvBusy] = useState(false);
+  const [mvErr, setMvErr] = useState("");
+  /* A return has to name the floor it came back from, and only one
+     department receives work — the unit K118 created. Read it rather than
+     hardcoding a code that could be renamed. */
+  const [unitId, setUnitId] = useState<string | null>(null);
   const [detailReqs, setDetailReqs] = useState<Req[] | null>(null);
   const [detailStatus, setDetailStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
@@ -149,6 +169,16 @@ export default function Orders() {
       .gt("usable", 0).order("material")
       .then(({ data }) => setUsableItems((data as UsableItem[]) ?? []));
   }, [modal]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from("v_usable_stock").select("item_id,item_code,material,unit,usable,in_stock")
+      .gt("usable", 0).order("material")
+      .then(({ data }) => setUsableItems((prev) => prev.length ? prev : ((data as UsableItem[]) ?? [])));
+    supabase.from("departments").select("id").eq("kind", "section").eq("in_process", true)
+      .limit(1).maybeSingle()
+      .then(({ data }) => setUnitId((data as { id: string } | null)?.id ?? null));
+  }, []);
 
   useEffect(() => {
     if (!supabase || mode !== "material" || !articleId || !srcItem || !(parseFloat(srcQty) > 0)) {
@@ -201,11 +231,48 @@ export default function Orders() {
 
   async function openDetail(o: Order) {
     setDetail(o); setDetailReqs(null); setDetailStatus(o.status);
+    setMoves([]); setMvItem(""); setMvQty(""); setMvReason(""); setMvErr(""); setMvType("return");
+    if (!supabase) return;
+    loadMoves(o.id);
     setConfirmDel(false); setDelErr("");
     if (!supabase) return;
     const { data } = await supabase.rpc("get_order_requirements", { p_article_id: o.article_id, p_quantity: o.quantity });
     setDetailReqs((data as Req[]) ?? []);
   }
+  async function loadMoves(orderId: string) {
+    if (!supabase) return;
+    const { data } = await supabase.from("v_order_movements")
+      .select("id,movement_number,type,moved_at,material,item_code,quantity,unit,reason,department")
+      .eq("production_order_id", orderId).order("moved_at", { ascending: false });
+    setMoves((data as Move[]) ?? []);
+  }
+
+  /* A return puts material back on the shelf; wastage writes it off. Both
+     name this order, so v_order_material can work out what a shirt actually
+     cost instead of what the recipe hoped it would cost. */
+  async function recordMove() {
+    if (!supabase || !detail) return;
+    setMvErr("");
+    if (!mvItem) { setMvErr("Choose the material."); return; }
+    if (!(parseFloat(mvQty) > 0)) { setMvErr("Enter a quantity."); return; }
+    if (mvType === "wastage" && !mvReason.trim()) { setMvErr("Say what happened to it."); return; }
+    setMvBusy(true);
+    const { error } = await supabase.rpc("post_stock_movement", {
+      p_type: mvType,
+      p_department_id: mvType === "return" ? unitId : null,
+      p_employee_id: null,
+      p_reason: mvReason || null,
+      p_moved_at: new Date().toISOString(),
+      p_direction: null,
+      p_lines: [{ item_id: mvItem, quantity: parseFloat(mvQty) }],
+      p_production_order_id: detail.id,
+    });
+    setMvBusy(false);
+    if (error) { setMvErr(error.message); return; }
+    setMvItem(""); setMvQty(""); setMvReason("");
+    loadMoves(detail.id);
+  }
+
   async function saveStatus() {
     if (!supabase || !detail) return;
     setSavingStatus(true);
@@ -437,6 +504,68 @@ export default function Orders() {
 
             <p className="mb-2 mt-4 text-[12px] font-semibold text-ink">Material needed</p>
             <Requirements reqs={detailReqs} loading={detailReqs === null} />
+
+            {/* ---- K125: what actually moved on this order ---- */}
+            <p className="mb-2 mt-5 text-[12px] font-semibold text-ink">Material movements</p>
+            {moves.length === 0 ? (
+              <p className="rounded-xl2 bg-panel px-3.5 py-3 text-[12.5px] text-muted">
+                Nothing recorded yet beyond what the order issued.
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-xl2 border border-line">
+                <table className="w-full text-left text-[12.5px]">
+                  <tbody>
+                    {moves.map((m) => (
+                      <tr key={m.id} className="border-b border-line/60 last:border-0">
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            m.type === "issue" ? "bg-panel text-ink"
+                            : m.type === "return" ? "bg-success-soft text-[#166534]"
+                            : "bg-danger-soft text-danger"}`}>{m.type}</span>
+                        </td>
+                        <td className="px-3 py-2 text-ink">{m.material}</td>
+                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">
+                          {m.type === "return" ? "+" : "−"}{n(m.quantity)} {m.unit}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-hint">{m.reason ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {canManage && (
+              <div className="mt-3 rounded-xl2 border border-line p-3">
+                <div className="flex gap-2">
+                  <button onClick={() => { setMvType("return"); setMvErr(""); }}
+                    className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mvType === "return" ? "bg-ink text-white" : "bg-panel text-muted"}`}>
+                    Material came back
+                  </button>
+                  <button onClick={() => { setMvType("wastage"); setMvErr(""); }}
+                    className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mvType === "wastage" ? "bg-ink text-white" : "bg-panel text-muted"}`}>
+                    Spoiled on the floor
+                  </button>
+                </div>
+                <div className="mt-2.5 grid grid-cols-2 gap-2">
+                  <select value={mvItem} onChange={(e) => setMvItem(e.target.value)} className={inp}>
+                    <option value="">Which material…</option>
+                    {usableItems.map((u) => (
+                      <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code}</option>
+                    ))}
+                  </select>
+                  <input type="number" value={mvQty} onChange={(e) => setMvQty(e.target.value)} placeholder="Quantity" className={inp} />
+                </div>
+                <input value={mvReason} onChange={(e) => setMvReason(e.target.value)} className={inp}
+                  placeholder={mvType === "wastage" ? "what happened to it — required" : "note (optional)"} />
+                {mvErr && <p className="mt-2 text-[12px] font-medium text-danger">{mvErr}</p>}
+                <button onClick={recordMove} disabled={mvBusy}
+                  className="mt-2.5 flex items-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
+                  {mvBusy && <Loader2 size={14} className="animate-spin" />}
+                  Record {mvType === "return" ? "return" : "wastage"}
+                </button>
+              </div>
+            )}
 
             {canManage && (
               <div className="mt-5 border-t border-line pt-4">

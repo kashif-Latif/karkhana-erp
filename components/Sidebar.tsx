@@ -37,10 +37,14 @@ const NAV: NavItem[] = [
   /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
      are labels on the work, not gates a piece passes through one at a time —
      what matters is how many of the order are still out on the floor, and that
-     count lives on the unit. */
+     count lives on the unit.
+
+     Stock movements used to hang here as its own page. It is gone: issuing,
+     returning and writing off material all belong to an order, and they are on
+     the order now. A second door into the store is how 100 kg of unsorted
+     fabric reached Cutting with no order behind it. */
   { label: "Main Factory Stitching Unit", Icon: Factory, children: [
     { label: "Work & wages", href: "/process" },
-    { label: "Stock movements", href: "/movements" },
   ] },
   /* Finished garments. Not the same thing as Stock above, and named so the
      difference is obvious: Stock is what you buy, Inventory is what you make. */
