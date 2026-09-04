@@ -53,6 +53,8 @@ export default function SortingPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [lines, setLines] = useState<OutLine[]>([{ category_id: "", color_id: "", size_id: "", quantity: "" }]);
   const [supervisor, setSupervisor] = useState("");
+  const [workerName, setWorkerName] = useState("");
+  const [bora, setBora] = useState("");
   const [workers, setWorkers] = useState("");
   const [labour, setLabour] = useState("");
   const [variance, setVariance] = useState("");
@@ -122,7 +124,13 @@ export default function SortingPage() {
         size_id: l.size_id || null, quantity: parseFloat(l.quantity),
       })),
     p_dry_run: dry,
-  }), [open, supervisor, workers, labour, variance, varReason, note, lines]);
+    /* K124. The man who opens the Bora is usually casual labour, not on the
+       payroll — so he gets a name field, not a staff record invented for one
+       afternoon's work. If a supervisor IS picked, the name is ignored and
+       his employee record is the truth. */
+    p_packages_sorted: bora ? parseInt(bora) : null,
+    p_worker_name: supervisor ? null : (workerName.trim() || null),
+  }), [open, supervisor, workerName, bora, workers, labour, variance, varReason, note, lines]);
 
   async function run(dry: boolean) {
     if (!supabase || !open) return;
@@ -282,8 +290,21 @@ export default function SortingPage() {
                   {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </Field>
+              <Field label={`Bora opened`}><input value={bora} onChange={(e) => { setBora(e.target.value); setCheck(null); }} inputMode="numeric" placeholder="10" className={inp} /></Field>
               <Field label="Workers"><input value={workers} onChange={(e) => { setWorkers(e.target.value); setCheck(null); }} inputMode="numeric" className={inp} /></Field>
               <Field label="Labour paid"><input value={labour} onChange={(e) => { setLabour(e.target.value); setCheck(null); }} inputMode="decimal" className={inp} /></Field>
+            </div>
+
+            {/* Only asked for when nobody on the payroll was picked. A sort job
+                with no name at all is a payment to nobody, and the database
+                refuses it — better to ask here than to fail on submit. */}
+            {!supervisor && (
+              <Field label="Who did the sorting?">
+                <input value={workerName} onChange={(e) => { setWorkerName(e.target.value); setCheck(null); }} placeholder="his name — casual labour is fine" className={inp} />
+              </Field>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Field label={`Lost (${open.unit})`}><input value={variance} onChange={(e) => { setVariance(e.target.value); setCheck(null); }} inputMode="decimal" className={inp} /></Field>
             </div>
             {parseFloat(variance) > 0 && (
@@ -356,6 +377,16 @@ export default function SortingPage() {
                         {Number(check.variance) > 0 && `, ${String(check.variance)} ${open.unit} lost costing ${rs(Number(check.variance_cost))} (${String(check.variance_pct)}%)`}
                         . {String(check.remaining_after)} {open.unit} would remain{check.closes_lot ? ", closing the lot" : ""}.
                       </p>
+                      {/* K124 — what the work costs, two ways, before it is paid.
+                          Per Bora is what you argue about with the man. Per unit
+                          is what lets you compare him against the next one. */}
+                      {Number(check.labour_cost) > 0 && (
+                        <p className="mt-1.5 text-ink/75">
+                          {String(check.worker)} paid {rs(Number(check.labour_cost))}
+                          {check.packages ? ` for ${String(check.packages)} Bora — ${rs(Number(check.per_package))} each` : ""}
+                          {check.per_kg ? `, ${rs(Number(check.per_kg))} per ${open.unit}` : ""}.
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="font-semibold">Recorded as {String(check.job)}. {String(check.remaining_after)} {open.unit} left{check.lot_closed ? " — lot closed." : "."}</p>
