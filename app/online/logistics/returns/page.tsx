@@ -64,7 +64,8 @@ export default function ReturnsPage() {
      The list said which parcels came back; nothing said whether that was
      normal. OwnEx ran at 14.5% in June, 25.2% in July and 14.9% in August —
      a swing worth Rs 190,000 that nobody could see. */
-  type Rate = { month_label: string; courier: string; returned: number;
+  type Rate = { month_label: string; courier: string;
+                delivered: number; returned: number;
                 return_pct: number | null; change_pts: number | null;
                 cod_returned: number | null; is_part_month: boolean };
   const [rates, setRates] = useState<Rate[]>([]);
@@ -151,7 +152,7 @@ export default function ReturnsPage() {
 
     const [r, rt, c] = await Promise.all([
       opts?.figuresOnly ? Promise.resolve({ data: null, error: null }) : rq,
-      supabase.rpc("hub_return_rates", { p_months: 3 }),
+      supabase.rpc("hub_return_rates", { p_months: 12 }),
       supabase.rpc("hub_returns_sections", {
         p_store: store === "ALL" ? null : store,
         p_courier: courier === "All couriers" ? null : courier,
