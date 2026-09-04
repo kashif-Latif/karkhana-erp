@@ -6,7 +6,18 @@ import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "l
 
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
-type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean };
+type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean;
+             owned: number; awaiting_sorting: number };
+
+/* K123. Two numbers, both true: what you own, and what you can actually cut.
+   Unsorted fabric is yours and it is on your floor — it just cannot be cut
+   until somebody opens the Bora. */
+type UsableItem = { item_id: string; item_code: string; material: string; unit: string;
+                    usable: number; in_stock: number };
+type Estimate =
+  | { ok: false; guard: string; meaning: string; usable?: number; you_entered?: number }
+  | { ok: true; pieces: number; from_this_material: number; limited_by: string | null;
+      material_given: number; meaning: string };
 
 /* What place_production_order (K120) hands back. It either refuses the whole
    order and lists every short line, or it succeeds and reports what it took
@@ -36,13 +47,22 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
   return (
     <div className="overflow-hidden rounded-xl2 border border-line">
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[12.5px]">
-        <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted"><th className="px-3 py-2 font-semibold">Material</th><th className="px-3 py-2 text-right font-semibold">Needed</th><th className="px-3 py-2 text-right font-semibold">In stock</th><th className="px-3 py-2 text-right font-semibold">OK?</th></tr></thead>
+        <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted"><th className="px-3 py-2 font-semibold">Material</th><th className="px-3 py-2 text-right font-semibold">Needed</th><th className="px-3 py-2 text-right font-semibold">Can cut</th><th className="px-3 py-2 text-right font-semibold">OK?</th></tr></thead>
         <tbody>
           {reqs.map((r, i) => (
             <tr key={i} className="border-t border-line/60">
               <td className="px-3 py-2 font-medium text-ink">{r.material_label}</td>
               <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
-              <td className="px-3 py-2 text-right tnum text-muted">{n(r.available)} {r.unit_symbol}</td>
+              <td className="px-3 py-2 text-right tnum text-muted">
+                {n(r.available)} {r.unit_symbol}
+                {/* The most confusing shortage in this system is "I have five
+                    tonnes and it says zero". Say why on the row itself. */}
+                {Number(r.awaiting_sorting) > 0 && (
+                  <span className="block text-[11px] text-hint">
+                    {n(r.owned)} owned · {n(r.awaiting_sorting)} not sorted yet
+                  </span>
+                )}
+              </td>
               <td className="px-3 py-2 text-right">
                 {r.enough ? <Check size={15} className="ml-auto text-[#166534]" /> : <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger"><AlertTriangle size={11} /> Short</span>}
               </td>
@@ -66,6 +86,16 @@ export default function Orders() {
   const [targetDate, setTargetDate] = useState(todayInput());
   const [notes, setNotes] = useState("");
   const [reqs, setReqs] = useState<Req[] | null>(null);
+
+  /* K123 — the order works both ways. "I want 100 shirts, what material?"
+     and "I am giving 100 kg, how many shirts?" are the same question asked
+     from opposite ends, and the second one is how the floor actually thinks. */
+  const [mode, setMode] = useState<"pieces" | "material">("pieces");
+  const [usableItems, setUsableItems] = useState<UsableItem[]>([]);
+  const [srcItem, setSrcItem] = useState("");
+  const [srcQty, setSrcQty] = useState("");
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [estLoading, setEstLoading] = useState(false);
   const [reqLoading, setReqLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -107,7 +137,33 @@ export default function Orders() {
     return () => { off = true; };
   }, [articleId, qty]);
 
-  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); setResult(null); }
+  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); setResult(null); setMode("pieces"); setSrcItem(""); setSrcQty(""); setEstimate(null); }
+
+  /* Only material you can actually cut is offered. Listing unsorted fabric
+     here would invite somebody to plan an order against it and be refused
+     at the last step, which teaches people the system is unreliable when it
+     is in fact being careful. */
+  useEffect(() => {
+    if (!supabase || !modal) return;
+    supabase.from("v_usable_stock").select("item_id,item_code,material,unit,usable,in_stock")
+      .gt("usable", 0).order("material")
+      .then(({ data }) => setUsableItems((data as UsableItem[]) ?? []));
+  }, [modal]);
+
+  useEffect(() => {
+    if (!supabase || mode !== "material" || !articleId || !srcItem || !(parseFloat(srcQty) > 0)) {
+      setEstimate(null); return;
+    }
+    let off = false; setEstLoading(true);
+    supabase.rpc("estimate_pieces_from_material", {
+      p_article_id: articleId, p_item_id: srcItem, p_quantity: parseFloat(srcQty),
+    }).then(({ data, error }) => {
+      if (off) return;
+      setEstLoading(false);
+      setEstimate(error ? { ok: false, guard: "could not calculate", meaning: error.message } : (data as Estimate));
+    });
+    return () => { off = true; };
+  }, [mode, articleId, srcItem, srcQty]);
 
   /* PLACING AN ORDER IS FOUR THINGS AT ONCE (K120): the recipe multiplies out,
      the material leaves stock, the order is created, and the floor is handed
@@ -229,6 +285,73 @@ export default function Orders() {
               <option value="">Choose article…</option>
               {articles.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
+            <div className="mt-3 flex rounded-xl2 bg-panel p-1">
+              <button onClick={() => { setMode("pieces"); setEstimate(null); }}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mode === "pieces" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
+                I want N pieces
+              </button>
+              <button onClick={() => { setMode("material"); setQty(""); }}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mode === "material" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
+                I&apos;m giving material
+              </button>
+            </div>
+
+            {mode === "material" && (
+              <div className="mt-3 rounded-xl2 border border-line p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Material you are giving</label>
+                    <select value={srcItem} onChange={(e) => setSrcItem(e.target.value)} className={inp}>
+                      <option value="">Choose…</option>
+                      {usableItems.map((u) => (
+                        <option key={u.item_id} value={u.item_id}>
+                          {u.material} · {u.item_code} — {n(u.usable)} {u.unit} ready
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">How much</label>
+                    <input type="number" value={srcQty} onChange={(e) => setSrcQty(e.target.value)} placeholder="e.g. 100" className={inp} />
+                  </div>
+                </div>
+
+                {usableItems.length === 0 && (
+                  <p className="mt-2 text-[12px] text-muted">
+                    Nothing is ready to cut yet. Fabric has to be sorted before it can be given to the floor.
+                  </p>
+                )}
+
+                {estLoading && <p className="mt-2 flex items-center gap-2 text-[12.5px] text-muted"><Loader2 size={14} className="animate-spin" /> Working it out…</p>}
+
+                {estimate && !estimate.ok && (
+                  <p className="mt-2 text-[12.5px] text-danger">{estimate.meaning}</p>
+                )}
+
+                {estimate && estimate.ok && (
+                  <div className="mt-3 rounded-xl2 bg-panel px-3.5 py-3">
+                    <p className="text-[13px] font-bold text-ink">
+                      {n(estimate.material_given)} makes {n(estimate.pieces)} pieces
+                    </p>
+                    {/* The fabric alone is never the answer. If thread runs out
+                        at 250 the honest number is 250, and it says which
+                        material held it back. */}
+                    {estimate.limited_by && (
+                      <p className="mt-1 text-[12px] text-ink/75">
+                        The fabric alone is worth {n(estimate.from_this_material)}, but {estimate.limited_by} only supports {n(estimate.pieces)}.
+                      </p>
+                    )}
+                    <button
+                      onClick={() => { setQty(String(estimate.pieces)); setMode("pieces"); }}
+                      disabled={estimate.pieces <= 0}
+                      className="mt-2.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
+                      Use {n(estimate.pieces)} pieces
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div><label className="block text-[12px] font-medium text-muted">Pieces to make *</label><input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="e.g. 100" className={inp} /></div>
               <div><label className="block text-[12px] font-medium text-muted">Target date</label><input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inp} /></div>
