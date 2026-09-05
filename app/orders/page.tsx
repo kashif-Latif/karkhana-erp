@@ -21,8 +21,8 @@ type Move = { id: string; movement_number: string; type: string; moved_at: strin
 /* K123. Two numbers, both true: what you own, and what you can actually cut.
    Unsorted fabric is yours and it is on your floor — it just cannot be cut
    until somebody opens the Bora. */
-type UsableItem = { item_id: string; item_code: string; material: string; unit: string;
-                    usable: number; in_stock: number };
+type UsableItem = { item_id: string; item_code: string; group_id: string; material: string;
+                    unit: string; usable: number; in_stock: number };
 type Estimate =
   | { ok: false; guard: string; meaning: string; usable?: number; you_entered?: number }
   | { ok: true; pieces: number; from_this_material: number; limited_by: string | null;
@@ -137,6 +137,27 @@ export default function Orders() {
      department receives work — the unit K118 created. Read it rather than
      hardcoding a code that could be renamed. */
   const [unitId, setUnitId] = useState<string | null>(null);
+
+  /* K132 — the order has TWO sections, because they are two different
+     moments. A RAW material order (fabric + thread) starts production and
+     goes to the floor. OTHER materials (sticker, shopper, zip) are added
+     onto the order later, when the pieces are back and being finished. One
+     dropdown offering everything mixes the two moments and invites fabric
+     mistakes at packing time. */
+  const [section, setSection] = useState<"raw" | "other">("raw");
+  const [groupCodes, setGroupCodes] = useState<Record<string, string>>({}); // group_id -> code
+  const [otherItem, setOtherItem] = useState("");
+  const [otherQty, setOtherQty] = useState("");
+  const [otherPrice, setOtherPrice] = useState("");
+  const [otherPriceTouched, setOtherPriceTouched] = useState(false);
+  const [otherBusy, setOtherBusy] = useState(false);
+  const [otherErr, setOtherErr] = useState("");
+  const [orderCosts, setOrderCosts] = useState<{ material: string; issued: number | null; unit: string; material_cost: number }[]>([]);
+
+  const RAW = ["FAB", "THR"];
+  const OTHER = ["STK", "PKG", "ZIP"];
+  const rawItems = usableItems.filter((u) => RAW.includes(groupCodes[u.group_id] ?? ""));
+  const otherItems = usableItems.filter((u) => OTHER.includes(groupCodes[u.group_id] ?? ""));
   const [detailReqs, setDetailReqs] = useState<Req[] | null>(null);
   const [detailStatus, setDetailStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
@@ -180,19 +201,22 @@ export default function Orders() {
      is in fact being careful. */
   useEffect(() => {
     if (!supabase || !modal) return;
-    supabase.from("v_usable_stock").select("item_id,item_code,material,unit,usable,in_stock")
+    supabase.from("v_usable_stock").select("item_id,item_code,group_id,material,unit,usable,in_stock")
       .gt("usable", 0).order("material")
       .then(({ data }) => setUsableItems((data as UsableItem[]) ?? []));
   }, [modal]);
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.from("v_usable_stock").select("item_id,item_code,material,unit,usable,in_stock")
+    supabase.from("v_usable_stock").select("item_id,item_code,group_id,material,unit,usable,in_stock")
       .gt("usable", 0).order("material")
       .then(({ data }) => setUsableItems((prev) => prev.length ? prev : ((data as UsableItem[]) ?? [])));
     supabase.from("departments").select("id").eq("kind", "section").eq("in_process", true)
       .limit(1).maybeSingle()
       .then(({ data }) => setUnitId((data as { id: string } | null)?.id ?? null));
+    supabase.from("material_groups").select("id,code")
+      .then(({ data }) => setGroupCodes(Object.fromEntries(
+        ((data as { id: string; code: string }[]) ?? []).map((g) => [g.id, g.code]))));
   }, []);
 
   useEffect(() => {
@@ -247,8 +271,10 @@ export default function Orders() {
   async function openDetail(o: Order) {
     setDetail(o); setDetailReqs(null); setDetailStatus(o.status);
     setMoves([]); setMvItem(""); setMvQty(""); setMvReason(""); setMvErr(""); setMvType("return");
+    setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false); setOtherErr(""); setOrderCosts([]);
     if (!supabase) return;
     loadMoves(o.id);
+    loadCosts(o.id);
     setConfirmDel(false); setDelErr("");
     if (!supabase) return;
     const { data } = await supabase.rpc("get_order_requirements", { p_article_id: o.article_id, p_quantity: o.quantity });
@@ -260,6 +286,51 @@ export default function Orders() {
       .select("id,movement_number,type,moved_at,material,item_code,quantity,unit,reason,department")
       .eq("production_order_id", orderId).order("moved_at", { ascending: false });
     setMoves((data as Move[]) ?? []);
+  }
+
+  async function loadCosts(orderId: string) {
+    if (!supabase) return;
+    const { data } = await supabase.from("v_order_material")
+      .select("material,issued,unit,material_cost")
+      .eq("order_id", orderId);
+    setOrderCosts((data as typeof orderCosts) ?? []);
+  }
+
+  /* The sticker's price "comes up automatically" — the latest batch rate for
+     that item — and stays editable, because what you agreed for THIS job can
+     differ from what the supplier last charged. Whatever ends up in the box
+     is frozen onto the line by K132, so next month's purchase cannot reprice
+     this order. */
+  useEffect(() => {
+    if (!supabase || !otherItem || otherPriceTouched) return;
+    let off = false;
+    supabase.from("stock_lots").select("rate").eq("item_id", otherItem)
+      .order("received_at", { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (!off) setOtherPrice(String((data as { rate: number } | null)?.rate ?? "")); });
+    return () => { off = true; };
+  }, [otherItem, otherPriceTouched]);
+
+  async function addOther() {
+    if (!supabase || !detail) return;
+    setOtherErr("");
+    if (!otherItem) { setOtherErr("Choose the material."); return; }
+    if (!(parseFloat(otherQty) > 0)) { setOtherErr("Enter a quantity."); return; }
+    if (!(parseFloat(otherPrice) >= 0)) { setOtherErr("Enter the price."); return; }
+    setOtherBusy(true);
+    const { error } = await supabase.rpc("post_stock_movement", {
+      p_type: "issue",
+      p_department_id: null,     // stickers go on at packing — no floor
+      p_employee_id: null,
+      p_reason: "other material added to order",
+      p_moved_at: new Date().toISOString(),
+      p_direction: null,
+      p_lines: [{ item_id: otherItem, quantity: parseFloat(otherQty), unit_price: parseFloat(otherPrice) }],
+      p_production_order_id: detail.id,
+    });
+    setOtherBusy(false);
+    if (error) { setOtherErr(error.message); return; }
+    setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false);
+    loadMoves(detail.id); loadCosts(detail.id);
   }
 
   /* A return puts material back on the shelf; wastage writes it off. Both
@@ -315,9 +386,28 @@ export default function Orders() {
           <div className="flex items-center justify-center gap-2 py-16 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
         ) : (
           <>
+            {/* THE TWO SECTIONS. Raw starts production; Other finishes it.
+                Same orders underneath — the tab changes what you DO to one. */}
+            <div className="mb-4 flex rounded-xl2 bg-panel p-1">
+              <button onClick={() => setSection("raw")}
+                className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "raw" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
+                Raw material order
+                <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">fabric + thread → floor</span>
+              </button>
+              <button onClick={() => setSection("other")}
+                className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "other" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
+                Other material order
+                <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">sticker · shopper · zip</span>
+              </button>
+            </div>
+
             <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-[12.5px] text-muted">Create an order and the system multiplies the article&apos;s recipe to show exactly what material you need.{!canManage && " (View only.)"}</p>
-              {canManage && <button onClick={openCreate} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
+              <p className="text-[12.5px] text-muted">
+                {section === "raw"
+                  ? <>Create an order and the system multiplies the article&apos;s recipe to show exactly what material you need.{!canManage && " (View only.)"}</>
+                  : <>Open an order and add sticker, shopper or zip onto it — the price comes up on its own and adds to the order&apos;s cost.</>}
+              </p>
+              {canManage && section === "raw" && <button onClick={openCreate} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
             </div>
 
             {orders.length === 0 ? (
@@ -385,7 +475,11 @@ export default function Orders() {
                     <label className="block text-[12px] font-medium text-muted">Material you are giving</label>
                     <select value={srcItem} onChange={(e) => setSrcItem(e.target.value)} className={inp}>
                       <option value="">Choose…</option>
-                      {usableItems.map((u) => (
+                      {/* A raw order is fabric and thread. Stickers, shoppers
+                          and zips are added later, on the Other tab, when the
+                          pieces are back — offering them here mixes the two
+                          moments. */}
+                      {rawItems.map((u) => (
                         <option key={u.item_id} value={u.item_id}>
                           {u.material} · {u.item_code} — {n(u.usable)} {u.unit} ready
                         </option>
@@ -398,9 +492,9 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {usableItems.length === 0 && (
+                {rawItems.length === 0 && (
                   <p className="mt-2 text-[12px] text-muted">
-                    Nothing is ready to cut yet. Fabric has to be sorted before it can be given to the floor.
+                    No fabric or thread in stock yet. Receive some and it appears here.
                   </p>
                 )}
 
@@ -545,6 +639,64 @@ export default function Orders() {
                         <td className="px-3 py-2 text-[11px] text-hint">{m.reason ?? ""}</td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {canManage && (
+              <div className="mt-3 rounded-xl2 border border-line p-3">
+                <p className="text-[12.5px] font-bold text-ink">Add other material — sticker · shopper · zip</p>
+                <p className="mt-0.5 text-[11.5px] text-hint">Goes onto this order at the price below. No floor needed — this happens at packing.</p>
+                <div className="mt-2.5 grid grid-cols-3 gap-2">
+                  <select value={otherItem}
+                    onChange={(e) => { setOtherItem(e.target.value); setOtherPriceTouched(false); setOtherErr(""); }}
+                    className={inp}>
+                    <option value="">Which one…</option>
+                    {otherItems.map((u) => (
+                      <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code} — {n(u.usable)} {u.unit}</option>
+                    ))}
+                  </select>
+                  <input type="number" value={otherQty} onChange={(e) => setOtherQty(e.target.value)} placeholder="Quantity" className={inp} />
+                  <input type="number" value={otherPrice}
+                    onChange={(e) => { setOtherPrice(e.target.value); setOtherPriceTouched(true); }}
+                    placeholder="Price / unit" className={inp} />
+                </div>
+                {otherItem && otherQty && otherPrice && parseFloat(otherQty) > 0 && (
+                  <p className="mt-2 text-[12px] text-ink/75">
+                    Adds <b className="tnum">Rs {n(parseFloat(otherQty) * parseFloat(otherPrice))}</b> to this order.
+                  </p>
+                )}
+                {otherErr && <p className="mt-2 text-[12px] font-medium text-danger">{otherErr}</p>}
+                <button onClick={addOther} disabled={otherBusy}
+                  className="mt-2.5 flex items-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
+                  {otherBusy && <Loader2 size={14} className="animate-spin" />} Add to order
+                </button>
+              </div>
+            )}
+
+            {orderCosts.length > 0 && (
+              <div className="mt-3 overflow-hidden rounded-xl2 border border-line">
+                <table className="w-full text-left text-[12.5px]">
+                  <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted">
+                    <th className="px-3 py-2 font-semibold">Material on this order</th>
+                    <th className="px-3 py-2 text-right font-semibold">Used</th>
+                    <th className="px-3 py-2 text-right font-semibold">Cost</th>
+                  </tr></thead>
+                  <tbody>
+                    {orderCosts.map((c, i) => (
+                      <tr key={i} className="border-t border-line/60">
+                        <td className="px-3 py-2 text-ink">{c.material}</td>
+                        <td className="px-3 py-2 text-right tnum text-muted">{c.issued == null ? "—" : n(c.issued)} {c.unit}</td>
+                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">Rs {n(c.material_cost)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-line bg-panel/40">
+                      <td className="px-3 py-2 font-bold text-ink" colSpan={2}>Material cost so far</td>
+                      <td className="px-3 py-2 text-right tnum font-extrabold text-ink">
+                        Rs {n(orderCosts.reduce((a, c) => a + Number(c.material_cost || 0), 0))}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

@@ -103,24 +103,36 @@ export default function ProcessPage() {
 
   return (
     <>
-      <Topbar title="Process" subtitle="Cutting, stitching and clipping — what is out and what is owed" />
+      <Topbar title="Main Factory Stitching Unit" subtitle="One unit, four floors — what is out and what is owed" />
       <div className="space-y-5 px-6 pb-10">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to see process work.</div>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="rounded-card bg-periwinkle-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Pieces on the floor</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">{num(totalOut)}</p>
+            {/* THE UNIT, THEN ITS FLOORS. Pending lives on the unit — the four
+                floors are stages inside it, not separate queues, so they carry
+                the same pending count rather than inventing four numbers that
+                would drift apart. Kashif: "they are all bound to a single
+                processing. I should see the pending section as well there." */}
+            <div className="rounded-card bg-surface p-4 shadow-card">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Processing — pieces pending</p>
+                  <p className="mt-1 text-[30px] font-extrabold leading-none text-ink">{num(totalOut)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Wages payable</p>
+                  <p className="mt-1 text-[18px] font-extrabold text-ink">{rs(totalOwed)}</p>
+                  <p className="text-[11px] text-hint">{rows.filter((r) => r.status !== "closed" && r.status !== "complete").length} open assignments</p>
+                </div>
               </div>
-              <div className="rounded-card bg-amber-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Wages payable</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">{rs(totalOwed)}</p>
-              </div>
-              <div className="rounded-card bg-salmon-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Open assignments</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">{rows.filter((r) => r.status !== "closed" && r.status !== "complete").length}</p>
+              <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {["Cutting", "Overlock", "Flatlock", "Singlelock"].map((f) => (
+                  <div key={f} className="rounded-xl2 border border-line bg-panel/50 px-3.5 py-3">
+                    <p className="text-[13px] font-bold text-ink">{f}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-hint">{num(totalOut)} pending in unit</p>
+                  </div>
+                ))}
               </div>
             </div>
 
