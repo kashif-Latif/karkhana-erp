@@ -93,7 +93,7 @@ export default function DisputesPage() {
     [rows],
   );
 
-  const window = useMemo(() => {
+  const range = useMemo(() => {
     const d = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
     switch (preset) {
       case "7d":   return { from: d(7),  to: "" };
@@ -109,14 +109,18 @@ export default function DisputesPage() {
   const shown = useMemo(() => {
     const n = q.trim().toLowerCase().replace("#", "");
     return rows.filter((r) =>
-      (!window.from || (r.return_date ?? "") >= window.from) &&
-      (!window.to   || (r.return_date ?? "") <= window.to) &&
+      (!range.from || (r.return_date ?? "") >= range.from) &&
+      (!range.to   || (r.return_date ?? "") <= range.to) &&
       (courier === "All" || r.courier === courier) &&
       (cpr === "All" || r.cpr_number === cpr) &&
       (!n || [r.order_number, r.tracking_id, r.customer_name, r.city]
         .some((v) => String(v ?? "").toLowerCase().replace("#", "").includes(n))),
     );
-  }, [rows, q, courier, cpr]);
+  /* window must be here. It is read inside this filter, so leaving it out means
+     React never recomputes when a date chip is clicked — the dates were being
+     applied to a list that never refreshed, and every preset showed the same
+     count. */
+  }, [rows, q, courier, cpr, range]);
 
   const totals = useMemo(() => ({
     n: shown.length,
