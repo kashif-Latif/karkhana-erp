@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "lucide-react";
+import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2, Download } from "lucide-react";
 
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
@@ -153,6 +154,33 @@ export default function Orders() {
   const [otherBusy, setOtherBusy] = useState(false);
   const [otherErr, setOtherErr] = useState("");
   const [orderCosts, setOrderCosts] = useState<{ material: string; issued: number | null; unit: string; material_cost: number }[]>([]);
+
+  type OtherOrder = { id: string; movement_number: string; moved_at: string;
+                      order_number: string | null; material: string; quantity: number;
+                      unit: string; unit_price: number | null; line_value: number };
+  const [otherOrders, setOtherOrders] = useState<OtherOrder[]>([]);
+  const loadOther = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.from("v_order_movements")
+      .select("id,movement_number,moved_at,order_number,material,quantity,unit,unit_price,line_value,order_section,type")
+      .eq("type", "issue").eq("order_section", "other")
+      .order("moved_at", { ascending: false });
+    setOtherOrders((data as unknown as OtherOrder[]) ?? []);
+  }, []);
+  useEffect(() => { if (section === "other") loadOther(); }, [section, loadOther]);
+
+  const rawTable = (): ExportTable => ({
+    title: "raw-material-orders",
+    headers: ["Order", "Article", "Pieces", "Target", "Placed", "Status"],
+    rows: orders.map((o) => [o.order_number, o.article?.name ?? "", o.quantity,
+      fmtDate(o.target_date), when(o.created_at), o.status]),
+  });
+  const otherTable = (): ExportTable => ({
+    title: "other-material-orders",
+    headers: ["Number", "Date", "Production order", "Material", "Qty", "Unit", "Price", "Value Rs"],
+    rows: otherOrders.map((m) => [m.movement_number, when(m.moved_at), m.order_number ?? "",
+      m.material, m.quantity, m.unit, m.unit_price ?? "batch rate", m.line_value]),
+  });
 
   const RAW = ["FAB", "THR"];
   const OTHER = ["STK", "PKG", "ZIP"];
@@ -330,7 +358,7 @@ export default function Orders() {
     setOtherBusy(false);
     if (error) { setOtherErr(error.message); return; }
     setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false);
-    loadMoves(detail.id); loadCosts(detail.id);
+    loadMoves(detail.id); loadCosts(detail.id); loadOther();
   }
 
   /* A return puts material back on the shelf; wastage writes it off. Both
@@ -407,10 +435,51 @@ export default function Orders() {
                   ? <>Create an order and the system multiplies the article&apos;s recipe to show exactly what material you need.{!canManage && " (View only.)"}</>
                   : <>Open an order and add sticker, shopper or zip onto it — the price comes up on its own and adds to the order&apos;s cost.</>}
               </p>
-              {canManage && section === "raw" && <button onClick={openCreate} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
+              <div className="flex shrink-0 items-center gap-2">
+                {(() => { const t = section === "raw" ? rawTable : otherTable; return (
+                  <>
+                    <button onClick={() => exportCSV(t())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
+                    <button onClick={() => exportExcel(t())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
+                    <button onClick={() => exportPDF(t())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+                  </>
+                ); })()}
+                {canManage && section === "raw" && <button onClick={openCreate} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
+              </div>
             </div>
 
-            {orders.length === 0 ? (
+            {section === "other" ? (
+              otherOrders.length === 0 ? (
+                <div className="rounded-card bg-surface p-10 text-center shadow-card">
+                  <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-panel text-ink"><ClipboardList size={26} /></span>
+                  <p className="mt-3 text-[15px] font-semibold text-ink">No other-material orders yet</p>
+                  <p className="mt-1 text-[13px] text-muted">Open a production order and add a sticker, shopper or zip — each addition becomes its own order here.</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-card bg-surface shadow-card">
+                  <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13.5px]">
+                    <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
+                      <th className="px-5 py-3 font-semibold">Number</th><th className="px-5 py-3 font-semibold">For order</th>
+                      <th className="px-5 py-3 font-semibold">Material</th><th className="px-5 py-3 text-right font-semibold">Qty</th>
+                      <th className="px-5 py-3 text-right font-semibold">Price</th><th className="px-5 py-3 text-right font-semibold">Value</th>
+                      <th className="px-5 py-3 font-semibold">Date</th>
+                    </tr></thead>
+                    <tbody>
+                      {otherOrders.map((m) => (
+                        <tr key={m.id} className="border-b border-line/60 last:border-0">
+                          <td className="px-5 py-3 font-mono text-[12px] text-ink">{m.movement_number}</td>
+                          <td className="px-5 py-3 text-ink/80">{m.order_number ?? "—"}</td>
+                          <td className="px-5 py-3 font-semibold text-ink">{m.material}</td>
+                          <td className="px-5 py-3 text-right tnum text-ink/80">{n(m.quantity)} {m.unit}</td>
+                          <td className="px-5 py-3 text-right tnum text-muted">{m.unit_price == null ? "batch rate" : `Rs ${n(m.unit_price)}`}</td>
+                          <td className="px-5 py-3 text-right tnum font-semibold text-ink">Rs {n(m.line_value)}</td>
+                          <td className="px-5 py-3 text-[12.5px] text-muted">{when(m.moved_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table></div>
+                </div>
+              )
+            ) : orders.length === 0 ? (
               <div className="rounded-card bg-surface p-10 text-center shadow-card">
                 <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-panel text-ink"><ClipboardList size={26} /></span>
                 <p className="mt-3 text-[15px] font-semibold text-ink">No orders yet</p>
