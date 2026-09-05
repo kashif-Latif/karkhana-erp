@@ -165,7 +165,12 @@ export default function Orders() {
       .select("id,movement_number,moved_at,order_number,material,quantity,unit,unit_price,line_value,order_section,type")
       .eq("type", "issue").eq("order_section", "other")
       .order("moved_at", { ascending: false });
-    setOtherOrders((data as unknown as OtherOrder[]) ?? []);
+    /* Belt and braces: the database returns each line once (verified), but a
+       row must be IMPOSSIBLE to show twice — production screens do not get
+       the benefit of the doubt. Dedupe on the full identity of the line. */
+    const raw = (data as unknown as OtherOrder[]) ?? [];
+    setOtherOrders(Array.from(new Map(raw.map((m) =>
+      [`${m.id}|${m.material}|${m.quantity}|${m.line_value}`, m])).values()));
   }, []);
   useEffect(() => { if (section === "other") loadOther(); }, [section, loadOther]);
 
@@ -464,8 +469,8 @@ export default function Orders() {
                       <th className="px-5 py-3 font-semibold">Date</th>
                     </tr></thead>
                     <tbody>
-                      {otherOrders.map((m) => (
-                        <tr key={m.id} className="border-b border-line/60 last:border-0">
+                      {otherOrders.map((m, i) => (
+                        <tr key={`${m.id}-${i}`} className="border-b border-line/60 last:border-0">
                           <td className="px-5 py-3 font-mono text-[12px] text-ink">{m.movement_number}</td>
                           <td className="px-5 py-3 text-ink/80">{m.order_number ?? "—"}</td>
                           <td className="px-5 py-3 font-semibold text-ink">{m.material}</td>
@@ -494,7 +499,7 @@ export default function Orders() {
                     <th className="px-5 py-3 font-semibold">Placed</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
-                    {orders.map((o) => {
+                    {orders.filter((o) => String(o.order_number || "").startsWith("PO")).map((o) => {
                       const st = STATUS[o.status] || STATUS.open;
                       return (
                         <tr key={o.id} className="border-b border-line/60 last:border-0">
