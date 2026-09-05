@@ -1,419 +1,400 @@
 "use client";
-/* SORTING — turning a bulk lot into the colours it actually contains.
+/* SORTING — paying the man who opens the Bora.
  *
- * A lot is a receipt line of material that arrived without an attribute its
- * own material requires: 500 kg of fabric in sealed cartons, colour unknown,
- * paid for at the gate. Days later a supervisor opens the cartons, weighs each
- * colour, and this screen records what came out.
+ * K130 changed what sorting IS. It used to split a lot into new items and
+ * move stock between them; it does neither any more. Stock is unchanged by
+ * sorting — 2,500 kg before, 2,500 kg after. What happens physically is that
+ * a man opens bales and stacks them into piles so the floor can work faster,
+ * and what this screen records is that work and what it cost:
  *
- * NOTHING IS WRITTEN UNTIL THE NUMBERS AGREE. Check runs the same function in
- * dry-run mode and shows exactly what would happen — sorted, lost, value, what
- * the lot would have left. Record then commits it. Same two-step the courier
- * settlement import uses, for the same reason: a wrong weight here silently
- * turns into wrong stock and a wrong cost per garment months later.
+ *   who · how many Bora · how much came out · what he was paid · a note
+ *
+ * The per-Bora rate (set below, admins only) fills the amount in — 25 Bora at
+ * Rs 68 suggests Rs 1,700 — and the amount stays editable, because the agreed
+ * rate and what was actually paid on the day are allowed to differ.
+ *
+ * Nothing on this page can change a stock number. That is not a missing
+ * feature; it is the point.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Scale, AlertTriangle, Plus, Trash2, Check, Lock, Undo2 } from "lucide-react";
+import { PackageOpen, Check, Undo2, Download, Pencil, Loader2 } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { usePermissions } from "@/lib/usePermissions";
 
-type Lot = {
-  id: string; lot_number: string; grn_number: string; supplier: string | null;
-  item_label: string; unit: string; received_qty: number; rate: number;
-  sorted_qty: number; variance_qty: number; remaining_qty: number;
-  labour_cost: number; job_count: number; status: string; age_days: number;
-};
+type Lot = { id: string; lot_number: string; item_label: string; unit: string;
+             received_qty: number };
 type Opt = { id: string; name: string };
-type OutLine = { category_id: string; color_id: string; size_id: string; quantity: string };
-type Job = {
-  id: string; job_number: string; sorted_at: string; worker_count: number | null;
-  labour_cost: number; variance_qty: number; variance_reason: string | null;
-  voided_at: string | null; void_reason: string | null;
-  employees: { name: string } | null;
-};
-type Check = Record<string, unknown>;
+type Job = { id: string; job_number: string; sorted_at: string; lot_number: string;
+             material: string; worker: string | null; on_payroll: boolean;
+             worker_count: number | null; packages_sorted: number | null; package_unit: string;
+             sorted_qty: number; variance_qty: number; labour_cost: number;
+             per_package: number | null; per_unit: number | null;
+             note: string | null; voided_at: string | null };
+type CheckResult = Record<string, unknown> | null;
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
-const rs = (n: number) => "Rs " + Math.round(n).toLocaleString();
-const kg = (n: number, u: string) => `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${u}`;
+const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
+const num = (v: number | null | undefined) =>
+  v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 3 });
 
 export default function SortingPage() {
+  const { can } = usePermissions();
+  const canSort = can(["inventory.sort"]);
+  const canSettings = can(["settings.manage"]);
+
   const [lots, setLots] = useState<Lot[]>([]);
-  const [cats, setCats] = useState<Opt[]>([]);
-  const [colors, setColors] = useState<Opt[]>([]);
-  const [sizes, setSizes] = useState<Opt[]>([]);
   const [staff, setStaff] = useState<Opt[]>([]);
-  const [group, setGroup] = useState<{ has_category: boolean; has_color: boolean; has_size: boolean } | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [rate, setRate] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [showClosed, setShowClosed] = useState(false);
 
-  const [open, setOpen] = useState<Lot | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [lines, setLines] = useState<OutLine[]>([{ category_id: "", color_id: "", size_id: "", quantity: "" }]);
+  /* the form */
+  const [modal, setModal] = useState(false);
+  const [lotId, setLotId] = useState("");
   const [supervisor, setSupervisor] = useState("");
   const [workerName, setWorkerName] = useState("");
   const [bora, setBora] = useState("");
   const [workers, setWorkers] = useState("");
   const [labour, setLabour] = useState("");
-  const [variance, setVariance] = useState("");
-  const [varReason, setVarReason] = useState("");
+  const [labourTouched, setLabourTouched] = useState(false);
+  const [sortedKg, setSortedKg] = useState("");
+  const [wasteKg, setWasteKg] = useState("");
   const [note, setNote] = useState("");
-  const [check, setCheck] = useState<Check | null>(null);
+  const [check, setCheck] = useState<CheckResult>(null);
   const [busy, setBusy] = useState(false);
-  const [formErr, setFormErr] = useState("");
+
+  /* the rate editor */
+  const [rateModal, setRateModal] = useState(false);
+  const [rateDraft, setRateDraft] = useState("");
+  const [rateBusy, setRateBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
-    const [l, c, co, sz, e] = await Promise.all([
-      supabase.from("v_stock_lots").select("*").eq("needs_sorting", true).order("received_at", { ascending: true }),
-      supabase.from("material_categories").select("id,name").order("name"),
-      supabase.from("colors").select("id,name").order("name"),
-      supabase.from("sizes").select("id,name").order("name"),
-      /* Only factory floors. `employees` is shared — the Hub's seven people live
-         in the same table (0093), and a sorting supervisor is never one of them. */
-      supabase.from("employees").select("id,name,departments!inner(kind)")
-        .eq("is_active", true).eq("departments.kind", "section").order("name"),
+    const [l, s, j, r] = await Promise.all([
+      supabase.from("v_stock_lots")
+        .select("id,lot_number,item_label,unit,received_qty")
+        .order("received_at", { ascending: false }),
+      supabase.from("employees").select("id,name").eq("is_active", true).order("name"),
+      supabase.from("v_sort_history").select("*").order("sorted_at", { ascending: false }),
+      supabase.from("factory_settings").select("value").eq("key", "sort_rate_per_bora").maybeSingle(),
     ]);
-    if (l.error) setErr(l.error.message);
+    if (l.error || s.error || j.error) setErr((l.error || s.error || j.error)!.message);
     setLots((l.data as Lot[]) ?? []);
-    setCats((c.data as Opt[]) ?? []); setColors((co.data as Opt[]) ?? []);
-    setSizes((sz.data as Opt[]) ?? []); setStaff((e.data as Opt[]) ?? []);
+    setStaff((s.data as Opt[]) ?? []);
+    setJobs((j.data as Job[]) ?? []);
+    setRate(Number((r.data as { value: unknown } | null)?.value ?? 0));
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const visible = useMemo(
-    () => lots.filter((l) => (showClosed ? true : l.status !== "closed")),
-    [lots, showClosed]
-  );
-  const awaiting = lots.filter((l) => l.status !== "closed");
-  const tiedUp = awaiting.reduce((t, l) => t + Number(l.remaining_qty) * Number(l.rate), 0);
+  /* Bora × rate suggests the amount; typing your own number wins and stays
+     won. The suggestion must never fight the person at the keyboard. */
+  useEffect(() => {
+    if (labourTouched) return;
+    const b = parseInt(bora);
+    if (rate > 0 && b > 0) setLabour(String(b * rate));
+  }, [bora, rate, labourTouched]);
 
-  async function openLot(lot: Lot) {
-    setOpen(lot); setCheck(null); setFormErr("");
-    setLines([{ category_id: "", color_id: "", size_id: "", quantity: "" }]);
-    setSupervisor(""); setWorkers(""); setLabour(""); setVariance(""); setVarReason(""); setNote("");
-    if (!supabase) return;
-    const [g, j] = await Promise.all([
-      supabase.from("material_groups").select("has_category,has_color,has_size").eq("id", (lot as unknown as { group_id: string }).group_id).maybeSingle(),
-      supabase.from("sort_jobs").select("id,job_number,sorted_at,worker_count,labour_cost,variance_qty,variance_reason,voided_at,void_reason,employees(name)")
-        .eq("lot_id", lot.id).order("sorted_at"),
-    ]);
-    setGroup((g.data as typeof group) ?? null);
-    setJobs(((j.data ?? []) as unknown as Record<string, unknown>[]).map((r) => ({
-      ...r, employees: Array.isArray(r.employees) ? r.employees[0] ?? null : r.employees,
-    })) as Job[]);
+  function openForm() {
+    setModal(true); setLotId(""); setSupervisor(""); setWorkerName("");
+    setBora(""); setWorkers(""); setLabour(""); setLabourTouched(false);
+    setSortedKg(""); setWasteKg(""); setNote(""); setCheck(null); setErr("");
   }
 
-  const payload = useCallback((dry: boolean) => ({
-    p_lot_id: open?.id,
+  const payload = useMemo(() => ({
+    p_lot_id: lotId || null,
     p_sorted_at: new Date().toISOString(),
     p_supervisor_employee_id: supervisor || null,
     p_worker_count: workers ? parseInt(workers) : null,
-    p_labour_cost: parseFloat(labour) || 0,
-    p_variance_qty: parseFloat(variance) || 0,
-    p_variance_reason: varReason || null,
+    p_labour_cost: labour ? parseFloat(labour) : 0,
+    p_variance_qty: wasteKg ? parseFloat(wasteKg) : 0,
+    p_variance_reason: null,
     p_note: note || null,
-    p_lines: lines
-      .filter((l) => parseFloat(l.quantity) > 0)
-      .map((l) => ({
-        category_id: l.category_id || null, color_id: l.color_id || null,
-        size_id: l.size_id || null, quantity: parseFloat(l.quantity),
-      })),
-    p_dry_run: dry,
-    /* K124. The man who opens the Bora is usually casual labour, not on the
-       payroll — so he gets a name field, not a staff record invented for one
-       afternoon's work. If a supervisor IS picked, the name is ignored and
-       his employee record is the truth. */
+    /* The kg he separated, recorded ONLY so the per-kg rate can be shown.
+       K130's function sums it and moves nothing. */
+    p_lines: sortedKg && parseFloat(sortedKg) > 0
+      ? [{ quantity: parseFloat(sortedKg) }] : [],
     p_packages_sorted: bora ? parseInt(bora) : null,
     p_worker_name: supervisor ? null : (workerName.trim() || null),
-  }), [open, supervisor, workerName, bora, workers, labour, variance, varReason, note, lines]);
+  }), [lotId, supervisor, workerName, bora, workers, labour, sortedKg, wasteKg, note]);
 
   async function run(dry: boolean) {
-    if (!supabase || !open) return;
-    setBusy(true); setFormErr("");
-    const { data, error } = await supabase.rpc("post_sort_job", payload(dry));
+    if (!supabase) return;
+    setErr("");
+    if (!lotId) { setErr("Which delivery did he open? Pick the lot."); return; }
+    setBusy(true);
+    const { data, error } = await supabase.rpc("post_sort_job", { ...payload, p_dry_run: dry });
     setBusy(false);
-    if (error) { setFormErr(error.message); return; }
-    const res = data as Check;
-    setCheck(res);
-    if (!dry && res.ok) { await load(); await openLot(open); setCheck(res); }
+    if (error) { setErr(error.message); setCheck(null); return; }
+    if (dry) { setCheck(data as CheckResult); return; }
+    setModal(false); load();
   }
 
-  /* A session can be undone while its output is still on the shelf. The
-     database refuses once any of it has been issued, and says which
-     material and how much is left — so the message is shown as-is rather
-     than replaced with something vaguer. */
-  async function undo(job: Job) {
-    if (!supabase || !open) return;
-    const why = window.prompt(`Undo ${job.job_number}? The material goes back into the lot.\n\nWhy?`);
-    if (!why || !why.trim()) return;
-    setBusy(true); setFormErr(""); setCheck(null);
-    const { data, error } = await supabase.rpc("void_sort_job", { p_job_id: job.id, p_reason: why.trim() });
-    setBusy(false);
-    if (error) { setFormErr(error.message); return; }
-    const r = data as Record<string, unknown>;
-    await load();
-    const fresh = (await supabase.from("v_stock_lots").select("*").eq("id", open.id).maybeSingle()).data as Lot | null;
-    if (fresh) await openLot(fresh);
-    setFormErr(`${String(r.job)} undone — ${String(r.returned_to_lot)} ${open.unit} back in the lot.`);
+  async function voidJob(j: Job) {
+    if (!supabase) return;
+    const reason = window.prompt(`Remove ${j.job_number}? Give the reason:`);
+    if (!reason?.trim()) return;
+    const { error } = await supabase.rpc("void_sort_job", { p_job_id: j.id, p_reason: reason.trim() });
+    if (error) { setErr(error.message); return; }
+    load();
   }
 
-  const entered = lines.reduce((t, l) => t + (parseFloat(l.quantity) || 0), 0) + (parseFloat(variance) || 0);
-  const overBy = open ? entered - Number(open.remaining_qty) : 0;
-  const passed = !!check && check.ok === true && check.dry_run === true;
+  async function saveRate() {
+    if (!supabase) return;
+    setRateBusy(true);
+    const { error } = await supabase.rpc("set_factory_setting", {
+      p_key: "sort_rate_per_bora", p_value: parseFloat(rateDraft) || 0,
+    });
+    setRateBusy(false);
+    if (error) { setErr(error.message); return; }
+    setRateModal(false); load();
+  }
+
+  /* CSV is built from the rows already on screen, so what you export is
+     exactly what you were looking at — no second query that could disagree.
+     XLS and PDF need a library added to the project; that is a dependency
+     decision, not a page decision, so they arrive as one shared exporter
+     for every tab rather than a one-off here. */
+  function exportCsv() {
+    const head = ["Job", "Date", "Lot", "Material", "Worker", "On payroll",
+                  "Bora", "Sorted", "Waste", "Labour Rs", "Per Bora", "Per unit", "Note", "Removed"];
+    const rows = jobs.map((j) => [
+      j.job_number, new Date(j.sorted_at).toLocaleDateString(), j.lot_number, j.material,
+      j.worker ?? "", j.on_payroll ? "yes" : "no", j.packages_sorted ?? "",
+      j.sorted_qty ?? "", j.variance_qty ?? "", j.labour_cost,
+      j.per_package ?? "", j.per_unit ?? "", j.note ?? "", j.voided_at ? "yes" : "",
+    ]);
+    const esc = (v: unknown) => `"${String(v).replaceAll('"', '""')}"`;
+    const csv = [head, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `sorting-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const totalPaid = jobs.filter((j) => !j.voided_at).reduce((a, j) => a + Number(j.labour_cost || 0), 0);
+  const totalBora = jobs.filter((j) => !j.voided_at).reduce((a, j) => a + Number(j.packages_sorted || 0), 0);
 
   return (
     <>
-      <Topbar title="Sorting" subtitle="Bulk material waiting to be split into what it actually is" />
-      <div className="space-y-5 px-6 pb-10">
-        {!isSupabaseConfigured ? (
-          <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to see lots.</div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="rounded-card bg-amber-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Lots open</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">{awaiting.length}</p>
-              </div>
-              <div className="rounded-card bg-periwinkle-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Value not yet identified</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">{rs(tiedUp)}</p>
-              </div>
-              <div className="rounded-card bg-salmon-soft p-4 shadow-soft">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Oldest waiting</p>
-                <p className="mt-1 text-[22px] font-extrabold text-ink">
-                  {awaiting.length ? `${Math.max(...awaiting.map((l) => l.age_days))} days` : "—"}
-                </p>
-              </div>
-            </div>
+      <Topbar title="Sorting" subtitle="Who opened the Bora, and what it cost — stock is not touched here" />
 
-            {err && <div className="rounded-xl2 bg-danger-soft px-4 py-2.5 text-[13px] text-danger">{err}</div>}
+      <div className="space-y-5 px-6 pb-12">
+        {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
 
-            <div className="rounded-card bg-surface shadow-card">
-              <div className="flex items-center justify-between px-5 py-4">
-                <h3 className="text-[14px] font-extrabold text-ink">Lots</h3>
-                <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-muted">
-                  <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} className="h-3.5 w-3.5 accent-[#141414]" />
-                  Show closed
-                </label>
-              </div>
-              {loading ? (
-                <p className="px-5 pb-5 text-[13px] text-muted">Loading…</p>
-              ) : visible.length === 0 ? (
-                <p className="px-5 pb-5 text-[13px] text-muted">
-                  Nothing waiting. Every receipt gets a batch number, but only batches received without a colour, category or size appear here — the rest arrive already identified.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-[13px]">
-                    <thead className="border-y border-line bg-panel text-[11.5px] uppercase tracking-wide text-muted">
-                      <tr>
-                        <th className="px-5 py-2.5 text-left">Lot</th>
-                        <th className="px-3 py-2.5 text-left">Material</th>
-                        <th className="px-3 py-2.5 text-right">Received</th>
-                        <th className="px-3 py-2.5 text-right">Sorted</th>
-                        <th className="px-3 py-2.5 text-right">Lost</th>
-                        <th className="px-3 py-2.5 text-right">Left</th>
-                        <th className="px-3 py-2.5 text-left">Status</th>
-                        <th className="px-5 py-2.5" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visible.map((l) => (
-                        <tr key={l.id} className="border-b border-line/60 last:border-0">
-                          <td className="px-5 py-3">
-                            <span className="font-semibold text-ink">{l.lot_number}</span>
-                            <span className="mt-0.5 block text-[11.5px] text-muted">{l.grn_number} · {l.supplier ?? "—"} · {l.age_days}d</span>
-                          </td>
-                          <td className="px-3 py-3 text-ink/80">{l.item_label}</td>
-                          <td className="px-3 py-3 text-right tabular-nums">{kg(l.received_qty, l.unit)}</td>
-                          <td className="px-3 py-3 text-right tabular-nums text-ink/70">{kg(l.sorted_qty, l.unit)}</td>
-                          <td className="px-3 py-3 text-right tabular-nums text-ink/70">{Number(l.variance_qty) > 0 ? kg(l.variance_qty, l.unit) : "—"}</td>
-                          <td className="px-3 py-3 text-right font-semibold tabular-nums text-ink">{kg(l.remaining_qty, l.unit)}</td>
-                          <td className="px-3 py-3">
-                            <span className={`rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${
-                              l.status === "closed" ? "bg-panel text-muted"
-                              : l.status === "part sorted" ? "bg-periwinkle-soft text-ink"
-                              : "bg-amber-soft text-ink"}`}>{l.status}</span>
-                          </td>
-                          <td className="px-5 py-3 text-right">
-                            {l.status !== "closed" && (
-                              <button onClick={() => openLot(l)} className="rounded-full bg-ink px-3.5 py-1.5 text-[12.5px] font-semibold text-white">Sort</button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-card border border-line bg-surface p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Bora opened</p>
+            <p className="mt-1.5 text-[22px] font-extrabold tracking-tight text-ink">{totalBora.toLocaleString()}</p>
+          </div>
+          <div className="rounded-card border border-line bg-surface p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Paid for sorting</p>
+            <p className="mt-1.5 text-[22px] font-extrabold tracking-tight text-ink">{rs(totalPaid)}</p>
+          </div>
+          <button
+            onClick={() => { if (canSettings) { setRateDraft(String(rate || "")); setRateModal(true); } }}
+            disabled={!canSettings}
+            className="rounded-card border border-line bg-surface p-4 text-left transition enabled:hover:border-ink/25 disabled:cursor-default"
+            title={canSettings ? "Change the rate" : "Only an admin can change the rate"}
+          >
+            <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-hint">
+              Rate per Bora {canSettings && <Pencil size={11} />}
+            </p>
+            <p className="mt-1.5 text-[22px] font-extrabold tracking-tight text-ink">
+              {rate > 0 ? rs(rate) : <span className="text-[15px] font-semibold text-muted">set your rate</span>}
+            </p>
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <h2 className="text-[15px] font-bold text-ink">Sorting history</h2>
+          <div className="flex gap-2">
+            <button onClick={exportCsv} disabled={jobs.length === 0}
+              className="flex items-center gap-1.5 rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-ink/80 hover:bg-panel disabled:opacity-40">
+              <Download size={14} /> CSV
+            </button>
+            {canSort && (
+              <button onClick={openForm}
+                className="flex items-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white">
+                <PackageOpen size={14} /> Record sorting
+              </button>
+            )}
+          </div>
+        </div>
+
+        {loading && <p className="text-[13px] text-hint">Loading…</p>}
+
+        {!loading && jobs.length === 0 && (
+          <div className="rounded-card border border-line bg-surface p-10 text-center">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-panel text-ink"><PackageOpen size={24} /></span>
+            <h3 className="mt-4 text-[16px] font-extrabold text-ink">Nothing recorded yet</h3>
+            <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-muted">
+              When a man opens Bora and gets paid, record it here. It is a labour record — stock does not change.
+            </p>
+          </div>
         )}
-      </div>
 
-      <Modal open={!!open} onClose={() => setOpen(null)} wide
-        title={open ? `Sort ${open.lot_number}` : ""}
-        subtitle={open ? `${open.item_label} · ${kg(open.remaining_qty, open.unit)} left of ${kg(open.received_qty, open.unit)} at ${rs(open.rate)}/${open.unit}` : ""}>
-        {open && (
-          <div className="space-y-4">
-            {jobs.length > 0 && (
-              <div className="rounded-xl2 bg-canvas p-3.5">
-                <p className="mb-2 text-[11.5px] font-semibold uppercase tracking-wide text-muted">Earlier sessions</p>
-                {jobs.map((j) => (
-                  <div key={j.id} className="flex items-start justify-between gap-3 py-0.5">
-                    <p className={`text-[12.5px] ${j.voided_at ? "text-muted line-through" : "text-ink/75"}`}>
-                      {j.job_number} · {new Date(j.sorted_at).toLocaleDateString()} · {j.employees?.name ?? "no supervisor"}
-                      {Number(j.variance_qty) > 0 && ` · lost ${j.variance_qty} (${j.variance_reason ?? "no reason given"})`}
-                    </p>
-                    {j.voided_at ? (
-                      <span className="shrink-0 text-[11.5px] font-semibold text-muted">undone — {j.void_reason}</span>
-                    ) : (
-                      <button onClick={() => undo(j)} disabled={busy}
-                        className="flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold text-ink/70 hover:bg-panel disabled:opacity-40">
-                        <Undo2 size={12} /> Undo
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Field label="Supervisor">
-                <select value={supervisor} onChange={(e) => { setSupervisor(e.target.value); setCheck(null); }} className={inp}>
-                  <option value="">Nobody named…</option>
-                  {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </Field>
-              <Field label={`Bora opened`}><input value={bora} onChange={(e) => { setBora(e.target.value); setCheck(null); }} inputMode="numeric" placeholder="10" className={inp} /></Field>
-              <Field label="Workers"><input value={workers} onChange={(e) => { setWorkers(e.target.value); setCheck(null); }} inputMode="numeric" className={inp} /></Field>
-              <Field label="Labour paid"><input value={labour} onChange={(e) => { setLabour(e.target.value); setCheck(null); }} inputMode="decimal" className={inp} /></Field>
-            </div>
-
-            {/* Only asked for when nobody on the payroll was picked. A sort job
-                with no name at all is a payment to nobody, and the database
-                refuses it — better to ask here than to fail on submit. */}
-            {!supervisor && (
-              <Field label="Who did the sorting?">
-                <input value={workerName} onChange={(e) => { setWorkerName(e.target.value); setCheck(null); }} placeholder="his name — casual labour is fine" className={inp} />
-              </Field>
-            )}
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Field label={`Lost (${open.unit})`}><input value={variance} onChange={(e) => { setVariance(e.target.value); setCheck(null); }} inputMode="decimal" className={inp} /></Field>
-            </div>
-            {parseFloat(variance) > 0 && (
-              <Field label="Why was it lost?">
-                <input value={varReason} onChange={(e) => { setVarReason(e.target.value); setCheck(null); }} placeholder="dust, offcuts, torn edges…" className={inp} />
-              </Field>
-            )}
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[13px] font-extrabold text-ink">What came out</p>
-                <button onClick={() => { setLines((l) => [...l, { category_id: "", color_id: "", size_id: "", quantity: "" }]); setCheck(null); }}
-                  className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">
-                  <Plus size={14} /> Add
-                </button>
-              </div>
-              <div className="space-y-2">
-                {lines.map((l, i) => (
-                  <div key={i} className="flex items-end gap-2 rounded-xl2 border border-line bg-canvas/60 p-2.5">
-                    {group?.has_category && (
-                      <select value={l.category_id} onChange={(e) => { setLines((ls) => ls.map((x, j) => j === i ? { ...x, category_id: e.target.value } : x)); setCheck(null); }} className={inp}>
-                        <option value="">Category…</option>
-                        {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    )}
-                    {group?.has_color && (
-                      <select value={l.color_id} onChange={(e) => { setLines((ls) => ls.map((x, j) => j === i ? { ...x, color_id: e.target.value } : x)); setCheck(null); }} className={inp}>
-                        <option value="">Colour…</option>
-                        {colors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    )}
-                    {group?.has_size && (
-                      <select value={l.size_id} onChange={(e) => { setLines((ls) => ls.map((x, j) => j === i ? { ...x, size_id: e.target.value } : x)); setCheck(null); }} className={inp}>
-                        <option value="">Size…</option>
-                        {sizes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    )}
-                    <input value={l.quantity} onChange={(e) => { setLines((ls) => ls.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x)); setCheck(null); }}
-                      inputMode="decimal" placeholder={open.unit} className={`${inp} max-w-[110px]`} />
-                    <button onClick={() => { setLines((ls) => ls.length === 1 ? ls : ls.filter((_, j) => j !== i)); setCheck(null); }}
-                      disabled={lines.length === 1} className="rounded-full p-2 text-muted hover:bg-danger-soft hover:text-danger disabled:opacity-30"><Trash2 size={15} /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={`flex items-center justify-between rounded-xl2 px-3.5 py-2.5 text-[13px] ${
-              overBy > 0.0005 ? "bg-danger-soft text-danger" : "bg-canvas text-ink/75"}`}>
-              <span className="flex items-center gap-2">
-                <Scale size={15} />
-                Entered {kg(entered, open.unit)} against {kg(open.remaining_qty, open.unit)} left
-              </span>
-              {overBy > 0.0005 && <span className="font-semibold">over by {kg(overBy, open.unit)}</span>}
-            </div>
-
-            {formErr && (
-              <div className="flex items-start gap-2 rounded-xl2 bg-danger-soft px-3.5 py-2.5 text-[13px] text-danger">
-                <AlertTriangle size={15} className="mt-0.5 shrink-0" />{formErr}
-              </div>
-            )}
-
-            {check && (
-              <div className={`rounded-xl2 px-3.5 py-3 text-[13px] ${check.ok ? "bg-success-soft text-ink" : "bg-danger-soft text-danger"}`}>
-                {check.ok ? (
-                  check.dry_run ? (
-                    <>
-                      <p className="font-semibold">Checks out — nothing written yet.</p>
-                      <p className="mt-1 text-ink/75">
-                        {String(check.sorted)} {open.unit} sorted worth {rs(Number(check.sorted_value))}
-                        {Number(check.variance) > 0 && `, ${String(check.variance)} ${open.unit} lost costing ${rs(Number(check.variance_cost))} (${String(check.variance_pct)}%)`}
-                        . {String(check.remaining_after)} {open.unit} would remain{check.closes_lot ? ", closing the lot" : ""}.
-                      </p>
-                      {/* K124 — what the work costs, two ways, before it is paid.
-                          Per Bora is what you argue about with the man. Per unit
-                          is what lets you compare him against the next one. */}
-                      {Number(check.labour_cost) > 0 && (
-                        <p className="mt-1.5 text-ink/75">
-                          {String(check.worker)} paid {rs(Number(check.labour_cost))}
-                          {check.packages ? ` for ${String(check.packages)} Bora — ${rs(Number(check.per_package))} each` : ""}
-                          {check.per_kg ? `, ${rs(Number(check.per_kg))} per ${open.unit}` : ""}.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="font-semibold">Recorded as {String(check.job)}. {String(check.remaining_after)} {open.unit} left{check.lot_closed ? " — lot closed." : "."}</p>
-                  )
-                ) : (
-                  <>
-                    <p className="font-semibold">{String(check.guard)} — nothing was written.</p>
-                    <p className="mt-1">{String(check.meaning)}</p>
-                  </>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-              <button onClick={() => setOpen(null)} className="rounded-full border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Close</button>
-              <button onClick={() => run(true)} disabled={busy}
-                className="flex items-center gap-1.5 rounded-full border border-line px-4 py-2.5 text-[13px] font-semibold text-ink hover:bg-panel disabled:opacity-40">
-                <Layers size={15} /> {busy ? "Checking…" : "Check"}
-              </button>
-              <button onClick={() => run(false)} disabled={busy || !passed}
-                title={passed ? "" : "Run Check first"}
-                className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-40">
-                {passed ? <Check size={15} /> : <Lock size={15} />} Record
-              </button>
+        {!loading && jobs.length > 0 && (
+          <div className="overflow-hidden rounded-card border border-line bg-surface">
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-hint">
+                    <th className="px-4 py-2.5 font-bold">Job</th>
+                    <th className="px-4 py-2.5 font-bold">Worker</th>
+                    <th className="px-4 py-2.5 font-bold">Lot</th>
+                    <th className="px-4 py-2.5 text-right font-bold">Bora</th>
+                    <th className="px-4 py-2.5 text-right font-bold">Sorted</th>
+                    <th className="px-4 py-2.5 text-right font-bold">Paid</th>
+                    <th className="px-4 py-2.5 text-right font-bold">Per Bora</th>
+                    <th className="px-4 py-2.5 font-bold">Note</th>
+                    <th className="px-4 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((j) => (
+                    <tr key={j.id} className={`border-b border-line/60 last:border-0 ${j.voided_at ? "opacity-45" : ""}`}>
+                      <td className="px-4 py-2.5">
+                        <span className="font-semibold text-ink">{j.job_number}</span>
+                        <span className="block text-[11px] text-hint">{new Date(j.sorted_at).toLocaleDateString()}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-ink">
+                        {j.worker ?? "—"}
+                        {j.worker && !j.on_payroll && <span className="ml-1.5 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold text-muted">casual</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-muted">{j.lot_number}</td>
+                      <td className="px-4 py-2.5 text-right tnum text-ink">{num(j.packages_sorted)}</td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">{num(j.sorted_qty)}</td>
+                      <td className="px-4 py-2.5 text-right tnum font-semibold text-ink">{rs(j.labour_cost)}</td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">{j.per_package == null ? "—" : rs(j.per_package)}</td>
+                      <td className="max-w-[180px] truncate px-4 py-2.5 text-[12px] text-hint">{j.voided_at ? `removed — ${j.note ?? ""}` : (j.note ?? "")}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {canSort && !j.voided_at && (
+                          <button onClick={() => voidJob(j)} title="Remove this record"
+                            className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-danger">
+                            <Undo2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
+      </div>
+
+      {/* ---------------- record a sorting job ---------------- */}
+      <Modal open={modal} onClose={() => setModal(false)} title="Record sorting">
+        <Field label="Which delivery did he open? *">
+          <select value={lotId} onChange={(e) => { setLotId(e.target.value); setCheck(null); }} className={inp}>
+            <option value="">Choose the lot…</option>
+            {lots.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.lot_number} — {l.item_label} · {num(l.received_qty)} {l.unit}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Field label="Supervisor">
+            <select value={supervisor} onChange={(e) => { setSupervisor(e.target.value); setCheck(null); }} className={inp}>
+              <option value="">Nobody on payroll…</option>
+              {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          {!supervisor && (
+            <Field label="Who did it? *">
+              <input value={workerName} onChange={(e) => { setWorkerName(e.target.value); setCheck(null); }}
+                placeholder="his name — casual is fine" className={inp} />
+            </Field>
+          )}
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Field label="Bora opened *">
+            <input value={bora} onChange={(e) => { setBora(e.target.value); setCheck(null); }}
+              inputMode="numeric" placeholder="25" className={inp} />
+          </Field>
+          <Field label="Workers">
+            <input value={workers} onChange={(e) => { setWorkers(e.target.value); setCheck(null); }}
+              inputMode="numeric" className={inp} />
+          </Field>
+          <Field label={rate > 0 ? `Paid (${rs(rate)}/Bora)` : "Paid"}>
+            <input value={labour}
+              onChange={(e) => { setLabour(e.target.value); setLabourTouched(true); setCheck(null); }}
+              inputMode="decimal" className={inp} />
+          </Field>
+          <Field label="Kg sorted (opt)">
+            <input value={sortedKg} onChange={(e) => { setSortedKg(e.target.value); setCheck(null); }}
+              inputMode="decimal" className={inp} />
+          </Field>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Field label="Kg waste (opt)">
+            <input value={wasteKg} onChange={(e) => { setWasteKg(e.target.value); setCheck(null); }}
+              inputMode="decimal" className={inp} />
+          </Field>
+          <Field label="Note (opt)">
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. black pile for orders, light for retail" className={inp} />
+          </Field>
+        </div>
+
+        {check && (
+          <div className="mt-4 rounded-xl2 border border-line bg-panel px-3.5 py-3 text-[12.5px]">
+            <p className="flex items-center gap-1.5 font-semibold text-ink"><Check size={14} /> Checks out — nothing written yet.</p>
+            <p className="mt-1 text-ink/75">
+              {String(check.worker)} · {String(check.packages ?? "?")} Bora · {rs(Number(check.labour_cost))}
+              {check.per_package != null && ` — ${rs(Number(check.per_package))} per Bora`}
+              {check.per_unit != null && `, ${rs(Number(check.per_unit))} per kg`}.
+            </p>
+            <p className="mt-1 text-[11.5px] text-hint">Stock is not changed by this. It is a labour record.</p>
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={() => setModal(false)} disabled={busy}
+            className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+          {!check ? (
+            <button onClick={() => run(true)} disabled={busy}
+              className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+              {busy && <Loader2 size={15} className="animate-spin" />} Check
+            </button>
+          ) : (
+            <button onClick={() => run(false)} disabled={busy}
+              className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+              {busy && <Loader2 size={15} className="animate-spin" />} Save
+            </button>
+          )}
+        </div>
+      </Modal>
+
+      {/* ---------------- the per-Bora rate ---------------- */}
+      <Modal open={rateModal} onClose={() => setRateModal(false)} title="Rate per Bora">
+        <Field label="What one opened Bora pays, in rupees">
+          <input value={rateDraft} onChange={(e) => setRateDraft(e.target.value)} inputMode="decimal"
+            placeholder="e.g. 68" className={inp} autoFocus />
+        </Field>
+        <p className="mt-2 text-[12px] leading-relaxed text-hint">
+          This fills the Paid box in automatically — Bora × rate — and stays editable on each job,
+          because the agreed rate and what was paid on the day are allowed to differ.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={() => setRateModal(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+          <button onClick={saveRate} disabled={rateBusy}
+            className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+            {rateBusy && <Loader2 size={15} className="animate-spin" />} Save rate
+          </button>
+        </div>
       </Modal>
     </>
   );
