@@ -67,7 +67,7 @@ export default function ProcessPage() {
       supabase.from("v_process_pending").select("*").order("assigned_at", { ascending: true }),
       supabase.from("production_orders").select("id,order_number,quantity,articles(code,name)").neq("status", "cancelled").order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name,process_order").eq("kind", "section").eq("in_process", true).order("process_order"),
-      supabase.from("employees").select("id,name,departments!inner(kind)").eq("is_active", true).eq("departments.kind", "section").order("name"),
+      supabase.from("v_factory_employees").select("id,name,departments!inner(kind)").eq("departments.kind", "section").order("name"),
       supabase.from("v_process_payable").select("*").order("payable", { ascending: false }),
       supabase.from("piece_rates").select("id,rate,effective_from,departments(name),articles(code)").order("effective_from", { ascending: false }),
     ]);

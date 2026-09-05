@@ -78,7 +78,7 @@ export default function SortingPage() {
       supabase.from("v_stock_lots")
         .select("id,lot_number,item_label,unit,received_qty")
         .order("received_at", { ascending: false }),
-      supabase.from("employees").select("id,name").eq("is_active", true).order("name"),
+      supabase.from("v_factory_employees").select("id,name").order("name"),
       supabase.from("v_sort_history").select("*").order("sorted_at", { ascending: false }),
       supabase.from("factory_settings").select("value").eq("key", "sort_rate_per_bora").maybeSingle(),
     ]);
