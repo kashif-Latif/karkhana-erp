@@ -56,6 +56,13 @@ export default function DisputesPage() {
   const [courier, setCourier] = useState("All");
   const [cpr, setCpr] = useState("All");
   const [picked, setPicked] = useState<string[]>([]);
+  /* The date belongs here, not in the view. Four fixed dates have been written
+     into this system and every one had to be undone; a filter somebody can
+     change costs nothing and never goes stale. Defaults to the last 60 days,
+     which is where the work is, and "All time" is one click away. */
+  const [preset, setPreset] = useState("60d");
+  const [cf, setCf] = useState("");
+  const [ct, setCt] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -78,9 +85,24 @@ export default function DisputesPage() {
     [rows],
   );
 
+  const window = useMemo(() => {
+    const d = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+    switch (preset) {
+      case "7d":   return { from: d(7),  to: "" };
+      case "30d":  return { from: d(30), to: "" };
+      case "60d":  return { from: d(60), to: "" };
+      case "90d":  return { from: d(90), to: "" };
+      case "all":  return { from: "",    to: "" };
+      case "custom": return { from: cf,  to: ct };
+      default:     return { from: d(60), to: "" };
+    }
+  }, [preset, cf, ct]);
+
   const shown = useMemo(() => {
     const n = q.trim().toLowerCase().replace("#", "");
     return rows.filter((r) =>
+      (!window.from || (r.return_date ?? "") >= window.from) &&
+      (!window.to   || (r.return_date ?? "") <= window.to) &&
       (courier === "All" || r.courier === courier) &&
       (cpr === "All" || r.cpr_number === cpr) &&
       (!n || [r.order_number, r.tracking_id, r.customer_name, r.city]
@@ -185,7 +207,29 @@ export default function DisputesPage() {
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      {/* Filter by when the parcel came back — the date that matters for a
+          dispute, since that is what the courier billed for. */}
+      <div className="mt-4 flex flex-wrap items-center gap-1.5">
+        {[["7d","7 days"],["30d","30 days"],["60d","60 days"],["90d","90 days"],["all","All time"],["custom","Custom"]]
+          .map(([k, label]) => (
+          <button key={k} onClick={() => setPreset(k)}
+                  className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold transition ${
+                    preset === k ? "bg-ink text-white dark:bg-white dark:text-[#141414]"
+                                 : "border border-line text-muted hover:bg-panel dark:border-white/10 dark:text-[#a89f93]"}`}>
+            {label}
+          </button>
+        ))}
+        {preset === "custom" && (
+          <>
+            <input type="date" value={cf} onChange={(e) => setCf(e.target.value)}
+                   className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
+            <input type="date" value={ct} onChange={(e) => setCt(e.target.value)}
+                   className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px] dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
+          </>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)}
                placeholder="Search order, tracking, customer"
                className="w-56 rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
@@ -22,7 +22,13 @@ const NAV: NavItem[] = [
       { label: "Shipments", href: "/online/logistics", Icon: Truck },
       { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },
   ] },
-  { label: "Finance", href: "/online/finance", Icon: Wallet },
+  /* Finance gains children for the same reason Logistics has them: disputes are
+     a separate job with its own worklist, not a tab inside the settlements
+     screen. Without an entry here the page existed and nothing pointed at it. */
+  { label: "Finance", href: "/online/finance", Icon: Wallet, children: [
+      { label: "Settlements", href: "/online/finance", Icon: Wallet },
+      { label: "Disputes", href: "/online/finance/disputes", Icon: AlertTriangle },
+  ] },
   /* People, grouped. The department's accounts person adds staff and marks
      attendance in one place, because that is one job. Logins and permissions
      stay in Administration — adding a person and granting them access to money
