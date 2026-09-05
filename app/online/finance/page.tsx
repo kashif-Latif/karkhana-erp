@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock, Truck } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import ReturnsPanel from "@/components/ReturnsPanel";
@@ -195,6 +196,13 @@ export default function FinancePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[20px] font-extrabold sm:text-[22px] tracking-tight text-ink dark:text-[#f4f1ea]">Finance</h1>
+          {/* Disputes are money on both sides — COD counted as revenue in
+              Shopify, and a return charge already paid. Worth a way in from
+              here rather than only from inside each settlement. */}
+          <Link href="/online/finance/disputes"
+                className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-soft px-3 py-1.5 text-[12.5px] font-semibold text-amber-900 transition hover:bg-amber-100">
+            Disputes — settled returns still open in Shopify
+          </Link>
           <p className="mt-1 text-[13px] text-muted dark:text-[#a89f93]">CPR reconciliation, and pending &amp; received payments. Returns moved to Logistics.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

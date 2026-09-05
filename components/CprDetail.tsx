@@ -56,6 +56,15 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     delivered: number;
   } | null>(null);
   const [shopMsg, setShopMsg] = useState("");
+  /* WHICH OF THEM YOU ACTUALLY RECEIVED.
+     A settlement can list seventeen returns and you may have ten boxes in your
+     hand. Closing all seventeen would mark seven as dealt with when nobody has
+     seen them — and they would vanish from the only list that would have made
+     somebody look. Empty selection means all, so the common case still takes
+     one press. */
+  const [picked, setPicked] = useState<string[]>([]);
+  const togglePick = (k: string) =>
+    setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
   const cpr = String(row.cpr_number ?? "");
 
   /* WHAT THIS SETTLEMENT MEANS FOR SHOPIFY.
@@ -114,9 +123,13 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
   async function pushOne(action: "close" | "deliver" | "paid" | "cancel") {
     if (!supabase) return;
     const returns = action === "close" || action === "cancel";
-    const wanted = returns
+    let wanted = returns
       ? parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS")
       : parcels.filter((p) => p.delivery_status === "Delivered");
+    // A chosen subset wins. Nothing chosen means all of them, as before.
+    if (returns && picked.length) {
+      wanted = wanted.filter((p) => picked.includes(`${p.store_code}|${p.order_number}`));
+    }
     const tracking = [...new Set(wanted.map((p) => p.tracking_id).filter(Boolean))] as string[];
     if (!tracking.length) return;
     const { data, error } = await supabase.functions.invoke("shopify-writeback", {
@@ -142,9 +155,13 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     // "Send again" retries both halves, since the automatic push does both.
     if (action === "paid") { await pushOne("paid"); await pushOne("deliver"); setBusy(""); return; }
     const returns = action === "close" || action === "cancel";
-    const wanted = returns
+    let wanted = returns
       ? parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS")
       : parcels.filter((p) => p.delivery_status === "Delivered");
+    // A chosen subset wins. Nothing chosen means all of them, as before.
+    if (returns && picked.length) {
+      wanted = wanted.filter((p) => picked.includes(`${p.store_code}|${p.order_number}`));
+    }
     const orders = [...new Set(wanted.map((p) => p.order_number).filter(Boolean))] as string[];
     if (!orders.length) { setBusy(""); setShopMsg("Nothing of that kind in this settlement."); return; }
     const { data, error } = await supabase.functions.invoke("shopify-writeback", {
@@ -484,7 +501,7 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                   <span className="flex gap-2 shrink-0">
                     <button disabled={!!busy} onClick={() => pushToShopify("close")}
                             className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-[#141414]">
-                      Close them
+                      {picked.length ? `Close ${picked.length}` : "Close all"}
                     </button>
                     {/* Cancelling is permanent in Shopify — there is no un-cancel,
                         only recreating the order and losing its number. So it asks
@@ -492,29 +509,58 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                     <button disabled={!!busy}
                             onClick={async () => {
                               if (!(await confirm({
-                                title: `Cancel ${shop?.open.length} order${shop?.open.length === 1 ? "" : "s"} in Shopify?`,
+                                title: `Cancel ${picked.length || shop?.open.length} order${(picked.length || shop?.open.length) === 1 ? "" : "s"} in Shopify?`,
                                 body: "Shopify has no un-cancel. The only way back is recreating the order, losing its number and history. Closing archives them instead and can be reversed.",
                                 confirmLabel: "Cancel them permanently",
                               }))) return;
                               pushToShopify("cancel");
                             }}
                             className="rounded-full border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
-                      Cancel instead
+                      {picked.length ? `Cancel ${picked.length}` : "Cancel all"}
                     </button>
                   </span>
 
                   {/* Wraps to a second line on a phone; each order is its own
                       chip so a long list stays readable rather than becoming a
                       wall of commas. */}
-                  <ul className="mt-1 flex w-full flex-wrap gap-1.5">
-                    {shop.open.map((o) => (
-                      <li key={`${o.store}-${o.order}`}
-                          className="flex items-baseline gap-1.5 rounded-full border border-amber-300 bg-white/70 px-2.5 py-1 text-[11.5px]">
-                        <span className="font-semibold text-amber-900">{o.store}</span>
-                        <span className="font-mono text-amber-900">{o.order}</span>
-                        <span className="tabular-nums text-amber-700">{money(o.cod)}</span>
-                      </li>
-                    ))}
+                  <div className="mt-1 flex w-full items-center justify-between gap-2 text-[11.5px] text-amber-800">
+                    <span>
+                      {picked.length
+                        ? `${picked.length} of ${shop.open.length} selected — only these will be touched`
+                        : "Tap the ones you have received. None selected means all of them."}
+                    </span>
+                    {picked.length > 0 && (
+                      <button onClick={() => setPicked([])}
+                              className="shrink-0 font-semibold underline underline-offset-2">
+                        clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Each order is its own chip, and each chip is a choice. A
+                      settlement can list seventeen returns when ten boxes are on
+                      the shelf; closing all seventeen would mark seven as dealt
+                      with that nobody has seen. */}
+                  <ul className="mt-1.5 flex w-full flex-wrap gap-1.5">
+                    {shop.open.map((o) => {
+                      const k = `${o.store}|${o.order}`;
+                      const on = picked.includes(k);
+                      return (
+                        <li key={k}>
+                          <button type="button" onClick={() => togglePick(k)}
+                                  aria-pressed={on}
+                                  className={`flex items-baseline gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] transition ${
+                                    on ? "border-emerald-500 bg-emerald-100 ring-1 ring-emerald-400"
+                                       : "border-amber-300 bg-white/70 hover:bg-white"}`}>
+                            <span className={on ? "font-bold text-emerald-800" : "font-semibold text-amber-900"}>
+                              {on ? "✓" : ""} {o.store}
+                            </span>
+                            <span className={`font-mono ${on ? "text-emerald-900" : "text-amber-900"}`}>{o.order}</span>
+                            <span className={`tabular-nums ${on ? "text-emerald-700" : "text-amber-700"}`}>{money(o.cod)}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
