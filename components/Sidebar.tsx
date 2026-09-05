@@ -32,7 +32,8 @@ const NAV: NavItem[] = [
      many of it. They were two separate menu entries for no reason. */
   { label: "Order", Icon: ClipboardList, children: [
     { label: "Articles", href: "/articles" },
-    { label: "Orders", href: "/orders" },
+    { label: "Order by cloth", href: "/orders" },
+    { label: "Other material order", href: "/orders?tab=other" },
   ] },
   /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
      are labels on the work, not gates a piece passes through one at a time —

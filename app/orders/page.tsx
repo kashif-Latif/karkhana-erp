@@ -173,17 +173,38 @@ export default function Orders() {
       [`${m.id}|${m.material}|${m.quantity}|${m.line_value}`, m])).values()));
   }, []);
   useEffect(() => { if (section === "other") loadOther(); }, [section, loadOther]);
+  useEffect(() => {
+    if (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("tab") === "other") setSection("other");
+  }, []);
+
+  /* Search runs on the number — which IS the barcode (PO-…, ISS-…) — plus
+     article and material, so a scanner pointed at a printed order finds it.
+     Dates: same day in both boxes = that one day; different = the range. */
+  const [q, setQ] = useState("");
+  const [dFrom, setDFrom] = useState("");
+  const [dTo, setDTo] = useState("");
+  const inRange = (iso: string) => {
+    const day = String(iso).slice(0, 10);
+    if (dFrom && day < dFrom) return false;
+    if (dTo && day > dTo) return false;
+    return true;
+  };
+  const hit = (...vals: (string | null | undefined)[]) =>
+    !q.trim() || vals.some((v) => String(v ?? "").toLowerCase().includes(q.trim().toLowerCase()));
+  const fRaw = (o: Order) => hit(o.order_number, o.article?.name, o.article?.code) && inRange(o.created_at);
+  const fOther = (m: OtherOrder) => hit(m.movement_number, m.material, m.order_number) && inRange(m.moved_at);
 
   const rawTable = (): ExportTable => ({
     title: "raw-material-orders",
     headers: ["Order", "Article", "Pieces", "Target", "Placed", "Status"],
-    rows: orders.map((o) => [o.order_number, o.article?.name ?? "", o.quantity,
+    rows: orders.filter(fRaw).map((o) => [o.order_number, o.article?.name ?? "", o.quantity,
       fmtDate(o.target_date), when(o.created_at), o.status]),
   });
   const otherTable = (): ExportTable => ({
     title: "other-material-orders",
     headers: ["Number", "Date", "Production order", "Material", "Qty", "Unit", "Price", "Value Rs"],
-    rows: otherOrders.map((m) => [m.movement_number, when(m.moved_at), m.order_number ?? "",
+    rows: otherOrders.filter(fOther).map((m) => [m.movement_number, when(m.moved_at), m.order_number ?? "",
       m.material, m.quantity, m.unit, m.unit_price ?? "batch rate", m.line_value]),
   });
 
@@ -402,8 +423,12 @@ export default function Orders() {
 
   async function doDelete() {
     if (!supabase || !detail) return;
+    /* Deleting an order puts its material BACK on the shelf first (K135) —
+       so the reason travels into the ledger next to every restored kilo. */
+    const reason = window.prompt(`Delete ${detail.order_number}? Material returns to stock. Give the reason:`);
+    if (!reason?.trim()) return;
     setDelErr(""); setDeleting(true);
-    const { error } = await supabase.rpc("delete_production_order", { p_id: detail.id });
+    const { error } = await supabase.rpc("delete_production_order", { p_order_id: detail.id, p_reason: reason.trim() });
     setDeleting(false);
     if (error) { setDelErr(error.message); return; }
     setDetail(null); load();
@@ -452,6 +477,20 @@ export default function Orders() {
               </div>
             </div>
 
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <input value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="Search number / barcode / article…"
+                className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
+              <input type="date" value={dFrom} onChange={(e) => setDFrom(e.target.value)}
+                className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none" />
+              <span className="text-[12px] text-hint">to</span>
+              <input type="date" value={dTo} onChange={(e) => setDTo(e.target.value)}
+                className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none" />
+              {(q || dFrom || dTo) && (
+                <button onClick={() => { setQ(""); setDFrom(""); setDTo(""); }}
+                  className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-ink/60 hover:bg-panel">Clear</button>
+              )}
+            </div>
             {section === "other" ? (
               otherOrders.length === 0 ? (
                 <div className="rounded-card bg-surface p-10 text-center shadow-card">
@@ -469,7 +508,7 @@ export default function Orders() {
                       <th className="px-5 py-3 font-semibold">Date</th>
                     </tr></thead>
                     <tbody>
-                      {otherOrders.map((m, i) => (
+                      {otherOrders.filter(fOther).map((m, i) => (
                         <tr key={`${m.id}-${i}`} className="border-b border-line/60 last:border-0">
                           <td className="px-5 py-3 font-mono text-[12px] text-ink">{m.movement_number}</td>
                           <td className="px-5 py-3 text-ink/80">{m.order_number ?? "—"}</td>
@@ -499,7 +538,7 @@ export default function Orders() {
                     <th className="px-5 py-3 font-semibold">Placed</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
-                    {orders.filter((o) => String(o.order_number || "").startsWith("PO")).map((o) => {
+                    {orders.filter((o) => String(o.order_number || "").startsWith("PO")).filter(fRaw).map((o) => {
                       const st = STATUS[o.status] || STATUS.open;
                       return (
                         <tr key={o.id} className="border-b border-line/60 last:border-0">
