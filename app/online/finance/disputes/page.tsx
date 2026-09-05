@@ -53,6 +53,14 @@ export default function DisputesPage() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [q, setQ] = useState("");
+  /* The search runs against rows already in memory, but re-filtering on every
+     keystroke re-renders the whole table — which is what made typing feel
+     sticky. A short delay means one filter per pause, not one per letter. */
+  const [qLive, setQLive] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQ(qLive), 180);
+    return () => clearTimeout(t);
+  }, [qLive]);
   const [courier, setCourier] = useState("All");
   const [cpr, setCpr] = useState("All");
   const [picked, setPicked] = useState<string[]>([]);
@@ -230,7 +238,7 @@ export default function DisputesPage() {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)}
+        <input value={qLive} onChange={(e) => setQLive(e.target.value)}
                placeholder="Search order, tracking, customer"
                className="w-56 rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] outline-none dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
         <select value={courier} onChange={(e) => setCourier(e.target.value)}
