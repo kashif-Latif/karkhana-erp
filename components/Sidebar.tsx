@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Boxes, Layers, Factory, Truck, Shirt, ClipboardList,
   FileBarChart, CheckSquare, Gem, LogOut, Wallet, ArrowLeftRight,
   Warehouse, PackageCheck,
-  ChevronDown, ArrowLeft, type LucideIcon,
+  ChevronDown, ArrowLeft, type LucideIcon,,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
 import { usePermissions } from "@/lib/usePermissions";
@@ -50,6 +50,9 @@ const NAV: NavItem[] = [
   /* Finished garments. Not the same thing as Stock above, and named so the
      difference is obvious: Stock is what you buy, Inventory is what you make. */
   { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
+  /* Stands alone: its own items, stock and in/out ledger (K138), gated on
+     khana.view — handed to one man, linked to no other department. */
+  { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
   /* Not a step in the run — the catalogue you open when a material you have
      never bought before turns up and needs adding. Below the flow, not inside
      Receiving, so it is not hidden on the day you need it. */
