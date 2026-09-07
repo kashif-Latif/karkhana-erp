@@ -100,6 +100,13 @@ export default function FinalInventoryPage() {
   const [days, setDays] = useState<number | null>(null);
   const [dFrom, setDFrom] = useState("");
   const [dTo, setDTo] = useState("");
+  /* Out is read by WHO it went to; In is read by WHAT came in. Different
+     questions, so different dropdowns rather than one generic filter that
+     answers neither well. */
+  const [fParty, setFParty] = useState("");
+  const [fBranch, setFBranch] = useState("");
+  const [fItem, setFItem] = useState("");
+  const [fCat, setFCat] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -145,7 +152,14 @@ export default function FinalInventoryPage() {
       ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
       : list;
   }, [items, q, cat, tab, days, dFrom, dTo]);
-  const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no) && inRange(m.created_at)), [moves, q, days, dFrom, dTo]);
+  const catOf = (bc: string) => items.find((i) => i.barcode === bc)?.category ?? null;
+  const fMoves = useMemo(() => moves.filter((m) =>
+    hit(m.barcode, m.name, m.movement_no) && inRange(m.created_at)
+    && (!fParty  || m.party === fParty)
+    && (!fBranch || m.branch === fBranch)
+    && (!fItem   || m.barcode === fItem)
+    && (!fCat    || catOf(m.barcode) === fCat)
+  ), [moves, items, q, days, dFrom, dTo, fParty, fBranch, fItem, fCat]);
   const visible = fMoves.filter((m) => showVoided || !m.voided_at);
   const inMoves = visible.filter((m) => m.movement_type === "IN");
   const outMoves = visible.filter((m) => m.movement_type === "OUT");
@@ -332,7 +346,7 @@ export default function FinalInventoryPage() {
 
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
-            <button key={t.k} onClick={() => { setTab(t.k); setCat(""); setQ(""); setDays(null); setDFrom(""); setDTo(""); }}
+            <button key={t.k} onClick={() => { setTab(t.k); setCat(""); setQ(""); setDays(null); setDFrom(""); setDTo(""); setFParty(""); setFBranch(""); setFItem(""); setFCat(""); }}
               className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === t.k ? "bg-ink text-white" : "border border-line text-ink/70 hover:bg-panel"}`}>
               {t.label}
             </button>
@@ -366,6 +380,42 @@ export default function FinalInventoryPage() {
             <span className="text-[12px] text-hint">to</span>
             <input type="date" value={dTo} onChange={(e) => { setDTo(e.target.value); setDays(null); }}
               className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
+          </div>
+        )}
+
+        {(tab === "in" || tab === "out") && (
+          <div className="flex flex-wrap items-center gap-2">
+            {tab === "out" && (
+              <>
+                <select value={fParty} onChange={(e) => { setFParty(e.target.value); setFBranch(""); }}
+                  className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30">
+                  <option value="">All parties</option>
+                  {parties.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                </select>
+                {/* Only the chosen party's branches — offering DHA under
+                    Carrefour would return nothing and look broken. */}
+                <select value={fBranch} onChange={(e) => setFBranch(e.target.value)} disabled={!fParty}
+                  className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none disabled:opacity-45">
+                  <option value="">{fParty ? "All branches" : "Pick a party first"}</option>
+                  {branches.filter((b) => b.party === fParty).map((b) => <option key={b.id} value={b.branch}>{b.branch}</option>)}
+                </select>
+              </>
+            )}
+            <select value={fCat} onChange={(e) => { setFCat(e.target.value); setFItem(""); }}
+              className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30">
+              <option value="">All categories</option>
+              {["Kids", "Child", "Ladies", "Men"].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={fItem} onChange={(e) => setFItem(e.target.value)}
+              className="max-w-[15rem] rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30">
+              <option value="">All products</option>
+              {items.filter((i) => !fCat || i.category === fCat)
+                    .map((i) => <option key={i.item_id} value={i.barcode}>{i.name}</option>)}
+            </select>
+            {(fParty || fBranch || fItem || fCat) && (
+              <button onClick={() => { setFParty(""); setFBranch(""); setFItem(""); setFCat(""); }}
+                className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-ink/60 hover:bg-panel">Clear</button>
+            )}
           </div>
         )}
 
