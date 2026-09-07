@@ -11,7 +11,7 @@
  * code then presses Enter — so Enter is the trigger everywhere.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, Plus, Loader2, Download, Undo2, Pencil, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -89,6 +89,10 @@ export default function FinalInventoryPage() {
   const [eInv, setEInv] = useState("");
   const [eBranch, setEBranch] = useState("");
   const [eNote, setENote] = useState("");
+  /* Voided rows stay out of the way by default — they are corrections, not
+     work. The toggle keeps them one click away rather than gone. */
+  const [showVoided, setShowVoided] = useState(false);
+  const [delRow, setDelRow] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -121,8 +125,10 @@ export default function FinalInventoryPage() {
       : list;
   }, [items, q, cat, tab]);
   const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no)), [moves, q]);
-  const inMoves = fMoves.filter((m) => m.movement_type === "IN");
-  const outMoves = fMoves.filter((m) => m.movement_type === "OUT");
+  const visible = fMoves.filter((m) => showVoided || !m.voided_at);
+  const inMoves = visible.filter((m) => m.movement_type === "IN");
+  const outMoves = visible.filter((m) => m.movement_type === "OUT");
+  const voidedCount = fMoves.filter((m) => m.voided_at).length;
 
   /* The scanner types the code and presses Enter. Resolving on Enter — not
      on every keystroke — means a half-typed code never matches the wrong
@@ -249,6 +255,13 @@ export default function FinalInventoryPage() {
     setEditMv(null); load();
   }
 
+  async function deleteMove(id: string) {
+    if (!supabase) return;
+    const { error } = await supabase.rpc("khana_delete_movement", { p_id: id });
+    if (error) { setErr(error.message); return; }
+    setDelRow(null); load();
+  }
+
   const table = (): ExportTable => tab === "materials" || tab === "stock"
     ? { title: `final-inventory-${tab}`,
         headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
@@ -331,6 +344,12 @@ export default function FinalInventoryPage() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          {(tab === "in" || tab === "out") && voidedCount > 0 && (
+            <button onClick={() => setShowVoided((v) => !v)}
+              className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
+              {showVoided ? "Hide" : "Show"} voided ({voidedCount})
+            </button>
+          )}
           {tab === "materials" && canManage && (
             <button onClick={() => setItemOpen(true)} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add material</button>
           )}
@@ -369,7 +388,13 @@ export default function FinalInventoryPage() {
                       </td>
                       <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>{n(i.quantity)}</td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
-                        {tab === "materials" && canManage && (
+                        {(tab === "in" || tab === "out") && voidedCount > 0 && (
+            <button onClick={() => setShowVoided((v) => !v)}
+              className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
+              {showVoided ? "Hide" : "Show"} voided ({voidedCount})
+            </button>
+          )}
+          {tab === "materials" && canManage && (
                           <button onClick={() => delItem(i)} title="Remove item"
                             className="ml-2 rounded-full p-1 text-muted hover:text-danger">✕</button>
                         )}</td>
@@ -466,7 +491,18 @@ export default function FinalInventoryPage() {
                             : (m.note ?? "")}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {canManage && !m.voided_at && editMv === m.id ? (
+                        {canManage && m.voided_at ? (
+                          delRow === m.id ? (
+                            <span className="flex items-center justify-end gap-1.5">
+                              <span className="text-[11px] text-ink/60">delete for good?</span>
+                              <button onClick={() => deleteMove(m.id)} className="text-[11px] font-bold text-danger">yes</button>
+                              <button onClick={() => setDelRow(null)} className="text-[11px] text-ink/50">no</button>
+                            </span>
+                          ) : (
+                            <button onClick={() => setDelRow(m.id)} title="Delete this voided movement"
+                              className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-danger"><Trash2 size={14} /></button>
+                          )
+                        ) : canManage && !m.voided_at && editMv === m.id ? (
                           <span className="flex flex-wrap items-center justify-end gap-1.5">
                             <input value={eQty} autoFocus onChange={(e) => setEQty(e.target.value)}
                               type="number" placeholder="qty"
