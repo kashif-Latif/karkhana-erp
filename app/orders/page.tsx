@@ -164,7 +164,7 @@ function OrdersInner() {
     if (!supabase) return;
     const { data } = await supabase.from("v_order_movements")
       .select("id,movement_number,moved_at,order_number,material,quantity,unit,unit_price,line_value,order_section,type")
-      .eq("type", "issue").eq("order_section", "other")
+      .eq("type", "issue").eq("order_section", "other").is("department", null)
       .order("moved_at", { ascending: false });
     /* Belt and braces: the database returns each line once (verified), but a
        row must be IMPOSSIBLE to show twice — production screens do not get
@@ -438,7 +438,7 @@ function OrdersInner() {
 
   return (
     <>
-      <Topbar title="Production Orders" subtitle="Make N pieces of an article — material is deducted and the floor is told" />
+      <Topbar title={section === "other" ? "Other Material Orders" : "Raw Material Orders"} subtitle={section === "other" ? "Sticker, shopper and zip — added onto finished pieces, priced on their own" : "Fabric and thread out to the floor — the recipe multiplied, stock deducted"} />
       <div className="px-6 pb-12">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage production orders.</div>
@@ -448,18 +448,7 @@ function OrdersInner() {
           <>
             {/* THE TWO SECTIONS. Raw starts production; Other finishes it.
                 Same orders underneath — the tab changes what you DO to one. */}
-            <div className="mb-4 flex rounded-xl2 bg-panel p-1">
-              <button onClick={() => router.replace("/orders")}
-                className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "raw" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
-                Raw material order
-                <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">fabric + thread → floor</span>
-              </button>
-              <button onClick={() => router.replace("/orders?tab=other")}
-                className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "other" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
-                Other material order
-                <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">sticker · shopper · zip</span>
-              </button>
-            </div>
+            {/* toggle removed — each order type is its own screen, reached only from the sidebar */}
 
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-[12.5px] text-muted">
