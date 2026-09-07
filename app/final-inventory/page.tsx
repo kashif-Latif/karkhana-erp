@@ -93,6 +93,13 @@ export default function FinalInventoryPage() {
      work. The toggle keeps them one click away rather than gone. */
   const [showVoided, setShowVoided] = useState(false);
   const [delRow, setDelRow] = useState<string | null>(null);
+  /* Quick ranges for the common questions — what moved today, this week —
+     and two date boxes for anything else. Same day in both means that one
+     day. Stock filters on when an item last moved, which is the only date
+     a holding has. */
+  const [days, setDays] = useState<number | null>(null);
+  const [dFrom, setDFrom] = useState("");
+  const [dTo, setDTo] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -112,19 +119,33 @@ export default function FinalInventoryPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const inRange = (iso: string | null) => {
+    if (!iso) return !days && !dFrom && !dTo;   // never moved: only in "All time"
+    const day = String(iso).slice(0, 10);
+    if (days !== null) {
+      const edge = new Date();
+      edge.setHours(0, 0, 0, 0);
+      edge.setDate(edge.getDate() - (days - 1));
+      if (new Date(day) < edge) return false;
+    }
+    if (dFrom && day < dFrom) return false;
+    if (dTo && day > dTo) return false;
+    return true;
+  };
   const hit = (...v: (string | null)[]) =>
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   const fItems = useMemo(() => {
     const list = items.filter((i) => (!cat || i.category === cat)
-      && hit(i.barcode, i.name, i.category, i.raw_material_reference));
+      && hit(i.barcode, i.name, i.category, i.raw_material_reference)
+      && (tab === "materials" || inRange(i.last_updated)));
     /* Stock is read to answer "what do we have" — so what we have most of
        goes first. The product list stays alphabetical, because that is
        read to find one specific thing. */
     return tab === "stock"
       ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
       : list;
-  }, [items, q, cat, tab]);
-  const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no)), [moves, q]);
+  }, [items, q, cat, tab, days, dFrom, dTo]);
+  const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no) && inRange(m.created_at)), [moves, q, days, dFrom, dTo]);
   const visible = fMoves.filter((m) => showVoided || !m.voided_at);
   const inMoves = visible.filter((m) => m.movement_type === "IN");
   const outMoves = visible.filter((m) => m.movement_type === "OUT");
@@ -311,7 +332,7 @@ export default function FinalInventoryPage() {
 
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
-            <button key={t.k} onClick={() => { setTab(t.k); setCat(""); setQ(""); }}
+            <button key={t.k} onClick={() => { setTab(t.k); setCat(""); setQ(""); setDays(null); setDFrom(""); setDTo(""); }}
               className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === t.k ? "bg-ink text-white" : "border border-line text-ink/70 hover:bg-panel"}`}>
               {t.label}
             </button>
@@ -327,6 +348,24 @@ export default function FinalInventoryPage() {
                 <span className="ml-1 opacity-60">{c ? items.filter((i) => i.category === c).length : items.length}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {tab !== "materials" && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[{ l: "All time", d: null }, { l: "Today", d: 1 }, { l: "2 days", d: 2 },
+              { l: "5 days", d: 5 }, { l: "This week", d: 7 }, { l: "30 days", d: 30 }].map((r) => (
+              <button key={r.l}
+                onClick={() => { setDays(r.d); setDFrom(""); setDTo(""); }}
+                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${days === r.d && !dFrom && !dTo ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
+                {r.l}
+              </button>
+            ))}
+            <input type="date" value={dFrom} onChange={(e) => { setDFrom(e.target.value); setDays(null); }}
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
+            <span className="text-[12px] text-hint">to</span>
+            <input type="date" value={dTo} onChange={(e) => { setDTo(e.target.value); setDays(null); }}
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
           </div>
         )}
 
