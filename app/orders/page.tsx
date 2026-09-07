@@ -186,6 +186,35 @@ function OrdersInner() {
   const [q, setQ] = useState("");
   const [dFrom, setDFrom] = useState("");
   const [dTo, setDTo] = useState("");
+  /* New order on the Other screen — its own document from day one, not only
+     an edit inside a PO. It still names the PO it serves, because a sticker
+     with no order is a cost with no home. */
+  const [omOpen, setOmOpen] = useState(false);
+  const [omOrder, setOmOrder] = useState("");
+  const [omItem, setOmItem] = useState("");
+  const [omQty, setOmQty] = useState("");
+  const [omPrice, setOmPrice] = useState("");
+  const [omBusy, setOmBusy] = useState(false);
+  const [omErr, setOmErr] = useState("");
+  async function createOtherOrder() {
+    if (!supabase) return;
+    setOmErr("");
+    if (!omOrder) { setOmErr("Which production order is this for?"); return; }
+    if (!omItem) { setOmErr("Pick the material."); return; }
+    if (!(parseFloat(omQty) > 0)) { setOmErr("Enter a quantity."); return; }
+    setOmBusy(true);
+    const { error } = await supabase.rpc("post_stock_movement", {
+      p_type: "issue", p_department_id: null, p_employee_id: null,
+      p_reason: null, p_moved_at: new Date().toISOString(), p_direction: null,
+      p_lines: [{ item_id: omItem, quantity: parseFloat(omQty),
+                  unit_price: omPrice ? parseFloat(omPrice) : null }],
+      p_production_order_id: omOrder,
+    });
+    setOmBusy(false);
+    if (error) { setOmErr(error.message); return; }
+    setOmOpen(false); setOmOrder(""); setOmItem(""); setOmQty(""); setOmPrice("");
+    loadOther();
+  }
   const inRange = (iso: string) => {
     const day = String(iso).slice(0, 10);
     if (dFrom && day < dFrom) return false;
@@ -464,10 +493,39 @@ function OrdersInner() {
                     <button onClick={() => exportPDF(t())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
                   </>
                 ); })()}
+                {canManage && section === "other" && <button onClick={() => setOmOpen(true)} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
                 {canManage && section === "raw" && <button onClick={openCreate} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
               </div>
             </div>
 
+            {omOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => setOmOpen(false)}>
+                <div className="w-full max-w-md rounded-card bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+                  <p className="text-[16px] font-extrabold text-ink">New other-material order</p>
+                  <label className="mt-3 block text-[12px] font-medium text-muted">For production order *</label>
+                  <select value={omOrder} onChange={(e) => setOmOrder(e.target.value)} className={inp}>
+                    <option value="">Choose…</option>
+                    {orders.map((o) => <option key={o.id} value={o.id}>{o.order_number} — {o.article?.name}</option>)}
+                  </select>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div><label className="block text-[12px] font-medium text-muted">Material *</label>
+                      <select value={omItem} onChange={(e) => setOmItem(e.target.value)} className={inp}>
+                        <option value="">Choose…</option>
+                        {otherItems.map((u) => <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code} — {n(u.usable)} {u.unit}</option>)}
+                      </select></div>
+                    <div><label className="block text-[12px] font-medium text-muted">Quantity *</label>
+                      <input type="number" value={omQty} onChange={(e) => setOmQty(e.target.value)} className={inp} /></div>
+                  </div>
+                  <label className="mt-2 block text-[12px] font-medium text-muted">Price per unit (blank = batch rate)</label>
+                  <input type="number" value={omPrice} onChange={(e) => setOmPrice(e.target.value)} className={inp} />
+                  {omErr && <p className="mt-2 text-[12.5px] font-medium text-danger">{omErr}</p>}
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button onClick={() => setOmOpen(false)} className="rounded-xl2 border border-line px-4 py-2 text-[13px] font-semibold text-ink/70">Cancel</button>
+                    <button onClick={createOtherOrder} disabled={omBusy} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{omBusy && <Loader2 size={14} className="animate-spin" />}Place order</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <input value={q} onChange={(e) => setQ(e.target.value)}
                 placeholder="Search number / barcode / article…"
