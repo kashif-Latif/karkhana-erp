@@ -192,6 +192,31 @@ export default function FinalInventoryPage() {
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
 
+        {/* The numbers first, in colour — the same visual language as the
+            other departments, so this section does not look like a bolt-on. */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="rounded-card bg-periwinkle-soft p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-ink/55">Items</p>
+            <p className="mt-1 text-[24px] font-extrabold leading-none text-ink">{items.length}</p>
+          </div>
+          <div className="rounded-card bg-success-soft p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-ink/55">Pieces in stock</p>
+            <p className="mt-1 text-[24px] font-extrabold leading-none text-ink">{n(items.reduce((a, i) => a + Number(i.quantity || 0), 0))}</p>
+          </div>
+          <div className="rounded-card bg-amber-soft p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-ink/55">In today</p>
+            <p className="mt-1 text-[24px] font-extrabold leading-none text-ink">
+              {n(moves.filter((m) => !m.voided_at && m.movement_type === "IN" && new Date(m.created_at).toDateString() === new Date().toDateString()).reduce((a, m) => a + Number(m.quantity), 0))}
+            </p>
+          </div>
+          <div className="rounded-card bg-salmon-soft p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-ink/55">Out today</p>
+            <p className="mt-1 text-[24px] font-extrabold leading-none text-ink">
+              {n(moves.filter((m) => !m.voided_at && m.movement_type === "OUT" && new Date(m.created_at).toDateString() === new Date().toDateString()).reduce((a, m) => a + Number(m.quantity), 0))}
+            </p>
+          </div>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
             <button key={t.k} onClick={() => setTab(t.k)}
@@ -202,8 +227,16 @@ export default function FinalInventoryPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode / name…"
-            className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
+          <div className="relative w-full max-w-xs">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
+              className="w-full rounded-xl2 border border-line bg-surface px-3 py-2 pr-16 text-[13px] outline-none focus:border-ink/30" />
+            {q && (
+              <button onClick={() => setQ("")} title="Clear"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-panel px-2 py-0.5 text-[11px] font-semibold text-ink/60">
+                {(tab === "materials" || tab === "stock" ? fItems.length : (tab === "in" ? inMoves : outMoves).length)} ✕
+              </button>
+            )}
+          </div>
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
@@ -232,13 +265,13 @@ export default function FinalInventoryPage() {
                   <th className="px-4 py-2.5 font-bold">Last moved</th>
                 </tr></thead>
                 <tbody>
-                  {fItems.map((i) => (
-                    <tr key={i.item_id} className="border-b border-line/60 last:border-0">
+                  {fItems.map((i, ix) => (
+                    <tr key={i.item_id} className={`border-b border-line/60 last:border-0 ${ix % 2 ? "bg-panel/25" : ""}`}>
                       <td className="px-4 py-2.5 font-mono text-[12px] text-ink">{i.barcode}</td>
                       <td className="px-4 py-2.5 font-semibold text-ink">{i.name}
                         {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</td>
                       <td className="px-4 py-2.5 text-muted">{i.raw_material_reference ?? "—"}</td>
-                      <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint"}`}>{n(i.quantity)}</td>
+                      <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>{n(i.quantity)}</td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
                         {tab === "materials" && canManage && (
                           <button onClick={() => delItem(i)} title="Remove item"
