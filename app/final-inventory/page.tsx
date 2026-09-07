@@ -11,7 +11,7 @@
  * code then presses Enter — so Enter is the trigger everywhere.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, Plus, Loader2, Download, Undo2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Boxes, Plus, Loader2, Download, Undo2, Pencil, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -25,10 +25,11 @@ type Move = { id: string; movement_no: string | null; movement_type: "IN" | "OUT
               quantity: number; note: string | null; created_at: string;
               voided_at: string | null; void_reason: string | null;
               invoice_no: string | null; party: string | null; branch: string | null;
-              delivery_no: number | null;
+              delivery_no: number | null; branch_id: string | null;
+              original_quantity: number | null; edited_at: string | null;
               barcode: string; name: string };
 type Party = { id: string; name: string };
-type Branch = { id: string; party_id: string; branch: string; deliveries: number };
+type Branch = { id: string; party_id: string; party: string; branch: string; deliveries: number };
 type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
@@ -81,6 +82,13 @@ export default function FinalInventoryPage() {
   const [killRow, setKillRow] = useState<string | null>(null);
   const [voidRow, setVoidRow] = useState<string | null>(null);
   const [voidWhy, setVoidWhy] = useState("");
+  /* Editing a movement moves stock by the DIFFERENCE (K143) — the database
+     does that arithmetic, never the screen. */
+  const [editMv, setEditMv] = useState<string | null>(null);
+  const [eQty, setEQty] = useState("");
+  const [eInv, setEInv] = useState("");
+  const [eBranch, setEBranch] = useState("");
+  const [eNote, setENote] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -89,7 +97,7 @@ export default function FinalInventoryPage() {
       supabase.from("v_khana_stock").select("*").order("name"),
       supabase.from("v_khana_movements").select("*").order("created_at", { ascending: false }).limit(300),
       supabase.from("khana_parties").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("v_khana_branches").select("id,party_id,branch,deliveries").eq("is_active", true).order("branch"),
+      supabase.from("v_khana_branches").select("id,party_id,party,branch,deliveries").eq("is_active", true).order("branch"),
     ]);
     setParties((pa.data as Party[]) ?? []);
     setBranches((br.data as Branch[]) ?? []);
@@ -223,6 +231,22 @@ export default function FinalInventoryPage() {
     const { error } = await supabase.rpc("khana_void_movement", { p_id: id, p_reason: voidWhy.trim() });
     if (error) { setErr(error.message); return; }
     setVoidRow(null); setVoidWhy(""); load();
+  }
+
+  function startEdit(m: Move) {
+    setEditMv(m.id); setVoidRow(null);
+    setEQty(String(m.quantity)); setEInv(m.invoice_no ?? "");
+    setEBranch(m.branch_id ?? ""); setENote(m.note ?? "");
+  }
+  async function saveEdit(m: Move) {
+    if (!supabase) return;
+    const { error } = await supabase.rpc("khana_edit_movement", {
+      p_id: m.id, p_quantity: parseFloat(eQty),
+      p_note: eNote || null, p_invoice_no: eInv || null,
+      p_branch_id: eBranch || null,
+    });
+    if (error) { setErr(error.message); return; }
+    setEditMv(null); load();
   }
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
@@ -424,13 +448,33 @@ export default function FinalInventoryPage() {
                       <td className="px-4 py-2.5 font-semibold text-ink">{m.name}</td>
                       <td className="px-4 py-2.5 text-right tnum font-bold text-ink">{n(m.quantity)}</td>
                       <td className="px-4 py-2.5 text-[12px] text-hint">
+                        {m.edited_at && !m.voided_at ? `edited · was ${n(Number(m.original_quantity ?? 0))} · ` : ""}
                         {m.voided_at ? `voided — ${m.void_reason ?? ""}`
                           : m.movement_type === "OUT"
                             ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.delivery_no ? " · #" + m.delivery_no : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
                             : (m.note ?? "")}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {canManage && !m.voided_at && (voidRow === m.id ? (
+                        {canManage && !m.voided_at && editMv === m.id ? (
+                          <span className="flex flex-wrap items-center justify-end gap-1.5">
+                            <input value={eQty} autoFocus onChange={(e) => setEQty(e.target.value)}
+                              type="number" placeholder="qty"
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
+                            {m.movement_type === "OUT" && (
+                              <>
+                                <select value={eBranch} onChange={(e) => setEBranch(e.target.value)}
+                                  className="w-28 rounded-lg border border-ink/30 px-1.5 py-1 text-[12px] outline-none">
+                                  <option value="">branch…</option>
+                                  {branches.filter((b) => b.party === m.party).map((b) => <option key={b.id} value={b.id}>{b.branch}</option>)}
+                                </select>
+                                <input value={eInv} onChange={(e) => setEInv(e.target.value)} placeholder="invoice"
+                                  className="w-28 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
+                              </>
+                            )}
+                            <button onClick={() => saveEdit(m)} className="text-[11px] font-bold text-ink">save</button>
+                            <button onClick={() => setEditMv(null)} className="text-[11px] text-ink/50">cancel</button>
+                          </span>
+                        ) : canManage && !m.voided_at && (voidRow === m.id ? (
                           <span className="flex items-center justify-end gap-1.5">
                             <input value={voidWhy} autoFocus placeholder="reason"
                               onChange={(e) => setVoidWhy(e.target.value)}
@@ -441,8 +485,12 @@ export default function FinalInventoryPage() {
                             <button onClick={() => { setVoidRow(null); setVoidWhy(""); }} className="text-[11px] text-ink/50">cancel</button>
                           </span>
                         ) : (
-                          <button onClick={() => { setVoidRow(m.id); setVoidWhy(""); }} title="Void this movement"
-                            className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-danger"><Undo2 size={14} /></button>
+                          <span className="flex items-center justify-end gap-1">
+                            <button onClick={() => startEdit(m)} title="Edit"
+                              className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-ink"><Pencil size={14} /></button>
+                            <button onClick={() => { setVoidRow(m.id); setVoidWhy(""); }} title="Void this movement"
+                              className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-danger"><Undo2 size={14} /></button>
+                          </span>
                         ))}
                       </td>
                     </tr>
