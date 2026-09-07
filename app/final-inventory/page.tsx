@@ -435,6 +435,7 @@ export default function FinalInventoryPage() {
             <div className="overflow-hidden rounded-card border border-line bg-surface">
               <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
+                  {tab === "out" && <th className="px-4 py-2.5 font-bold">#</th>}
                   <th className="px-4 py-2.5 font-bold">Date</th><th className="px-4 py-2.5 font-bold">Barcode</th>
                   <th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 text-right font-bold">Qty</th>
@@ -443,6 +444,16 @@ export default function FinalInventoryPage() {
                 <tbody>
                   {(tab === "in" ? inMoves : outMoves).map((m) => (
                     <tr key={m.id} className={`border-b border-line/60 last:border-0 ${m.voided_at ? "opacity-45" : ""}`}>
+                      {/* The delivery number is what the party quotes back at
+                          you on the phone, so it reads first and reads big —
+                          not buried in a sentence at the far right. */}
+                      {tab === "out" && (
+                        <td className="px-4 py-2.5">
+                          {m.delivery_no
+                            ? <span className="inline-flex min-w-[2.25rem] justify-center rounded-lg bg-ink px-2 py-1 text-[13px] font-extrabold tnum text-white">#{m.delivery_no}</span>
+                            : <span className="text-hint">—</span>}
+                        </td>
+                      )}
                       <td className="px-4 py-2.5 text-[12px] text-muted">{when(m.created_at)}</td>
                       <td className="px-4 py-2.5 font-mono text-[12px] text-ink">{m.barcode}</td>
                       <td className="px-4 py-2.5 font-semibold text-ink">{m.name}</td>
@@ -451,7 +462,7 @@ export default function FinalInventoryPage() {
                         {m.edited_at && !m.voided_at ? `edited · was ${n(Number(m.original_quantity ?? 0))} · ` : ""}
                         {m.voided_at ? `voided — ${m.void_reason ?? ""}`
                           : m.movement_type === "OUT"
-                            ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.delivery_no ? " · #" + m.delivery_no : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
+                            ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
                             : (m.note ?? "")}
                       </td>
                       <td className="px-4 py-2.5 text-right">
@@ -496,7 +507,7 @@ export default function FinalInventoryPage() {
                     </tr>
                   ))}
                   {(tab === "in" ? inMoves : outMoves).length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-[13px] text-muted">Nothing recorded yet.</td></tr>
+                    <tr><td colSpan={tab === "out" ? 7 : 6} className="px-4 py-8 text-center text-[13px] text-muted">Nothing recorded yet.</td></tr>
                   )}
                 </tbody>
               </table></div>
