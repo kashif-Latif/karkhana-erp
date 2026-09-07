@@ -388,13 +388,7 @@ export default function FinalInventoryPage() {
                       </td>
                       <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>{n(i.quantity)}</td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
-                        {(tab === "in" || tab === "out") && voidedCount > 0 && (
-            <button onClick={() => setShowVoided((v) => !v)}
-              className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-              {showVoided ? "Hide" : "Show"} voided ({voidedCount})
-            </button>
-          )}
-          {tab === "materials" && canManage && (
+                        {tab === "materials" && canManage && (
                           <button onClick={() => delItem(i)} title="Remove item"
                             className="ml-2 rounded-full p-1 text-muted hover:text-danger">✕</button>
                         )}</td>
