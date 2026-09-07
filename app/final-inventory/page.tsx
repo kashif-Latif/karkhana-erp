@@ -25,9 +25,10 @@ type Move = { id: string; movement_no: string | null; movement_type: "IN" | "OUT
               quantity: number; note: string | null; created_at: string;
               voided_at: string | null; void_reason: string | null;
               invoice_no: string | null; party: string | null; branch: string | null;
+              delivery_no: number | null;
               barcode: string; name: string };
 type Party = { id: string; name: string };
-type Branch = { id: string; party_id: string; branch: string };
+type Branch = { id: string; party_id: string; branch: string; deliveries: number };
 type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
@@ -80,7 +81,7 @@ export default function FinalInventoryPage() {
       supabase.from("v_khana_stock").select("*").order("name"),
       supabase.from("v_khana_movements").select("*").order("created_at", { ascending: false }).limit(300),
       supabase.from("khana_parties").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("v_khana_branches").select("id,party_id,branch").eq("is_active", true).order("branch"),
+      supabase.from("v_khana_branches").select("id,party_id,branch,deliveries").eq("is_active", true).order("branch"),
     ]);
     setParties((pa.data as Party[]) ?? []);
     setBranches((br.data as Branch[]) ?? []);
@@ -93,7 +94,16 @@ export default function FinalInventoryPage() {
 
   const hit = (...v: (string | null)[]) =>
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
-  const fItems = useMemo(() => items.filter((i) => (!cat || i.category === cat) && hit(i.barcode, i.name, i.category, i.raw_material_reference)), [items, q, cat]);
+  const fItems = useMemo(() => {
+    const list = items.filter((i) => (!cat || i.category === cat)
+      && hit(i.barcode, i.name, i.category, i.raw_material_reference));
+    /* Stock is read to answer "what do we have" — so what we have most of
+       goes first. The product list stays alphabetical, because that is
+       read to find one specific thing. */
+    return tab === "stock"
+      ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
+      : list;
+  }, [items, q, cat, tab]);
   const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no)), [moves, q]);
   const inMoves = fMoves.filter((m) => m.movement_type === "IN");
   const outMoves = fMoves.filter((m) => m.movement_type === "OUT");
@@ -155,6 +165,33 @@ export default function FinalInventoryPage() {
     setPOpen(false); setPName(""); setPParty(""); load();
   }
 
+  async function renameParty(id: string, isBranch: boolean, current: string) {
+    if (!supabase) return;
+    const name = window.prompt("New name:", current);
+    if (!name?.trim() || name.trim() === current) return;
+    const { error } = await supabase.from(isBranch ? "khana_party_branches" : "khana_parties")
+      .update({ name: name.trim() }).eq("id", id);
+    if (error) { setErr(error.message); return; }
+    load();
+  }
+
+  async function removeBranch(b: Branch) {
+    if (!supabase) return;
+    /* Deliveries carry their branch. Removing one with history would
+       orphan those rows, so it is deactivated instead — gone from the
+       dropdown, still readable on old paperwork. */
+    if (b.deliveries > 0) {
+      if (!window.confirm(`${b.branch} has ${b.deliveries} deliveries. Hide it from the list? The history stays.`)) return;
+      const { error } = await supabase.from("khana_party_branches").update({ is_active: false }).eq("id", b.id);
+      if (error) { setErr(error.message); return; }
+    } else {
+      if (!window.confirm(`Remove ${b.branch}?`)) return;
+      const { error } = await supabase.from("khana_party_branches").delete().eq("id", b.id);
+      if (error) { setErr(error.message); return; }
+    }
+    load();
+  }
+
   async function delItem(i: Item) {
     if (!supabase) return;
     if (i.quantity !== 0) { setErr(`${i.name} still holds ${n(i.quantity)}. Take it out before removing the item.`); return; }
@@ -178,13 +215,13 @@ export default function FinalInventoryPage() {
         headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
         rows: fItems.map((i) => [i.barcode, i.name, i.category ?? "", i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
     : { title: `final-inventory-${tab}`,
-        headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Invoice", "Note", "Voided"],
+        headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
           m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
-          m.invoice_no ?? "", m.note ?? "", m.voided_at ? "yes" : ""]) };
+          m.delivery_no ?? "", m.invoice_no ?? "", m.note ?? "", m.voided_at ? "yes" : ""]) };
 
   const TABS: { k: Tab; label: string }[] = [
-    { k: "materials", label: "Materials" }, { k: "stock", label: "Stock" },
+    { k: "materials", label: "Product list" }, { k: "stock", label: "Stock" },
     { k: "in", label: "In" }, { k: "out", label: "Out" },
   ];
 
@@ -222,7 +259,7 @@ export default function FinalInventoryPage() {
 
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
-            <button key={t.k} onClick={() => setTab(t.k)}
+            <button key={t.k} onClick={() => { setTab(t.k); setCat(""); setQ(""); }}
               className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === t.k ? "bg-ink text-white" : "border border-line text-ink/70 hover:bg-panel"}`}>
               {t.label}
             </button>
@@ -374,7 +411,7 @@ export default function FinalInventoryPage() {
                       <td className="px-4 py-2.5 text-[12px] text-hint">
                         {m.voided_at ? `voided — ${m.void_reason ?? ""}`
                           : m.movement_type === "OUT"
-                            ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
+                            ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.delivery_no ? " · #" + m.delivery_no : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
                             : (m.note ?? "")}
                       </td>
                       <td className="px-4 py-2.5 text-right">
@@ -406,6 +443,28 @@ export default function FinalInventoryPage() {
           <input value={pName} onChange={(e) => setPName(e.target.value)} autoFocus
             placeholder={pParty ? "branch name" : "party name"} className={inp} />
         </Field></div>
+        <div className="mt-4 max-h-56 overflow-y-auto rounded-xl2 border border-line">
+          {parties.map((pt) => (
+            <div key={pt.id} className="border-b border-line/60 px-3 py-2 last:border-0">
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] font-bold text-ink">{pt.name}</span>
+                <button onClick={() => renameParty(pt.id, false, pt.name)}
+                  className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
+              </div>
+              {branches.filter((b) => b.party_id === pt.id).map((b) => (
+                <div key={b.id} className="mt-1 flex items-center justify-between pl-3">
+                  <span className="text-[12px] text-ink/70">{b.branch}
+                    {b.deliveries > 0 && <span className="ml-1 text-[10.5px] text-hint">{b.deliveries} deliveries</span>}</span>
+                  <span className="flex gap-2">
+                    <button onClick={() => renameParty(b.id, true, b.branch)} className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
+                    <button onClick={() => removeBranch(b)} className="text-[11px] font-semibold text-danger/70 hover:text-danger">remove</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={() => setPOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
           <button onClick={addParty} disabled={busy} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">Add</button>
