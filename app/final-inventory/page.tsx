@@ -24,7 +24,10 @@ type Item = { item_id: string; barcode: string; name: string; description: strin
 type Move = { id: string; movement_no: string | null; movement_type: "IN" | "OUT";
               quantity: number; note: string | null; created_at: string;
               voided_at: string | null; void_reason: string | null;
+              invoice_no: string | null; party: string | null; branch: string | null;
               barcode: string; name: string };
+type Party = { id: string; name: string };
+type Branch = { id: string; party_id: string; branch: string };
 type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
@@ -56,14 +59,28 @@ export default function FinalInventoryPage() {
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [mErr, setMErr] = useState("");
+  /* OUT must say where it went — the party is required, the branch optional
+     (some parties have none), and the invoice number is theirs, as given. */
+  const [parties, setParties] = useState<Party[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [partyId, setPartyId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [invNo, setInvNo] = useState("");
+  const [pOpen, setPOpen] = useState(false);
+  const [pName, setPName] = useState("");
+  const [pParty, setPParty] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
-    const [i, m] = await Promise.all([
+    const [i, m, pa, br] = await Promise.all([
       supabase.from("v_khana_stock").select("*").order("name"),
       supabase.from("v_khana_movements").select("*").order("created_at", { ascending: false }).limit(300),
+      supabase.from("khana_parties").select("id,name").eq("is_active", true).order("name"),
+      supabase.from("v_khana_branches").select("id,party_id,branch").eq("is_active", true).order("branch"),
     ]);
+    setParties((pa.data as Party[]) ?? []);
+    setBranches((br.data as Branch[]) ?? []);
     if (i.error || m.error) setErr((i.error || m.error)!.message);
     setItems((i.data as Item[]) ?? []);
     setMoves((m.data as Move[]) ?? []);
@@ -108,16 +125,40 @@ export default function FinalInventoryPage() {
     setMErr("");
     if (!(parseFloat(qty) > 0)) { setMErr("Enter a quantity."); return; }
     setBusy(true);
+    if (type === "OUT" && !partyId) { setBusy(false); setMErr("Which party is this going to?"); return; }
     const { error } = await supabase.from("khana_stock_movements").insert({
       item_id: found.item_id, movement_type: type,
       quantity: parseFloat(qty), note: note.trim() || null,
+      party_id: type === "OUT" ? partyId : null,
+      branch_id: type === "OUT" && branchId ? branchId : null,
+      invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
     });
     setBusy(false);
     /* The database refuses an OUT larger than stock (K138). Showing its own
        words is better than inventing a friendlier lie — it names both
        numbers. */
     if (error) { setMErr(error.message); return; }
-    setScan(""); setFound(null); setQty(""); setNote(""); load();
+    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); load();
+  }
+
+  async function addParty() {
+    if (!supabase || !pName.trim()) return;
+    setBusy(true);
+    const { error } = pParty
+      ? await supabase.from("khana_party_branches").insert({ party_id: pParty, name: pName.trim() })
+      : await supabase.from("khana_parties").insert({ name: pName.trim() });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setPOpen(false); setPName(""); setPParty(""); load();
+  }
+
+  async function delItem(i: Item) {
+    if (!supabase) return;
+    if (i.quantity !== 0) { setErr(`${i.name} still holds ${n(i.quantity)}. Take it out before removing the item.`); return; }
+    if (!window.confirm(`Remove ${i.name}? It has never held stock or is now empty.`)) return;
+    const { error } = await supabase.from("khana_final_items").delete().eq("id", i.item_id);
+    if (error) { setErr(error.message); return; }
+    load();
   }
 
   async function voidMove(m: Move) {
@@ -134,9 +175,10 @@ export default function FinalInventoryPage() {
         headers: ["Barcode", "Name", "Reference", "Quantity", "Last updated"],
         rows: fItems.map((i) => [i.barcode, i.name, i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
     : { title: `final-inventory-${tab}`,
-        headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Note", "Voided"],
+        headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
-          m.barcode, m.name, m.movement_type, m.quantity, m.note ?? "", m.voided_at ? "yes" : ""]) };
+          m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
+          m.invoice_no ?? "", m.note ?? "", m.voided_at ? "yes" : ""]) };
 
   const TABS: { k: Tab; label: string }[] = [
     { k: "materials", label: "Materials" }, { k: "stock", label: "Stock" },
@@ -197,7 +239,11 @@ export default function FinalInventoryPage() {
                         {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</td>
                       <td className="px-4 py-2.5 text-muted">{i.raw_material_reference ?? "—"}</td>
                       <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint"}`}>{n(i.quantity)}</td>
-                      <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}</td>
+                      <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
+                        {tab === "materials" && canManage && (
+                          <button onClick={() => delItem(i)} title="Remove item"
+                            className="ml-2 rounded-full p-1 text-muted hover:text-danger">✕</button>
+                        )}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -222,13 +268,30 @@ export default function FinalInventoryPage() {
                     onBlur={resolve}
                     placeholder="Scan or type barcode, then Enter" className={inp} />
                   <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" className={inp} />
-                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
+                  {tab === "out" ? (
+                    <select value={partyId} onChange={(e) => { setPartyId(e.target.value); setBranchId(""); }} className={inp}>
+                      <option value="">Party…</option>
+                      {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  ) : (
+                    <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
+                  )}
                   <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Record {tab === "in" ? "in" : "out"}
                   </button>
                 </div>
+                {tab === "out" && (
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <select value={branchId} onChange={(e) => setBranchId(e.target.value)} disabled={!partyId} className={inp}>
+                      <option value="">Branch (optional)…</option>
+                      {branches.filter((b) => b.party_id === partyId).map((b) => <option key={b.id} value={b.id}>{b.branch}</option>)}
+                    </select>
+                    <input value={invNo} onChange={(e) => setInvNo(e.target.value)} placeholder="Party invoice number" className={inp} />
+                    <button onClick={() => setPOpen(true)} className="rounded-xl2 border border-line px-3 py-2 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">+ Party / branch</button>
+                  </div>
+                )}
                 {found && (
                   <p className="mt-2 text-[12.5px] text-ink/80">
                     <b>{found.name}</b> · holding {n(found.quantity)}
@@ -246,7 +309,7 @@ export default function FinalInventoryPage() {
                   <th className="px-4 py-2.5 font-bold">Date</th><th className="px-4 py-2.5 font-bold">Barcode</th>
                   <th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 text-right font-bold">Qty</th>
-                  <th className="px-4 py-2.5 font-bold">Note</th><th className="px-4 py-2.5"></th>
+                  <th className="px-4 py-2.5 font-bold">{tab === "out" ? "Went to" : "Note"}</th><th className="px-4 py-2.5"></th>
                 </tr></thead>
                 <tbody>
                   {(tab === "in" ? inMoves : outMoves).map((m) => (
@@ -255,7 +318,12 @@ export default function FinalInventoryPage() {
                       <td className="px-4 py-2.5 font-mono text-[12px] text-ink">{m.barcode}</td>
                       <td className="px-4 py-2.5 font-semibold text-ink">{m.name}</td>
                       <td className="px-4 py-2.5 text-right tnum font-bold text-ink">{n(m.quantity)}</td>
-                      <td className="px-4 py-2.5 text-[12px] text-hint">{m.voided_at ? `voided — ${m.void_reason ?? ""}` : (m.note ?? "")}</td>
+                      <td className="px-4 py-2.5 text-[12px] text-hint">
+                        {m.voided_at ? `voided — ${m.void_reason ?? ""}`
+                          : m.movement_type === "OUT"
+                            ? `${m.party ?? ""}${m.branch ? " · " + m.branch : ""}${m.invoice_no ? " · inv " + m.invoice_no : ""}`
+                            : (m.note ?? "")}
+                      </td>
                       <td className="px-4 py-2.5 text-right">
                         {canManage && !m.voided_at && (
                           <button onClick={() => voidMove(m)} title="Void this movement"
@@ -273,6 +341,23 @@ export default function FinalInventoryPage() {
           </>
         )}
       </div>
+
+      <Modal open={pOpen} onClose={() => setPOpen(false)} title="Add party or branch">
+        <Field label="Belongs to (leave empty to add a new party)">
+          <select value={pParty} onChange={(e) => setPParty(e.target.value)} className={inp}>
+            <option value="">— new party —</option>
+            {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        <div className="mt-3"><Field label="Name *">
+          <input value={pName} onChange={(e) => setPName(e.target.value)} autoFocus
+            placeholder={pParty ? "branch name" : "party name"} className={inp} />
+        </Field></div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={() => setPOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+          <button onClick={addParty} disabled={busy} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">Add</button>
+        </div>
+      </Modal>
 
       <Modal open={itemOpen} onClose={() => setItemOpen(false)} title="Add material">
         <Field label="Barcode *">
