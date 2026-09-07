@@ -95,7 +95,7 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
   );
 }
 
-export default function Orders() {
+function OrdersInner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [canManage, setCanManage] = useState(false);
