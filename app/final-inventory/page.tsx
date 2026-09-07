@@ -25,7 +25,8 @@ type Move = { id: string; movement_no: string | null; movement_type: "IN" | "OUT
               quantity: number; note: string | null; created_at: string;
               voided_at: string | null; void_reason: string | null;
               invoice_no: string | null; party: string | null; branch: string | null;
-              delivery_no: number | null; branch_id: string | null;
+              delivery_no: number | null; branch_id: string | null; party_id: string | null;
+              invoice_gap_reason: string | null;
               original_quantity: number | null; edited_at: string | null;
               barcode: string; name: string };
 type Party = { id: string; name: string };
@@ -71,6 +72,7 @@ export default function FinalInventoryPage() {
   const [partyId, setPartyId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [invNo, setInvNo] = useState("");
+  const [gapWhy, setGapWhy] = useState("");
   const [pOpen, setPOpen] = useState(false);
   const [pName, setPName] = useState("");
   const [pParty, setPParty] = useState("");
@@ -152,6 +154,21 @@ export default function FinalInventoryPage() {
       ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
       : list;
   }, [items, q, cat, tab, days, dFrom, dTo]);
+  /* The last invoice this branch was given, and what should follow it.
+     Purely numeric numbers get a suggestion; anything else is left alone
+     rather than guessed at. */
+  const lastInvoice = useMemo(() => {
+    const rows = moves.filter((m) => m.movement_type === "OUT" && !m.voided_at
+      && m.invoice_no && m.party_id === partyId
+      && (branchId ? m.branch_id === branchId : !m.branch_id));
+    return rows.length ? rows[0].invoice_no : null;   // already newest-first
+  }, [moves, partyId, branchId]);
+  const expectedInvoice = useMemo(() => {
+    if (!lastInvoice || !/^\d+$/.test(lastInvoice)) return null;
+    return String(BigInt(lastInvoice) + BigInt(1)).padStart(lastInvoice.length, "0");
+  }, [lastInvoice]);
+  const invoiceGap = !!(expectedInvoice && invNo.trim() && invNo.trim() !== expectedInvoice);
+
   const catOf = (bc: string) => items.find((i) => i.barcode === bc)?.category ?? null;
   const fMoves = useMemo(() => moves.filter((m) =>
     hit(m.barcode, m.name, m.movement_no) && inRange(m.created_at)
@@ -162,12 +179,19 @@ export default function FinalInventoryPage() {
   ), [moves, items, q, days, dFrom, dTo, fParty, fBranch, fItem, fCat]);
   const visible = fMoves.filter((m) => showVoided || !m.voided_at);
   const inMoves = visible.filter((m) => m.movement_type === "IN");
-  const outMoves = visible.filter((m) => m.movement_type === "OUT");
+  const outMoves = visible.filter((m) => m.movement_type === "OUT")
+    .sort((a, b) => (a.party ?? "").localeCompare(b.party ?? "")
+                 || (a.branch ?? "").localeCompare(b.branch ?? "")
+                 || (b.delivery_no ?? 0) - (a.delivery_no ?? 0));
   const voidedCount = fMoves.filter((m) => m.voided_at).length;
 
   /* The scanner types the code and presses Enter. Resolving on Enter — not
      on every keystroke — means a half-typed code never matches the wrong
      item and starts a movement against it. */
+  useEffect(() => {
+    if (expectedInvoice && !invNo) setInvNo(expectedInvoice);
+  }, [expectedInvoice]);
+
   function resolve() {
     const code = scan.trim();
     if (!code) return;
@@ -202,13 +226,14 @@ export default function FinalInventoryPage() {
       party_id: type === "OUT" ? partyId : null,
       branch_id: type === "OUT" && branchId ? branchId : null,
       invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
+      invoice_gap_reason: type === "OUT" && invoiceGap ? (gapWhy.trim() || null) : null,
     });
     setBusy(false);
     /* The database refuses an OUT larger than stock (K138). Showing its own
        words is better than inventing a friendlier lie — it names both
        numbers. */
     if (error) { setMErr(error.message); return; }
-    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); load();
+    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); setGapWhy(""); load();
   }
 
   async function addParty() {
@@ -529,6 +554,22 @@ export default function FinalInventoryPage() {
                     <button onClick={() => setPOpen(true)} className="rounded-xl2 border border-line px-3 py-2 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">+ Party / branch</button>
                   </div>
                 )}
+                {tab === "out" && lastInvoice && (
+                  <p className="mt-2 text-[12px] text-ink/70">
+                    Last invoice for {branches.find((b) => b.id === branchId)?.branch ?? parties.find((p) => p.id === partyId)?.name}: <b className="tnum">{lastInvoice}</b>
+                    {expectedInvoice && <> · next expected <b className="tnum">{expectedInvoice}</b></>}
+                  </p>
+                )}
+                {tab === "out" && invoiceGap && (
+                  <div className="mt-2 rounded-xl2 border border-amber-soft bg-amber-soft/50 p-2.5">
+                    <p className="text-[12.5px] font-semibold text-ink">
+                      Expected {expectedInvoice}, you entered {invNo.trim()}.
+                    </p>
+                    <input value={gapWhy} onChange={(e) => setGapWhy(e.target.value)}
+                      placeholder="why the gap? (optional — e.g. bulk book, cancelled pad)"
+                      className={`${inp} mt-2`} />
+                  </div>
+                )}
                 {found && (
                   <p className="mt-2 text-[12.5px] text-ink/80">
                     <b>{found.name}</b> · holding {n(found.quantity)}
@@ -550,7 +591,15 @@ export default function FinalInventoryPage() {
                   <th className="px-4 py-2.5 font-bold">{tab === "out" ? "Went to" : "Note"}</th><th className="px-4 py-2.5"></th>
                 </tr></thead>
                 <tbody>
-                  {(tab === "in" ? inMoves : outMoves).map((m) => (
+                  {(tab === "in" ? inMoves : outMoves).map((m, mi, arr) => (
+                    <>
+                    {tab === "out" && (mi === 0 || `${arr[mi-1].party}|${arr[mi-1].branch}` !== `${m.party}|${m.branch}`) && (
+                      <tr key={`h-${m.id}`} className="bg-panel/60">
+                        <td colSpan={7} className="px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-wide text-ink/70">
+                          {m.party ?? "—"}{m.branch ? ` · ${m.branch}` : ""}
+                        </td>
+                      </tr>
+                    )}
                     <tr key={m.id} className={`border-b border-line/60 last:border-0 ${m.voided_at ? "opacity-45" : ""}`}>
                       {/* The delivery number is what the party quotes back at
                           you on the phone, so it reads first and reads big —
@@ -558,7 +607,7 @@ export default function FinalInventoryPage() {
                       {tab === "out" && (
                         <td className="px-4 py-2.5">
                           {m.delivery_no
-                            ? <span className="inline-flex min-w-[2.25rem] justify-center rounded-lg bg-ink px-2 py-1 text-[13px] font-extrabold tnum text-white">#{m.delivery_no}</span>
+                            ? <span className="tnum text-[12.5px] font-bold text-ink/70">#{m.delivery_no}</span>
                             : <span className="text-hint">—</span>}
                         </td>
                       )}
@@ -624,6 +673,7 @@ export default function FinalInventoryPage() {
                         ))}
                       </td>
                     </tr>
+                    </>
                   ))}
                   {(tab === "in" ? inMoves : outMoves).length === 0 && (
                     <tr><td colSpan={tab === "out" ? 7 : 6} className="px-4 py-8 text-center text-[13px] text-muted">Nothing recorded yet.</td></tr>
