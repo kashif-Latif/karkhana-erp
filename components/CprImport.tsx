@@ -664,14 +664,25 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
               </div>
             )}
 
-            {results.length > 0 && (
+            {results.length > 0 && (() => {
+              /* ONE SETTLEMENT, ONE LINE.
+                 A file is checked and then imported, and both attempts were
+                 pushed into this list — so importing one invoice successfully
+                 read "1 of 2 passed · 1 refused", which looks like half the file
+                 was rejected. Nothing had been. Keeping only the latest outcome
+                 per settlement makes the count mean what it says. */
+              const latest = [...new Map(results.map((r) => [r.ref || "—", r])).values()];
+              const bad = latest.filter((r) => !r.ok);
+              return (
               <div className="mt-3">
                 <div className="mb-1.5 text-[13px] font-semibold text-ink">
-                  {results.filter((r) => r.ok).length} of {results.length} passed
-                  {failed.length > 0 && <span className="text-red-700"> · {failed.length} refused</span>}
+                  {bad.length === 0
+                    ? `${latest.length} settlement${latest.length === 1 ? "" : "s"} imported`
+                    : <>{latest.length - bad.length} of {latest.length} imported
+                        <span className="text-red-700"> · {bad.length} refused</span></>}
                 </div>
                 <div className="max-h-56 overflow-auto rounded-card border border-line">
-                  {results.map((r, i) => (
+                  {latest.map((r, i) => (
                     <div key={i} className={`flex items-start gap-2 border-b border-line px-2.5 py-1.5 text-[12px] last:border-0 ${r.ok ? "" : "bg-red-50"}`}>
                       {r.ok ? <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-600" />
                             : <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-600" />}
@@ -683,7 +694,8 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
                   ))}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             <div className="mt-4 flex items-center justify-end gap-2">
               <button className={btnGhost} disabled={busy} onClick={() => setOpen(false)}>Close</button>
