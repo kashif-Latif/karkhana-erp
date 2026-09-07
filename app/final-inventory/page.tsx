@@ -73,6 +73,14 @@ export default function FinalInventoryPage() {
   const [pOpen, setPOpen] = useState(false);
   const [pName, setPName] = useState("");
   const [pParty, setPParty] = useState("");
+  /* No window.prompt / window.confirm anywhere. A browser dialog cannot be
+     styled, cannot be cancelled with Escape reliably on every platform, and
+     looks like a phishing box. Renaming and confirming happen in the row. */
+  const [editRow, setEditRow] = useState<{ id: string; branch: boolean } | null>(null);
+  const [editVal, setEditVal] = useState("");
+  const [killRow, setKillRow] = useState<string | null>(null);
+  const [voidRow, setVoidRow] = useState<string | null>(null);
+  const [voidWhy, setVoidWhy] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -165,49 +173,56 @@ export default function FinalInventoryPage() {
     setPOpen(false); setPName(""); setPParty(""); load();
   }
 
-  async function renameParty(id: string, isBranch: boolean, current: string) {
-    if (!supabase) return;
-    const name = window.prompt("New name:", current);
-    if (!name?.trim() || name.trim() === current) return;
-    const { error } = await supabase.from(isBranch ? "khana_party_branches" : "khana_parties")
-      .update({ name: name.trim() }).eq("id", id);
+  async function saveRename() {
+    if (!supabase || !editRow || !editVal.trim()) return;
+    const { error } = await supabase.from(editRow.branch ? "khana_party_branches" : "khana_parties")
+      .update({ name: editVal.trim() }).eq("id", editRow.id);
     if (error) { setErr(error.message); return; }
-    load();
+    setEditRow(null); setEditVal(""); load();
   }
 
   async function removeBranch(b: Branch) {
     if (!supabase) return;
-    /* Deliveries carry their branch. Removing one with history would
-       orphan those rows, so it is deactivated instead — gone from the
-       dropdown, still readable on old paperwork. */
-    if (b.deliveries > 0) {
-      if (!window.confirm(`${b.branch} has ${b.deliveries} deliveries. Hide it from the list? The history stays.`)) return;
-      const { error } = await supabase.from("khana_party_branches").update({ is_active: false }).eq("id", b.id);
+    /* A branch with deliveries is hidden, not deleted — those rows point at
+       it, and old paperwork still names it. Nothing with history is ever
+       destroyed here. */
+    const { error } = b.deliveries > 0
+      ? await supabase.from("khana_party_branches").update({ is_active: false }).eq("id", b.id)
+      : await supabase.from("khana_party_branches").delete().eq("id", b.id);
+    if (error) { setErr(error.message); return; }
+    setKillRow(null); load();
+  }
+
+  async function removeParty(pt: Party) {
+    if (!supabase) return;
+    const used = moves.some((m) => m.party === pt.name);
+    const hasBranches = branches.some((b) => b.party_id === pt.id);
+    if (used || hasBranches) {
+      /* Same rule one level up: a party that has shipped anything, or still
+         holds branches, is deactivated so its deliveries stay explainable. */
+      const { error } = await supabase.from("khana_parties").update({ is_active: false }).eq("id", pt.id);
       if (error) { setErr(error.message); return; }
     } else {
-      if (!window.confirm(`Remove ${b.branch}?`)) return;
-      const { error } = await supabase.from("khana_party_branches").delete().eq("id", b.id);
+      const { error } = await supabase.from("khana_parties").delete().eq("id", pt.id);
       if (error) { setErr(error.message); return; }
     }
-    load();
+    setKillRow(null); load();
   }
 
   async function delItem(i: Item) {
     if (!supabase) return;
+    setKillRow(null);
     if (i.quantity !== 0) { setErr(`${i.name} still holds ${n(i.quantity)}. Take it out before removing the item.`); return; }
-    if (!window.confirm(`Remove ${i.name}? It has never held stock or is now empty.`)) return;
     const { error } = await supabase.from("khana_final_items").delete().eq("id", i.item_id);
     if (error) { setErr(error.message); return; }
     load();
   }
 
-  async function voidMove(m: Move) {
-    if (!supabase) return;
-    const reason = window.prompt(`Void ${m.movement_type} of ${n(m.quantity)} ${m.name}? Reason:`);
-    if (!reason?.trim()) return;
-    const { error } = await supabase.rpc("khana_void_movement", { p_id: m.id, p_reason: reason.trim() });
+  async function voidMove(id: string) {
+    if (!supabase || !voidWhy.trim()) return;
+    const { error } = await supabase.rpc("khana_void_movement", { p_id: id, p_reason: voidWhy.trim() });
     if (error) { setErr(error.message); return; }
-    load();
+    setVoidRow(null); setVoidWhy(""); load();
   }
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
@@ -415,10 +430,20 @@ export default function FinalInventoryPage() {
                             : (m.note ?? "")}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {canManage && !m.voided_at && (
-                          <button onClick={() => voidMove(m)} title="Void this movement"
+                        {canManage && !m.voided_at && (voidRow === m.id ? (
+                          <span className="flex items-center justify-end gap-1.5">
+                            <input value={voidWhy} autoFocus placeholder="reason"
+                              onChange={(e) => setVoidWhy(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") voidMove(m.id); if (e.key === "Escape") { setVoidRow(null); setVoidWhy(""); } }}
+                              className="w-36 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
+                            <button onClick={() => voidMove(m.id)} disabled={!voidWhy.trim()}
+                              className="text-[11px] font-bold text-danger disabled:opacity-40">void</button>
+                            <button onClick={() => { setVoidRow(null); setVoidWhy(""); }} className="text-[11px] text-ink/50">cancel</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => { setVoidRow(m.id); setVoidWhy(""); }} title="Void this movement"
                             className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-danger"><Undo2 size={14} /></button>
-                        )}
+                        ))}
                       </td>
                     </tr>
                   ))}
@@ -443,21 +468,74 @@ export default function FinalInventoryPage() {
           <input value={pName} onChange={(e) => setPName(e.target.value)} autoFocus
             placeholder={pParty ? "branch name" : "party name"} className={inp} />
         </Field></div>
-        <div className="mt-4 max-h-56 overflow-y-auto rounded-xl2 border border-line">
+        <div className="mt-4 max-h-64 overflow-y-auto rounded-xl2 border border-line">
           {parties.map((pt) => (
             <div key={pt.id} className="border-b border-line/60 px-3 py-2 last:border-0">
-              <div className="flex items-center justify-between">
-                <span className="text-[12.5px] font-bold text-ink">{pt.name}</span>
-                <button onClick={() => renameParty(pt.id, false, pt.name)}
-                  className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
+              <div className="flex items-center justify-between gap-2">
+                {editRow?.id === pt.id && !editRow.branch ? (
+                  <input value={editVal} autoFocus
+                    onChange={(e) => setEditVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveRename(); if (e.key === "Escape") setEditRow(null); }}
+                    className="flex-1 rounded-lg border border-ink/30 px-2 py-1 text-[12.5px] outline-none" />
+                ) : (
+                  <span className="text-[12.5px] font-bold text-ink">{pt.name}</span>
+                )}
+                <span className="flex shrink-0 gap-2">
+                  {editRow?.id === pt.id && !editRow.branch ? (
+                    <>
+                      <button onClick={saveRename} className="text-[11px] font-bold text-ink">save</button>
+                      <button onClick={() => setEditRow(null)} className="text-[11px] text-ink/50">cancel</button>
+                    </>
+                  ) : killRow === pt.id ? (
+                    <>
+                      <span className="text-[11px] text-ink/60">
+                        {moves.some((m) => m.party === pt.name) || branches.some((b) => b.party_id === pt.id) ? "hide it?" : "remove?"}
+                      </span>
+                      <button onClick={() => removeParty(pt)} className="text-[11px] font-bold text-danger">yes</button>
+                      <button onClick={() => setKillRow(null)} className="text-[11px] text-ink/50">no</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => { setEditRow({ id: pt.id, branch: false }); setEditVal(pt.name); }}
+                        className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
+                      <button onClick={() => setKillRow(pt.id)}
+                        className="text-[11px] font-semibold text-danger/70 hover:text-danger">remove</button>
+                    </>
+                  )}
+                </span>
               </div>
+
               {branches.filter((b) => b.party_id === pt.id).map((b) => (
-                <div key={b.id} className="mt-1 flex items-center justify-between pl-3">
-                  <span className="text-[12px] text-ink/70">{b.branch}
-                    {b.deliveries > 0 && <span className="ml-1 text-[10.5px] text-hint">{b.deliveries} deliveries</span>}</span>
-                  <span className="flex gap-2">
-                    <button onClick={() => renameParty(b.id, true, b.branch)} className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
-                    <button onClick={() => removeBranch(b)} className="text-[11px] font-semibold text-danger/70 hover:text-danger">remove</button>
+                <div key={b.id} className="mt-1 flex items-center justify-between gap-2 pl-3">
+                  {editRow?.id === b.id && editRow.branch ? (
+                    <input value={editVal} autoFocus
+                      onChange={(e) => setEditVal(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveRename(); if (e.key === "Escape") setEditRow(null); }}
+                      className="flex-1 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
+                  ) : (
+                    <span className="text-[12px] text-ink/70">{b.branch}
+                      {b.deliveries > 0 && <span className="ml-1 text-[10.5px] text-hint">{b.deliveries} deliveries</span>}</span>
+                  )}
+                  <span className="flex shrink-0 gap-2">
+                    {editRow?.id === b.id && editRow.branch ? (
+                      <>
+                        <button onClick={saveRename} className="text-[11px] font-bold text-ink">save</button>
+                        <button onClick={() => setEditRow(null)} className="text-[11px] text-ink/50">cancel</button>
+                      </>
+                    ) : killRow === b.id ? (
+                      <>
+                        <span className="text-[11px] text-ink/60">{b.deliveries > 0 ? "hide it?" : "remove?"}</span>
+                        <button onClick={() => removeBranch(b)} className="text-[11px] font-bold text-danger">yes</button>
+                        <button onClick={() => setKillRow(null)} className="text-[11px] text-ink/50">no</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => { setEditRow({ id: b.id, branch: true }); setEditVal(b.branch); }}
+                          className="text-[11px] font-semibold text-ink/50 hover:text-ink">rename</button>
+                        <button onClick={() => setKillRow(b.id)}
+                          className="text-[11px] font-semibold text-danger/70 hover:text-danger">remove</button>
+                      </>
+                    )}
                   </span>
                 </div>
               ))}
