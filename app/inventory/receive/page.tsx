@@ -12,7 +12,8 @@ type Cat = { id: string; group_id: string; name: string };
 type Named = { id: string; name: string };
 type Unit = { id: string; name: string; symbol: string | null };
 type GU = { group_id: string; unit_id: string };
-type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string; packages: string; package_unit: string };
+type Split = { category_id: string; color_id: string; quantity: string; packages: string };
+type Line = { group_id: string; category_id: string; color_id: string; size_id: string; unit_id: string; quantity: string; rate: string; packages: string; package_unit: string; splits?: Split[] };
 
 const EMPTY: Line = { group_id: "", category_id: "", color_id: "", size_id: "", unit_id: "", quantity: "", rate: "", packages: "", package_unit: "" };
 function todayInput() { const d = new Date(); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
@@ -128,6 +129,16 @@ export default function ReceiveStock() {
     setLine(i, { group_id: gid, category_id: "", color_id: "", size_id: "", unit_id: allowed.length === 1 ? allowed[0].id : "" });
   }
   const addLine = () => setLines((ls) => [...ls, { ...EMPTY }]);
+  /* K136/K137 — optional portions declared as the delivery lands.
+     2,500 kg may be 250 red + 250 white + the rest unmarked. Composition is
+     only ever set here; sorting stays labour-only. */
+  const addSplit = (i: number) => setLines((ls) => ls.map((l, x) => x === i
+    ? { ...l, splits: [...(l.splits ?? []), { category_id: "", color_id: "", quantity: "", packages: "" }] } : l));
+  const setSplit = (i: number, j: number, patch: Partial<Split>) => setLines((ls) => ls.map((l, x) => x === i
+    ? { ...l, splits: (l.splits ?? []).map((sp, y) => y === j ? { ...sp, ...patch } : sp) } : l));
+  const delSplit = (i: number, j: number) => setLines((ls) => ls.map((l, x) => x === i
+    ? { ...l, splits: (l.splits ?? []).filter((_, y) => y !== j) } : l));
+  const splitSum = (l: Line) => (l.splits ?? []).reduce((a, sp) => a + (parseFloat(sp.quantity) || 0), 0);
   const removeLine = (i: number) => setLines((ls) => (ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i)));
 
   const lineTotal = (l: Line) => (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
@@ -164,6 +175,12 @@ export default function ReceiveStock() {
       clean.push(l);
     }
     if (clean.length === 0) { setError("Add at least one material line."); return; }
+    for (const l of clean) {
+      if (splitSum(l) > (parseFloat(l.quantity) || 0)) {
+        setError("Portions add to more than the line itself. A delivery cannot contain more than it is.");
+        return;
+      }
+    }
 
     setSaving(true);
     const p_lines = clean.map((l) => ({
@@ -182,12 +199,43 @@ export default function ReceiveStock() {
       router.push("/inventory");
       return;
     }
-    const { error } = await supabase.rpc("post_grn_smart", {
+    const { data: grnRes, error } = await supabase.rpc("post_grn_smart", {
       p_supplier_id: supplierId, p_received_at: dateToISO(receivedAt),
       p_freight: parseFloat(freight) || 0, p_discount: parseFloat(discount) || 0, p_note: note, p_lines,
     });
+    if (error) { setSaving(false); setError(error.message); return; }
+
+    /* Portions are applied AFTER posting — a split row cannot reference a
+       line that does not exist yet (K137). Failures here are reported but
+       never discard the receipt: the stock is already correctly in. */
+    const withSplits = clean.filter((l) => splitSum(l) > 0);
+    if (withSplits.length > 0) {
+      const r = grnRes as unknown as Record<string, unknown> | string | null;
+      const grnId = typeof r === "string" ? r : (r?.grn_id ?? r?.id) as string | undefined;
+      if (grnId) {
+        const { data: glRows } = await supabase.from("grn_lines")
+          .select("id, quantity, rate, material_items(group_id)").eq("grn_id", grnId);
+        const rows = (glRows as unknown as { id: string; quantity: number; rate: number; material_items: { group_id: string } | null }[]) ?? [];
+        const used = new Set<string>();
+        for (const l of withSplits) {
+          const m = rows.find((g) => !used.has(g.id)
+            && g.material_items?.group_id === l.group_id
+            && Number(g.quantity) === parseFloat(l.quantity)
+            && Number(g.rate) === parseFloat(l.rate));
+          if (!m) continue;
+          used.add(m.id);
+          const { error: se } = await supabase.rpc("apply_grn_line_splits", {
+            p_grn_line_id: m.id,
+            p_splits: (l.splits ?? []).filter((sp) => parseFloat(sp.quantity) > 0).map((sp) => ({
+              category_id: sp.category_id || null, color_id: sp.color_id || null,
+              quantity: parseFloat(sp.quantity), packages: sp.packages ? parseInt(sp.packages) : null,
+            })),
+          });
+          if (se) { setSaving(false); setError(`Delivery saved, but portions failed: ${se.message}`); return; }
+        }
+      }
+    }
     setSaving(false);
-    if (error) { setError(error.message); return; }
     if (canPay) { setPostedTotal(total); setPayAmount(String(total)); setPayMethod("cash"); setPayRef(""); setPayError(""); }
     else router.push("/inventory");
   }
@@ -331,6 +379,39 @@ export default function ReceiveStock() {
                               <Field label="Quantity"><input type="number" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} placeholder="0" className={inpSm} /></Field>
                               <Field label="Rate (Rs)"><input type="number" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} placeholder="0" className={inpSm} /></Field>
                               <Field label="Line total"><div className="px-1 py-2 text-[13.5px] font-bold tnum text-ink">{fmt(lineTotal(l))}</div></Field>
+                              {/* PORTIONS — every field optional. Receiving
+                                  uncategorised stays exactly as it was; this
+                                  only appears if you choose to use it. */}
+                              <div className="col-span-full mt-2 rounded-xl2 border border-line bg-panel/40 p-2.5">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[12px] font-semibold text-ink/80">
+                                    Portions <span className="font-normal text-hint">optional — 250 red, 250 white, rest unmarked</span>
+                                  </p>
+                                  <button type="button" onClick={() => addSplit(i)}
+                                    className="rounded-full border border-line bg-surface px-2.5 py-1 text-[11.5px] font-semibold text-ink/70">+ Portion</button>
+                                </div>
+                                {(l.splits ?? []).map((sp, j) => (
+                                  <div key={j} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                    <select value={sp.category_id} onChange={(e) => setSplit(i, j, { category_id: e.target.value })} className={inpSm}>
+                                      <option value="">Category…</option>
+                                      {cats.filter((c) => c.group_id === l.group_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                    <select value={sp.color_id} onChange={(e) => setSplit(i, j, { color_id: e.target.value })} className={inpSm}>
+                                      <option value="">Colour…</option>
+                                      {colors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                    <input type="number" value={sp.quantity} onChange={(e) => setSplit(i, j, { quantity: e.target.value })} placeholder="Qty" className={inpSm} />
+                                    <input type="number" value={sp.packages} onChange={(e) => setSplit(i, j, { packages: e.target.value })} placeholder="Bora" className={inpSm} />
+                                    <button type="button" onClick={() => delSplit(i, j)}
+                                      className="rounded-xl2 border border-line px-2 py-1 text-[11.5px] font-semibold text-danger">Remove</button>
+                                  </div>
+                                ))}
+                                {(l.splits ?? []).length > 0 && (
+                                  <p className={`mt-2 text-[11.5px] font-medium ${splitSum(l) > (parseFloat(l.quantity) || 0) ? "text-danger" : "text-hint"}`}>
+                                    {splitSum(l)} of {parseFloat(l.quantity) || 0} declared · {Math.max((parseFloat(l.quantity) || 0) - splitSum(l), 0)} stays unmarked
+                                  </p>
+                                )}
+                              </div>
                               {/* How many physical pieces arrived. Fabric comes as than or
                                   cartons, not as a bare weight — the weight is what the ledger
                                   needs, the count is what the storekeeper counts at the gate

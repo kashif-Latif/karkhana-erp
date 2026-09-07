@@ -40,6 +40,11 @@ export default function ProcessPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [depts, setDepts] = useState<Dept[]>([]);
+  /* K118's structure, finally on screen: one unit that holds the pending,
+     four floors inside it. Read from the database so a renamed floor shows
+     its new name without a deploy. */
+  const [unit, setUnit] = useState<{ id: string; name: string } | null>(null);
+  const [floors, setFloors] = useState<{ id: string; name: string }[]>([]);
   const [staff, setStaff] = useState<Emp[]>([]);
   const [pay, setPay] = useState<Pay[]>([]);
   const [rates, setRates] = useState<Rate[]>([]);
@@ -63,13 +68,14 @@ export default function ProcessPage() {
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
-    const [w, o, d, e, p, r] = await Promise.all([
+    const [w, o, d, e, p, r, allSec] = await Promise.all([
       supabase.from("v_process_pending").select("*").order("assigned_at", { ascending: true }),
       supabase.from("production_orders").select("id,order_number,quantity,articles(code,name)").neq("status", "cancelled").order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name,process_order").eq("kind", "section").eq("in_process", true).order("process_order"),
-      supabase.from("v_factory_employees").select("id,name,departments!inner(kind)").eq("departments.kind", "section").order("name"),
+      supabase.from("employees").select("id,name,departments!inner(kind)").eq("is_active", true).eq("departments.kind", "section").order("name"),
       supabase.from("v_process_payable").select("*").order("payable", { ascending: false }),
       supabase.from("piece_rates").select("id,rate,effective_from,departments(name),articles(code)").order("effective_from", { ascending: false }),
+      supabase.from("departments").select("id,name,parent_id,in_process,process_order").eq("kind", "section").eq("is_active", true).order("process_order"),
     ]);
     if (w.error) setErr(w.error.message);
     setRows((w.data as Row[]) ?? []);
@@ -77,6 +83,12 @@ export default function ProcessPage() {
       ...x, articles: Array.isArray(x.articles) ? x.articles[0] ?? null : x.articles,
     })) as Order[]);
     setDepts((d.data as Dept[]) ?? []);
+    {
+      const secs = (allSec.data as { id: string; name: string; parent_id: string | null; in_process: boolean }[]) ?? [];
+      const u = secs.find((s) => s.in_process) ?? null;
+      setUnit(u ? { id: u.id, name: u.name } : null);
+      setFloors(u ? secs.filter((s) => s.parent_id === u.id).map((s) => ({ id: s.id, name: s.name })) : []);
+    }
     setStaff((e.data as unknown as Emp[]) ?? []);
     setPay((p.data as Pay[]) ?? []);
     setRates(((r.data ?? []) as unknown as Record<string, unknown>[]).map((x) => ({
@@ -103,36 +115,47 @@ export default function ProcessPage() {
 
   return (
     <>
-      <Topbar title="Main Factory Stitching Unit" subtitle="One unit, four floors — what is out and what is owed" />
+      <Topbar title="Main Factory Stitching Unit" subtitle="What is out on the floor, and what is owed for it" />
       <div className="space-y-5 px-6 pb-10">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to see process work.</div>
         ) : (
           <>
-            {/* THE UNIT, THEN ITS FLOORS. Pending lives on the unit — the four
-                floors are stages inside it, not separate queues, so they carry
-                the same pending count rather than inventing four numbers that
-                would drift apart. Kashif: "they are all bound to a single
-                processing. I should see the pending section as well there." */}
-            <div className="rounded-card bg-surface p-4 shadow-card">
-              <div className="flex flex-wrap items-end justify-between gap-3">
+            {/* THE UNIT, UP FRONT. One box: the unit's name, its four floors,
+                and the numbers that matter. The floors are labels on the work
+                — pieces belong to the unit, not to a single floor — so the
+                pending count sits on the unit and the floors sit inside it,
+                exactly the shape K118 gave the database. */}
+            <div className="rounded-card bg-surface p-5 shadow-card">
+              <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Processing — pieces pending</p>
-                  <p className="mt-1 text-[30px] font-extrabold leading-none text-ink">{num(totalOut)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink/60">Wages payable</p>
-                  <p className="mt-1 text-[18px] font-extrabold text-ink">{rs(totalOwed)}</p>
-                  <p className="text-[11px] text-hint">{rows.filter((r) => r.status !== "closed" && r.status !== "complete").length} open assignments</p>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                {["Cutting", "Overlock", "Flatlock", "Singlelock"].map((f) => (
-                  <div key={f} className="rounded-xl2 border border-line bg-panel/50 px-3.5 py-3">
-                    <p className="text-[13px] font-bold text-ink">{f}</p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-hint">{num(totalOut)} pending in unit</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Processing unit</p>
+                  <h2 className="mt-0.5 text-[19px] font-extrabold tracking-tight text-ink">
+                    {unit?.name ?? "Main Factory Stitching Unit"}
+                  </h2>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    {floors.map((f) => (
+                      <span key={f.id} className="rounded-full border border-line bg-panel px-3 py-1 text-[12px] font-semibold text-ink/80">
+                        {f.name}
+                      </span>
+                    ))}
+                    {floors.length === 0 && <span className="text-[12px] text-hint">No floors set up yet</span>}
                   </div>
-                ))}
+                </div>
+                <div className="flex gap-6 text-right">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Pending</p>
+                    <p className="mt-0.5 text-[22px] font-extrabold text-ink">{num(totalOut)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Wages payable</p>
+                    <p className="mt-0.5 text-[22px] font-extrabold text-ink">{rs(totalOwed)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-hint">Open orders</p>
+                    <p className="mt-0.5 text-[22px] font-extrabold text-ink">{rows.filter((r) => r.status !== "closed" && r.status !== "complete").length}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
