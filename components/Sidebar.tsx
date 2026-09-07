@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Boxes, Layers, Factory, Truck, Shirt, ClipboardList,
   FileBarChart, CheckSquare, Gem, LogOut, Wallet, ArrowLeftRight,
   Warehouse, PackageCheck,
-  ChevronDown, ArrowLeft, type LucideIcon,,
+  ChevronDown, ArrowLeft, type LucideIcon,
 } from "lucide-react";
 import { useProfile } from "@/lib/useProfile";
 import { usePermissions } from "@/lib/usePermissions";
