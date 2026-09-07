@@ -19,7 +19,7 @@ import { usePermissions } from "@/lib/usePermissions";
 import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
 
 type Item = { item_id: string; barcode: string; name: string; description: string | null;
-              raw_material_reference: string | null; is_active: boolean;
+              raw_material_reference: string | null; category: string | null; is_active: boolean;
               quantity: number; last_updated: string | null };
 type Move = { id: string; movement_no: string | null; movement_type: "IN" | "OUT";
               quantity: number; note: string | null; created_at: string;
@@ -42,6 +42,9 @@ export default function FinalInventoryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [moves, setMoves] = useState<Move[]>([]);
   const [q, setQ] = useState("");
+  /* 041 Kids · 042 Child · 043 Ladies · 044 Men — the codes on the printed
+     sheets. Filtering by name is what people actually think in. */
+  const [cat, setCat] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -90,7 +93,7 @@ export default function FinalInventoryPage() {
 
   const hit = (...v: (string | null)[]) =>
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
-  const fItems = useMemo(() => items.filter((i) => hit(i.barcode, i.name, i.raw_material_reference)), [items, q]);
+  const fItems = useMemo(() => items.filter((i) => (!cat || i.category === cat) && hit(i.barcode, i.name, i.category, i.raw_material_reference)), [items, q, cat]);
   const fMoves = useMemo(() => moves.filter((m) => hit(m.barcode, m.name, m.movement_no)), [moves, q]);
   const inMoves = fMoves.filter((m) => m.movement_type === "IN");
   const outMoves = fMoves.filter((m) => m.movement_type === "OUT");
@@ -172,8 +175,8 @@ export default function FinalInventoryPage() {
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
     ? { title: `final-inventory-${tab}`,
-        headers: ["Barcode", "Name", "Reference", "Quantity", "Last updated"],
-        rows: fItems.map((i) => [i.barcode, i.name, i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
+        headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
+        rows: fItems.map((i) => [i.barcode, i.name, i.category ?? "", i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
     : { title: `final-inventory-${tab}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
@@ -226,6 +229,18 @@ export default function FinalInventoryPage() {
           ))}
         </div>
 
+        {(tab === "materials" || tab === "stock") && (
+          <div className="flex flex-wrap gap-1.5">
+            {["", "Kids", "Child", "Ladies", "Men"].map((c) => (
+              <button key={c || "all"} onClick={() => setCat(c)}
+                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${cat === c ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
+                {c || "All"}
+                <span className="ml-1 opacity-60">{c ? items.filter((i) => i.category === c).length : items.length}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full max-w-xs">
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
@@ -260,7 +275,7 @@ export default function FinalInventoryPage() {
               <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
                   <th className="px-4 py-2.5 font-bold">Barcode</th><th className="px-4 py-2.5 font-bold">Item</th>
-                  <th className="px-4 py-2.5 font-bold">Reference</th>
+                  <th className="px-4 py-2.5 font-bold">Category</th>
                   <th className="px-4 py-2.5 text-right font-bold">In stock</th>
                   <th className="px-4 py-2.5 font-bold">Last moved</th>
                 </tr></thead>
@@ -270,7 +285,12 @@ export default function FinalInventoryPage() {
                       <td className="px-4 py-2.5 font-mono text-[12px] text-ink">{i.barcode}</td>
                       <td className="px-4 py-2.5 font-semibold text-ink">{i.name}
                         {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</td>
-                      <td className="px-4 py-2.5 text-muted">{i.raw_material_reference ?? "—"}</td>
+                      <td className="px-4 py-2.5">
+                        {i.category
+                          ? <span className="rounded-full bg-panel px-2 py-0.5 text-[11.5px] font-semibold text-ink/75">{i.category}</span>
+                          : <span className="text-muted">—</span>}
+                        {i.raw_material_reference && <span className="ml-1.5 text-[11px] text-hint">{i.raw_material_reference}</span>}
+                      </td>
                       <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>{n(i.quantity)}</td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
                         {tab === "materials" && canManage && (
