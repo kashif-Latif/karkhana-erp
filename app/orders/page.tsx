@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -173,10 +174,11 @@ export default function Orders() {
       [`${m.id}|${m.material}|${m.quantity}|${m.line_value}`, m])).values()));
   }, []);
   useEffect(() => { if (section === "other") loadOther(); }, [section, loadOther]);
-  useEffect(() => {
-    if (typeof window !== "undefined" &&
-        new URLSearchParams(window.location.search).get("tab") === "other") setSection("other");
-  }, []);
+  const router = useRouter();
+  const spTab = useSearchParams().get("tab");
+  /* The URL owns the tab — sidebar links, the toggle, back/forward all just
+     move the URL and this one effect follows. Two writers was the flicker. */
+  useEffect(() => { setSection(spTab === "other" ? "other" : "raw"); }, [spTab]);
 
   /* Search runs on the number — which IS the barcode (PO-…, ISS-…) — plus
      article and material, so a scanner pointed at a printed order finds it.
@@ -447,12 +449,12 @@ export default function Orders() {
             {/* THE TWO SECTIONS. Raw starts production; Other finishes it.
                 Same orders underneath — the tab changes what you DO to one. */}
             <div className="mb-4 flex rounded-xl2 bg-panel p-1">
-              <button onClick={() => setSection("raw")}
+              <button onClick={() => router.replace("/orders")}
                 className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "raw" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
                 Raw material order
                 <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">fabric + thread → floor</span>
               </button>
-              <button onClick={() => setSection("other")}
+              <button onClick={() => router.replace("/orders?tab=other")}
                 className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${section === "other" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
                 Other material order
                 <span className="ml-1.5 hidden text-[11px] font-normal text-hint sm:inline">sticker · shopper · zip</span>
@@ -878,3 +880,7 @@ export default function Orders() {
 }
 
 const inp = "mt-1.5 w-full rounded-xl2 border border-line bg-canvas px-3.5 py-2.5 text-[14px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
+
+export default function OrdersPage() {
+  return <Suspense fallback={null}><OrdersInner /></Suspense>;
+}
