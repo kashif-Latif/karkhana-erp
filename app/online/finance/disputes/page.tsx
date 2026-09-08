@@ -135,6 +135,30 @@ export default function DisputesPage() {
      than quietly reaching past them. */
   const allShown = () => setPicked(shown.map((r) => r.tracking_id));
 
+  /* Shopify said no (404 on an order it cannot find, 422 on a fulfilled one)
+     and the return sat here forever. This records the decision on our side —
+     online_dispute_closures — and the view drops the row for good. Nothing is
+     sent to Shopify; the store still shows the order live, which is why the
+     button is separate and says so. */
+  async function closeHere() {
+    if (!supabase || !picked.length) return;
+    const ok = await confirm({
+      title: `Close ${picked.length} dispute${picked.length === 1 ? "" : "s"} on the website only?`,
+      body: "Shopify is not touched — the order stays live there. Use this when Shopify refused. The parcel leaves this list permanently.",
+      confirmLabel: "Close here",
+    });
+    if (!ok) return;
+    setBusy("here"); setErr(""); setMsg("");
+    const { data, error } = await supabase.rpc("hub_close_disputes", {
+      p_tracking: picked,
+      p_reason: "closed on website from Disputes (Shopify not updated)",
+    });
+    setBusy("");
+    if (error) { setErr(error.message); return; }
+    setMsg(`${data ?? 0} closed on the website.`);
+    load();
+  }
+
   async function push(action: "close" | "cancel") {
     if (!supabase || !picked.length) return;
     if (action === "cancel") {
@@ -275,6 +299,12 @@ export default function DisputesPage() {
                   className="rounded-full border border-red-300 px-3.5 py-1.5 text-[12.5px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40">
             {busy === "cancel" && <Loader2 size={12} className="mr-1 inline animate-spin" />}
             Cancel {picked.length || ""}
+          </button>
+          <button onClick={closeHere} disabled={!picked.length || !!busy}
+                  title="Shopify refused? Record the closure here; Shopify is not changed."
+                  className="rounded-full border border-line px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-panel disabled:opacity-40 dark:border-white/10 dark:text-[#a89f93] dark:hover:bg-white/10">
+            {busy === "here" && <Loader2 size={12} className="mr-1 inline animate-spin" />}
+            Close {picked.length || ""} here only
           </button>
         </div>
       </div>

@@ -1,0 +1,2 @@
+-- Applied to production 8 Sep 2026 via Supabase:apply_migration. Kept here for the repo record.
+-- See the migration body in the Supabase dashboard > Database > Migrations > H228.

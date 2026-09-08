@@ -89,7 +89,12 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
 
        The list now also excludes anything this system has successfully closed
        or cancelled. What is left is what genuinely still needs a decision. */
-    const [{ data }, { data: done }] = await Promise.all([
+    const ids = [...new Set(parcels.map((p) => p.tracking_id).filter(Boolean))] as string[];
+    /* H228: online_shopify_writebacks had RLS on and no policy, so the second
+       query below returned nothing to the browser and "handled" never grew —
+       every return came back after Close. Fixed in the database. The third
+       query is the website-side closure for when Shopify refuses. */
+    const [{ data }, { data: done }, { data: here }] = await Promise.all([
       supabase.from("online_orders")
         .select("order_number,store_code,cancelled_at").in("order_number", nums),
       supabase.from("online_shopify_writebacks")
@@ -97,11 +102,15 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
         .in("order_number", nums)
         .eq("succeeded", true)
         .in("action", ["close", "cancel"]),
+      supabase.from("online_dispute_closures")
+        .select("order_number,store_code")
+        .in("tracking_id", ids),
     ]);
     const handled = new Set([
       ...(data ?? []).filter((o) => o.cancelled_at)
         .map((o) => `${o.store_code}|${o.order_number}`),
       ...(done ?? []).map((d) => `${d.store_code}|${d.order_number}`),
+      ...(here ?? []).map((d) => `${d.store_code}|${d.order_number}`),
     ]);
     const open: { order: string; store: string; cod: number }[] = [];
     let delivered = 0;
@@ -119,6 +128,33 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
     open.sort((a, b) => b.cod - a.cod);
     setShop({ open, delivered });
   }, []);
+
+  /* Shopify refused (404/422) or the order was cancelled by hand in the admin.
+     Record the closure on our side; the return leaves this list and Disputes
+     permanently. Shopify itself is not touched. */
+  async function closeHere() {
+    if (!supabase || !shop) return;
+    let wanted = parcels.filter((p) => p.delivery_status === "Returned" || p.delivery_status === "RTS");
+    if (picked.length) wanted = wanted.filter((p) => picked.includes(`${p.store_code}|${p.order_number}`));
+    else wanted = wanted.filter((p) => shop.open.some((o) => o.order === String(p.order_number) && o.store === String(p.store_code)));
+    const tracking = [...new Set(wanted.map((p) => p.tracking_id).filter(Boolean))] as string[];
+    if (!tracking.length) return;
+    if (!(await confirm({
+      title: `Close ${tracking.length} return${tracking.length === 1 ? "" : "s"} on the website only?`,
+      body: "Shopify is not touched — the order stays live there. Use this when Shopify refused. They leave this list and Disputes permanently.",
+      confirmLabel: "Close here",
+    }))) return;
+    setBusy("here"); setErr("");
+    const { data, error } = await supabase.rpc("hub_close_disputes", {
+      p_tracking: tracking,
+      p_reason: `closed on website from CPR ${cpr} (Shopify not updated)`,
+    });
+    setBusy("");
+    if (error) { setErr(error.message); return; }
+    setShopMsg(`${data ?? 0} closed on the website.`);
+    setPicked([]);
+    loadShopState(parcels);
+  }
 
   async function pushOne(action: "close" | "deliver" | "paid" | "cancel") {
     if (!supabase) return;
@@ -517,6 +553,11 @@ export default function CprDetail({ row, onClose }: { row: Row; onClose: () => v
                             }}
                             className="rounded-full border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
                       {picked.length ? `Cancel ${picked.length}` : "Cancel all"}
+                    </button>
+                    <button disabled={!!busy} onClick={closeHere}
+                            title="Shopify refused? Record the closure here; Shopify is not changed."
+                            className="rounded-full border border-amber-400 px-3 py-1.5 text-[12px] font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50">
+                      {picked.length ? `Close ${picked.length} here only` : "Close all here only"}
                     </button>
                   </span>
 
