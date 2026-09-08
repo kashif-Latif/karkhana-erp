@@ -16,6 +16,8 @@ type Req = { material_label: string; required: number; unit_symbol: string; avai
              problem: "ok" | "no_item" | "wrong_kind" | "unsorted" | "short";
              fix: string | null };
 
+type Receipt = { id: string; receipt_no: string; quantity: number; rejected: number;
+                 received_at: string; wage_amount: number | null; paid_at: string | null };
 type Move = { id: string; movement_number: string; type: string; moved_at: string;
               material: string; item_code: string; quantity: number; unit: string;
               reason: string | null; department: string | null };
@@ -123,6 +125,12 @@ function OrdersInner() {
   const [result, setResult] = useState<PlaceResult | null>(null);
 
   const [detail, setDetail] = useState<Order | null>(null);
+  const [delWhy, setDelWhy] = useState("");
+  /* Receipts are the reason a delete gets refused, so they must be visible
+     and voidable from the same screen — otherwise the refusal is a dead end. */
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [rVoid, setRVoid] = useState<string | null>(null);
+  const [rWhy, setRWhy] = useState("");
 
   /* K125 — issue, return and wastage live on the order now, not on a
      separate screen. Giving material out and getting it back are two halves
@@ -355,11 +363,12 @@ function OrdersInner() {
 
   async function openDetail(o: Order) {
     setDetail(o); setDetailReqs(null); setDetailStatus(o.status);
-    setMoves([]); setMvItem(""); setMvQty(""); setMvReason(""); setMvErr(""); setMvType("return");
+    setMoves([]); setReceipts([]); setDelWhy(""); setRVoid(null); setMvItem(""); setMvQty(""); setMvReason(""); setMvErr(""); setMvType("return");
     setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false); setOtherErr(""); setOrderCosts([]);
     if (!supabase) return;
     loadMoves(o.id);
     loadCosts(o.id);
+    loadReceipts(o.id);
     setConfirmDel(false); setDelErr("");
     if (!supabase) return;
     const { data } = await supabase.rpc("get_order_requirements", { p_article_id: o.article_id, p_quantity: o.quantity });
@@ -371,6 +380,29 @@ function OrdersInner() {
       .select("id,movement_number,type,moved_at,material,item_code,quantity,unit,reason,department")
       .eq("production_order_id", orderId).order("moved_at", { ascending: false });
     setMoves((data as Move[]) ?? []);
+  }
+
+  async function loadReceipts(orderId: string) {
+    if (!supabase) return;
+    const { data } = await supabase.from("process_receipts")
+      .select("id,receipt_no,quantity,rejected,received_at,wage_amount,paid_at,process_assignments!inner(order_id)")
+      .eq("process_assignments.order_id", orderId)
+      .order("received_at", { ascending: false });
+    setReceipts(((data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
+      id: r.id as string, receipt_no: r.receipt_no as string,
+      quantity: Number(r.quantity), rejected: Number(r.rejected ?? 0),
+      received_at: r.received_at as string,
+      wage_amount: r.wage_amount == null ? null : Number(r.wage_amount),
+      paid_at: (r.paid_at as string) ?? null,
+    })));
+  }
+
+  async function voidReceipt(id: string) {
+    if (!supabase || !rWhy.trim() || !detail) return;
+    const { error } = await supabase.rpc("void_process_receipt", { p_receipt_id: id, p_reason: rWhy.trim() });
+    if (error) { setDelErr(error.message); return; }
+    setRVoid(null); setRWhy("");
+    loadReceipts(detail.id); loadMoves(detail.id); load();
   }
 
   async function loadCosts(orderId: string) {
@@ -456,8 +488,8 @@ function OrdersInner() {
     if (!supabase || !detail) return;
     /* Deleting an order puts its material BACK on the shelf first (K135) —
        so the reason travels into the ledger next to every restored kilo. */
-    const reason = window.prompt(`Delete ${detail.order_number}? Material returns to stock. Give the reason:`);
-    if (!reason?.trim()) return;
+    if (!delWhy.trim()) { setDelErr("Give a reason — it goes into the ledger beside every kilo that returns."); return; }
+    const reason = delWhy;
     setDelErr(""); setDeleting(true);
     const { error } = await supabase.rpc("delete_production_order", { p_order_id: detail.id, p_reason: reason.trim() });
     setDeleting(false);
@@ -909,7 +941,41 @@ function OrdersInner() {
                   <button onClick={() => setConfirmDel(true)} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
                 ) : (
                   <div className="mt-4 rounded-xl2 bg-danger-soft p-3">
-                    <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? This can&apos;t be undone.</p>
+                    <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? Material returns to stock.</p>
+                    {receipts.length > 0 && (
+                      <div className="mt-2 rounded-xl2 bg-surface/70 p-2.5">
+                        <p className="text-[12px] font-semibold text-ink">
+                          {receipts.length} receipt{receipts.length > 1 ? "s" : ""} must be voided first — pieces came back and wages were recorded.
+                        </p>
+                        {receipts.map((r) => (
+                          <div key={r.id} className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-1.5 first:border-0 first:pt-0">
+                            <span className="text-[12px] text-ink/80">
+                              <b>{r.receipt_no}</b> · {n(r.quantity)} pieces
+                              {r.rejected > 0 && ` · ${n(r.rejected)} rejected`}
+                              {r.wage_amount ? ` · Rs ${n(r.wage_amount)}` : ""}
+                              {r.paid_at && <span className="ml-1 font-semibold text-danger">paid</span>}
+                            </span>
+                            {rVoid === r.id ? (
+                              <span className="flex items-center gap-1.5">
+                                <input value={rWhy} autoFocus onChange={(e) => setRWhy(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") voidReceipt(r.id); if (e.key === "Escape") setRVoid(null); }}
+                                  placeholder="reason" className="w-32 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
+                                <button onClick={() => voidReceipt(r.id)} disabled={!rWhy.trim()}
+                                  className="text-[11px] font-bold text-danger disabled:opacity-40">void</button>
+                                <button onClick={() => setRVoid(null)} className="text-[11px] text-ink/50">cancel</button>
+                              </span>
+                            ) : (
+                              <button onClick={() => { setRVoid(r.id); setRWhy(""); }}
+                                className="rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold text-ink/70 hover:bg-panel">Void</button>
+                            )}
+                          </div>
+                        ))}
+                        <p className="mt-2 text-[11.5px] text-ink/60">A wage already paid cannot be voided — record a correction in Payments instead.</p>
+                      </div>
+                    )}
+                    <input value={delWhy} onChange={(e) => setDelWhy(e.target.value)}
+                      placeholder="reason for deleting — goes into the ledger"
+                      className="mt-2 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30" />
                     {delErr && <p className="mt-1 text-[12px] text-danger">{delErr}</p>}
                     <div className="mt-2 flex gap-2">
                       <button onClick={() => setConfirmDel(false)} disabled={deleting} className="rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink/70">Cancel</button>
