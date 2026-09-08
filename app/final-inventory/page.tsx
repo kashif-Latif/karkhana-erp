@@ -109,6 +109,15 @@ export default function FinalInventoryPage() {
   const [fBranch, setFBranch] = useState("");
   const [fItem, setFItem] = useState("");
   const [fCat, setFCat] = useState("");
+  /* Editing an item is a plain update; correcting stock is not — it writes a
+     movement (K146), so the total never stops matching its own history. */
+  const [editItem, setEditItem] = useState<string | null>(null);
+  const [eName, setEName] = useState("");
+  const [eBar, setEBar] = useState("");
+  const [eItemCat, setEItemCat] = useState("");
+  const [stockRow, setStockRow] = useState<string | null>(null);
+  const [sQty, setSQty] = useState("");
+  const [sWhy, setSWhy] = useState("");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -322,6 +331,26 @@ export default function FinalInventoryPage() {
     setDelRow(null); load();
   }
 
+  async function saveItem(i: Item) {
+    if (!supabase) return;
+    if (!eName.trim() || !eBar.trim()) { setErr("Name and barcode are both needed."); return; }
+    const { error } = await supabase.from("khana_final_items")
+      .update({ name: eName.trim(), barcode: eBar.trim(), category: eItemCat || null })
+      .eq("id", i.item_id);
+    if (error) { setErr(error.message.includes("duplicate") ? "That barcode belongs to another item." : error.message); return; }
+    setEditItem(null); load();
+  }
+
+  async function saveStock(i: Item) {
+    if (!supabase) return;
+    if (!sWhy.trim()) { setErr("Say why the figure is changing."); return; }
+    const { error } = await supabase.rpc("khana_set_stock", {
+      p_item_id: i.item_id, p_new_quantity: parseFloat(sQty), p_reason: sWhy.trim(),
+    });
+    if (error) { setErr(error.message); return; }
+    setStockRow(null); setSQty(""); setSWhy(""); load();
+  }
+
   const table = (): ExportTable => tab === "materials" || tab === "stock"
     ? { title: `final-inventory-${tab}`,
         headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
@@ -491,21 +520,75 @@ export default function FinalInventoryPage() {
                 <tbody>
                   {fItems.map((i, ix) => (
                     <tr key={i.item_id} className={`border-b border-line/60 last:border-0 ${ix % 2 ? "bg-panel/25" : ""}`}>
-                      <td className="px-4 py-2.5 font-mono text-[12px] text-ink">{i.barcode}</td>
-                      <td className="px-4 py-2.5 font-semibold text-ink">{i.name}
-                        {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</td>
+                      <td className="px-4 py-2.5 font-mono text-[12px] text-ink">
+                        {editItem === i.item_id
+                          ? <input value={eBar} onChange={(e) => setEBar(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveItem(i); if (e.key === "Escape") setEditItem(null); }}
+                              className="w-36 rounded-lg border border-ink/30 px-2 py-1 font-mono text-[12px] outline-none" />
+                          : i.barcode}
+                      </td>
+                      <td className="px-4 py-2.5 font-semibold text-ink">
+                        {editItem === i.item_id ? (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <input value={eName} autoFocus onChange={(e) => setEName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveItem(i); if (e.key === "Escape") setEditItem(null); }}
+                              className="w-48 rounded-lg border border-ink/30 px-2 py-1 text-[12px] font-normal outline-none" />
+                            <select value={eItemCat} onChange={(e) => setEItemCat(e.target.value)}
+                              className="rounded-lg border border-ink/30 px-1.5 py-1 text-[12px] font-normal outline-none">
+                              <option value="">no category</option>
+                              {["Kids", "Child", "Ladies", "Men"].map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <button onClick={() => saveItem(i)} className="text-[11px] font-bold text-ink">save</button>
+                            <button onClick={() => setEditItem(null)} className="text-[11px] font-normal text-ink/50">cancel</button>
+                          </span>
+                        ) : (<>{i.name}
+                          {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</>)}
+                      </td>
                       <td className="px-4 py-2.5">
                         {i.category
                           ? <span className="rounded-full bg-panel px-2 py-0.5 text-[11.5px] font-semibold text-ink/75">{i.category}</span>
                           : <span className="text-muted">—</span>}
                         {i.raw_material_reference && <span className="ml-1.5 text-[11px] text-hint">{i.raw_material_reference}</span>}
                       </td>
-                      <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>{n(i.quantity)}</td>
-                      <td className="px-4 py-2.5 text-[12px] text-muted">{i.last_updated ? when(i.last_updated) : "—"}
-                        {tab === "materials" && canManage && (
-                          <button onClick={() => delItem(i)} title="Remove item"
-                            className="ml-2 rounded-full p-1 text-muted hover:text-danger">✕</button>
-                        )}</td>
+                      <td className={`px-4 py-2.5 text-right tnum font-bold ${i.quantity > 0 ? "text-ink" : "text-hint/60"}`}>
+                        {stockRow === i.item_id ? (
+                          <span className="flex items-center justify-end gap-1.5">
+                            <input type="number" value={sQty} autoFocus onChange={(e) => setSQty(e.target.value)}
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] outline-none" />
+                            <input value={sWhy} onChange={(e) => setSWhy(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveStock(i); if (e.key === "Escape") setStockRow(null); }}
+                              placeholder="why" className="w-28 rounded-lg border border-ink/30 px-2 py-1 text-left text-[12px] outline-none" />
+                            <button onClick={() => saveStock(i)} className="text-[11px] font-bold text-ink">save</button>
+                            <button onClick={() => setStockRow(null)} className="text-[11px] text-ink/50">✕</button>
+                          </span>
+                        ) : n(i.quantity)}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12px] text-muted">
+                        {i.last_updated ? when(i.last_updated) : "—"}
+                        {canManage && (
+                          <span className="ml-2 inline-flex gap-2">
+                            {tab === "stock" ? (
+                              <button onClick={() => { setStockRow(i.item_id); setSQty(String(i.quantity)); setSWhy(""); }}
+                                className="text-[11px] font-semibold text-ink/50 hover:text-ink">set stock</button>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? ""); }}
+                                  className="text-[11px] font-semibold text-ink/50 hover:text-ink">edit</button>
+                                {killRow === i.item_id ? (
+                                  <>
+                                    <span className="text-[11px] text-ink/60">remove?</span>
+                                    <button onClick={() => delItem(i)} className="text-[11px] font-bold text-danger">yes</button>
+                                    <button onClick={() => setKillRow(null)} className="text-[11px] text-ink/50">no</button>
+                                  </>
+                                ) : (
+                                  <button onClick={() => setKillRow(i.item_id)}
+                                    className="text-[11px] font-semibold text-danger/70 hover:text-danger">remove</button>
+                                )}
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
