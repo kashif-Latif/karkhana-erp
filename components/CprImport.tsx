@@ -42,6 +42,7 @@ import { Upload, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucid
 import { supabase } from "@/lib/supabase";
 import { parseCsv, matchHeader, toNum } from "@/lib/csv";
 import Modal, { btnPrimary, btnGhost } from "@/components/Modal";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type CprRow = {
   tracking_id: string; status: string;
@@ -411,6 +412,7 @@ type Result = { ref: string; ok: boolean; report: Record<string, unknown> };
 
 export default function CprImport({ onDone }: { onDone?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -424,6 +426,11 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
   const [progress, setProgress] = useState("");
   const [checked, setChecked] = useState(false);
   const [committed, setCommitted] = useState(false);
+  /* Kashif, 8 Sep: on import, ask whether to cancel the returned orders in
+     Shopify as well. Off by default — cancelling has no undo — and confirmed
+     once more before anything is written. Whatever Shopify refuses stays on
+     Disputes marked "Shopify refused", with the reason. */
+  const [cancelReturns, setCancelReturns] = useState(false);
 
   const all = (parsed?.batches ?? []).filter((b) => b.ref !== "__dupes__");
   const dupeNote = (parsed?.batches ?? []).find((b) => b.ref === "__dupes__")?.problem;
@@ -472,6 +479,15 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
      this system that moves money. Slower and correct. */
   async function run(dry: boolean) {
     if (!parsed || !supabase) return;
+    if (!dry && cancelReturns) {
+      const nRet = (many ? good : all).reduce((t, b) => t + b.rows.filter((r) => !isDelivered(r.status)).length, 0);
+      const ok = await confirm({
+        title: `Cancel the ${nRet} returned order${nRet === 1 ? "" : "s"} in Shopify after importing?`,
+        body: "Shopify has no un-cancel. Orders the agents already cancelled are skipped. Anything Shopify refuses stays on the Disputes page with the reason.",
+        confirmLabel: "Import and cancel them",
+      });
+      if (!ok) return;
+    }
     setBusy(true); setErr(""); setResults([]);
     const acc: Result[] = [];
     const list = many ? good : all;
@@ -481,6 +497,8 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
       setProgress(`${dry ? "Checking" : "Importing"} ${i + 1} of ${list.length} · ${b.ref || "settlement"}`);
       // Kept so the Shopify push below knows what this settlement covered.
       const deliveredNums = [...new Set(b.rows.filter((r) => /deliver/i.test(r.status))
+        .map((r) => r.tracking_id))];
+      const returnedNums = [...new Set(b.rows.filter((r) => !isDelivered(r.status))
         .map((r) => r.tracking_id))];
       const { data, error } = await supabase.rpc("hub_cpr_import", {
         p_courier: many ? b.courier : courier,
@@ -527,6 +545,32 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
           if (se) acc.push({ ref: b.ref, ok: false,
             report: { shopify: `${action}: ${se.message} — the import itself is safe; use the buttons on the settlement to retry.` } });
         }
+        setResults([...acc]);
+      }
+
+      /* RETURNS — only when asked, and only after the import itself is in.
+         The function skips what agents already cancelled and what an earlier
+         run did; it is called again while it reports a full batch. */
+      if (!dry && !error && (data as { ok?: boolean })?.ok === true && cancelReturns && returnedNums.length) {
+        setProgress(`Cancelling returns in Shopify for ${b.ref || "this settlement"}…`);
+        let closed = 0, skipped = 0, failedN = 0, rounds = 0;
+        for (;;) {
+          const { data: wb, error: we } = await supabase.functions.invoke("shopify-writeback", {
+            body: { action: "cancel", tracking: returnedNums, dry_run: false, max: 200,
+                    confirm: "CANCEL PERMANENTLY" },
+          });
+          if (we) {
+            acc.push({ ref: b.ref, ok: false,
+              report: { shopify: `cancel: ${we.message} — the import itself is safe; the returns are on Disputes.` } });
+            break;
+          }
+          const w = (wb ?? {}) as { closed?: number; skipped?: number; failed?: number };
+          closed += w.closed ?? 0; skipped += w.skipped ?? 0; failedN += w.failed ?? 0;
+          rounds++;
+          if ((w.closed ?? 0) < 200 || rounds >= 3) break;
+        }
+        acc.push({ ref: b.ref, ok: true,
+          report: { report: `Shopify returns: ${closed} cancelled, ${skipped} already done or unmatched, ${failedN} refused${failedN ? " — see Disputes" : ""}.` } });
         setResults([...acc]);
       }
     }
@@ -688,7 +732,7 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
                             : <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-600" />}
                       <span className="font-mono">{r.ref || "—"}</span>
                       <span className="text-muted">
-                        {String(r.report.report ?? r.report.guard ?? r.report.error ?? "")}
+                        {String(r.report.report ?? r.report.guard ?? r.report.error ?? r.report.shopify ?? "")}
                       </span>
                     </div>
                   ))}
@@ -697,7 +741,20 @@ export default function CprImport({ onDone }: { onDone?: () => void }) {
               );
             })()}
 
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-card border border-line bg-panel/40 p-3 text-[12.5px] dark:border-white/10 dark:bg-white/[0.04]">
+              <input type="checkbox" className="mt-0.5" checked={cancelReturns} disabled={busy || committed}
+                     onChange={(e) => setCancelReturns(e.target.checked)} />
+              <span>
+                <b>Also cancel the returned orders in Shopify.</b>{" "}
+                <span className="text-muted dark:text-[#a89f93]">
+                  Delivered ones are always marked paid and delivered. Ticking this cancels the
+                  returns too — permanent in Shopify, asked once more before writing. Anything
+                  Shopify refuses stays on Disputes with the reason.
+                </span>
+              </span>
+            </label>
+
+            <div className="mt-3 flex items-center justify-end gap-2">
               <button className={btnGhost} disabled={busy} onClick={() => setOpen(false)}>Close</button>
               <button className={btnGhost} disabled={busy || !guardReady} onClick={() => run(true)}>
                 Check {many ? `all ${good.length}` : "only"}
