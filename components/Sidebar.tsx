@@ -18,49 +18,35 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-  /* Receiving comes before the material catalogue: stock arriving is the
-     daily job, and the catalogue is the reference you consult while doing
-     it. "Inventory" said nothing about what the section was for. */
-  { label: "Receiving Stock", Icon: Boxes, children: [
-    { label: "Received", href: "/inventory" },
+
+  /* ── KARKHANA ── buying material and stitching it into pieces. Ends at
+     Inventory: what came off the floor, stitched but not yet finished. */
+  { label: "Karkhana", Icon: Factory, children: [
+    { label: "GRN · Receiving", href: "/inventory" },
     { label: "Sorting", href: "/inventory/sorting" },
-  ] },
-  /* Raw material that has been received and sorted, grouped the way it sits
-     on the shelf: material, then category, then size. */
-  { label: "Stock", href: "/stock", Icon: Warehouse },
-  /* An article and an order are the same conversation — what we make, and how
-     many of it. They were two separate menu entries for no reason. */
-  { label: "Order", Icon: ClipboardList, children: [
+    { label: "Stock", href: "/stock" },
+    { label: "Raw materials", href: "/raw-materials" },
     { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Other material order", href: "/orders?tab=other" },
+    { label: "Stitching unit", href: "/process" },
+    { label: "Inventory", href: "/inventory/final-products" },
   ] },
-  /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
-     are labels on the work, not gates a piece passes through one at a time —
-     what matters is how many of the order are still out on the floor, and that
-     count lives on the unit.
 
-     Stock movements used to hang here as its own page. It is gone: issuing,
-     returning and writing off material all belong to an order, and they are on
-     the order now. A second door into the store is how 100 kg of unsorted
-     fabric reached Cutting with no order behind it. */
-  { label: "Main Factory Stitching Unit", Icon: Factory, children: [
-    { label: "Work & wages", href: "/process" },
+  /* ── FINISHING ── takes stitched pieces OUT of Karkhana's inventory and
+     turns them into sellable ones. Its own department because the work,
+     the material and the men are all different from the floor. */
+  { label: "Finishing", Icon: Layers, children: [
+    { label: "Packing", href: "/packing" },
   ] },
-  /* Finished garments. Not the same thing as Stock above, and named so the
-     difference is obvious: Stock is what you buy, Inventory is what you make. */
-  /* Between the floor and the final store: stitched pieces become sellable
-     ones here, consuming stickers and shoppers and costing labour (K147). */
-  { label: "Packing", href: "/packing", Icon: PackageCheck },
-  { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
-  /* Stands alone: its own items, stock and in/out ledger (K138), gated on
-     khana.view. Kept through the revert — the Final Inventory work is the
-     part that stays. */
-  { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
-  /* Not a step in the run — the catalogue you open when a material you have
-     never bought before turns up and needs adding. Below the flow, not inside
-     Receiving, so it is not hidden on the day you need it. */
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
+
+  /* ── WAREHOUSE ── finished pieces going out to parties and branches. */
+  /* One page with its own tabs — Product list, Stock, In, Out. Splitting it
+     into menu entries that all open the same screen would only look like
+     four places. */
+  { label: "Warehouse", href: "/final-inventory", Icon: Boxes },
+
+  /* Serve every department, belong to none. */
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
   { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
