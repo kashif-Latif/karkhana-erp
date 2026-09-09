@@ -19,47 +19,43 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
 
-  /* RAW MATERIAL — everything about material you BUY, in the order it
-     happens: it arrives (GRN), it sits on the shelf (Inventory), it goes
-     back when it is wrong (Purchase return). Stock used to be a separate
-     top-level entry, which split one subject across two places. */
+  /* RAW MATERIAL — material you buy, in the order it happens. Articles sit
+     here because an article is a recipe FOR raw material: you open it while
+     deciding what to buy, not while running the floor. Sorting is out of the
+     menu for now — the records survive, the entry point is gone. */
   { label: "Raw Material", Icon: Boxes, children: [
     { label: "GRN", href: "/inventory" },
     { label: "Inventory", href: "/stock" },
-    { label: "Sorting", href: "/inventory/sorting" },
+    { label: "Articles", href: "/articles" },
     { label: "Purchase return", href: "/purchase-return" },
   ] },
 
-  /* What we make, and how many of it. */
-  { label: "Order", Icon: ClipboardList, children: [
-    { label: "Articles", href: "/articles" },
-    { label: "Order by cloth", href: "/orders" },
-    { label: "Other material order", href: "/orders?tab=other" },
-  ] },
+  /* The catalogue itself — materials and their categories. */
+  { label: "Materials", href: "/raw-materials", Icon: Layers },
 
-  /* Cutting, overlock, flatlock and singlelock are stages inside one unit,
-     not gates a piece passes through one at a time. */
   { label: "Cutting", Icon: Factory, children: [
     { label: "Work & wages", href: "/process" },
   ] },
 
-  /* Stock is what you buy. Inventory here is what you MAKE — named so the
-     difference is obvious at a glance. */
+  /* Order moved below the material it draws on: you cannot place one until
+     the material and the article exist. */
+  { label: "Order", Icon: ClipboardList, children: [
+    { label: "Order by cloth", href: "/orders" },
+    { label: "Other material order", href: "/orders?tab=other" },
+  ] },
+
+  /* Stock is what you buy. This is what you MAKE. */
   { label: "Finished Goods", href: "/inventory/final-products", Icon: PackageCheck },
 
   /* Stands alone: its own items, stock and in/out ledger (K138), gated on
      khana.view — handed to one man, linked to no other department. */
   { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
 
-  /* The catalogue you open when a material you have never bought turns up.
-     Below the flow, not inside it. */
-  { label: "Materials", href: "/raw-materials", Icon: Layers },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
 
-  /* ACCOUNT PAYABLE — who the factory owes. Supplier credit and labour are
-     both money going out, but they behave nothing alike: one is an invoice
-     with terms, the other is a man waiting at the end of a shift. Same
-     heading, separate screens. */
+  /* Supplier credit and labour are both money going out, but they behave
+     nothing alike: one is an invoice with terms, the other is a man waiting
+     at the end of a shift. */
   { label: "Account Payable", Icon: Wallet, children: [
     { label: "Supplier (credit)", href: "/payables/suppliers" },
     { label: "Labour pay", href: "/payables/labour" },
