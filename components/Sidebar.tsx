@@ -26,12 +26,12 @@ const NAV: NavItem[] = [
   { label: "Raw Material", Icon: Boxes, children: [
     { label: "GRN", href: "/inventory" },
     { label: "Inventory", href: "/stock" },
-    { label: "Articles", href: "/articles" },
+    { label: "Article recipes", href: "/articles" },
     { label: "Purchase return", href: "/purchase-return" },
   ] },
 
   /* The catalogue itself — materials and their categories. */
-  { label: "Materials", href: "/raw-materials", Icon: Layers },
+  { label: "Articles", href: "/raw-materials", Icon: Layers },
 
   { label: "Cutting", Icon: Factory, children: [
     { label: "Work & wages", href: "/process" },
