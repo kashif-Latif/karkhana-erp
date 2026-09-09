@@ -129,7 +129,9 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
                  Receiving Stock was the single group in this menu. With three
                  groups, all three lit up and expanded whenever you opened a
                  receiving page. Each group now answers for its own children. */
-              const anyActive = item.children.some((c) => childActive(c.href));
+              /* Headings carry no href — skip them before asking whether a
+                 child is the active route. */
+              const anyActive = item.children.some((c) => !c.heading && childActive(c.href!));
               const open = expanded[item.label] ?? anyActive;
               return (
                 <div key={item.label}>
