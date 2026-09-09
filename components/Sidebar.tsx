@@ -13,44 +13,53 @@ import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
 
-type Child = { label: string; href: string };
+/* A child is either a link, or a heading that groups the links under it.
+   Karkhana has nine screens; nine in a row reads as a wall. Headings turn
+   it into four short stacks you can scan. */
+type Child = { label: string; href: string; heading?: false }
+            | { label: string; heading: true; href?: undefined };
 type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number; children?: Child[] };
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
 
-  /* ── KARKHANA ── buying material and stitching it into pieces. Ends at
-     Inventory: what came off the floor, stitched but not yet finished. */
+  /* ═══ KARKHANA ═══ material in, pieces out, finished and packed.
+     Grouped in the order the work actually happens. */
   { label: "Karkhana", Icon: Factory, children: [
-    { label: "GRN · Receiving", href: "/inventory" },
-    { label: "Sorting", href: "/inventory/sorting" },
+    { label: "Receiving store", heading: true },
+    { label: "New GRN", href: "/inventory" },
     { label: "Stock", href: "/stock" },
     { label: "Raw materials", href: "/raw-materials" },
+
+    { label: "Order", heading: true },
     { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
-    { label: "Other material order", href: "/orders?tab=other" },
+    { label: "Order by other material", href: "/orders?tab=other" },
+
+    { label: "Production", heading: true },
     { label: "Stitching unit", href: "/process" },
     { label: "Inventory", href: "/inventory/final-products" },
+
+    /* Fixing, clipping and pressing are stages of the same job as packing —
+       same men, same bench, same wage rule. One screen with a stage on it,
+       not four screens to fix every future bug in. */
+    { label: "Finishing", heading: true },
+    { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
   ] },
 
-  /* ── FINISHING ── takes stitched pieces OUT of Karkhana's inventory and
-     turns them into sellable ones. Its own department because the work,
-     the material and the men are all different from the floor. */
-  { label: "Finishing", Icon: Layers, children: [
-    { label: "Packing", href: "/packing" },
-  ] },
-
-  /* ── WAREHOUSE ── finished pieces going out to parties and branches. */
-  /* One page with its own tabs — Product list, Stock, In, Out. Splitting it
-     into menu entries that all open the same screen would only look like
-     four places. */
+  /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
+  /* The warehouse GRN — receiving from Karkhana — is the next build. Until
+     it exists this is one page with its own tabs, not a dead link. */
   { label: "Warehouse", href: "/final-inventory", Icon: Boxes },
 
-  /* Serve every department, belong to none. */
-  { label: "Suppliers", href: "/suppliers", Icon: Truck },
-  { label: "Payments", href: "/payments", Icon: Wallet },
+  /* ═══ PAYMENTS ═══ its own section, serving both departments. */
+  { label: "Payments", Icon: Wallet, children: [
+    { label: "Suppliers", href: "/suppliers" },
+    { label: "Payments made", href: "/payments" },
+    { label: "Approvals", href: "/approvals" },
+  ] },
+
   { label: "Reports", href: "/reports", Icon: FileBarChart },
-  { label: "Approvals", href: "/approvals", Icon: CheckSquare, badge: 7 },
 ];
 
 /* ADMINISTRATION AND EMPLOYEES ARE NOT KARKHANA THINGS.
@@ -80,7 +89,10 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
 
   const items: NavItem[] = NAV.map((n) => {
     if (n.children) {
-      const kids = n.children.filter((c) => can(ROUTE_PERMS[c.href] ?? null));
+      const visible = n.children.filter((c) => c.heading || can(ROUTE_PERMS[c.href!] ?? null));
+      /* A heading with nothing left under it is noise — drop it. */
+      const kids = visible.filter((c, i) =>
+        !c.heading || visible.slice(i + 1).some((x) => !x.heading));
       return kids.length ? { ...n, children: kids } : null;
     }
     return n.href && can(ROUTE_PERMS[n.href] ?? null) ? n : null;
@@ -130,10 +142,16 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
                   </button>
                   {open && (
                     <div className="mt-1 space-y-1 pl-3.5">
-                      {item.children.map((c) => {
-                        const on = childActive(c.href);
+                      {item.children.map((c, ci) => {
+                        if (c.heading) return (
+                          <p key={`h-${ci}`}
+                            className={`px-3.5 pb-0.5 text-[10.5px] font-bold uppercase tracking-wide text-hint ${ci ? "pt-2.5" : "pt-1"}`}>
+                            {c.label}
+                          </p>
+                        );
+                        const on = childActive(c.href!);
                         return (
-                          <Link key={c.href} href={c.href}
+                          <Link key={c.href} href={c.href!}
                             className={`flex items-center gap-2.5 rounded-xl2 px-3.5 py-2 text-[13.5px] transition ${on ? "bg-salmon-soft font-semibold text-ink" : "text-muted hover:bg-panel hover:text-ink"}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${on ? "bg-salmon-strong" : "bg-current opacity-30"}`} />
                             {c.label}
