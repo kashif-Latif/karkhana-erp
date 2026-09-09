@@ -49,6 +49,9 @@ const NAV: NavItem[] = [
   ] },
   /* Finished garments. Not the same thing as Stock above, and named so the
      difference is obvious: Stock is what you buy, Inventory is what you make. */
+  /* Between the floor and the final store: stitched pieces become sellable
+     ones here, consuming stickers and shoppers and costing labour (K147). */
+  { label: "Packing", href: "/packing", Icon: PackageCheck },
   { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
   /* Stands alone: its own items, stock and in/out ledger (K138), gated on
      khana.view. Kept through the revert — the Final Inventory work is the

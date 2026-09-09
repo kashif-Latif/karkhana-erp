@@ -5,6 +5,7 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/": null,
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
+  "/packing": ["production.view", "production.entry"],
   "/final-inventory": ["khana.view"],
   /* K119 gave finished garments their own permission. This used to sit under
      inventory.view, which is the permission for raw material — someone who can
