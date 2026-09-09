@@ -18,49 +18,47 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-
-  /* RAW MATERIAL — material you buy, in the order it happens. Articles sit
-     here because an article is a recipe FOR raw material: you open it while
-     deciding what to buy, not while running the floor. Sorting is out of the
-     menu for now — the records survive, the entry point is gone. */
-  { label: "Raw Material", Icon: Boxes, children: [
-    { label: "GRN", href: "/inventory" },
-    { label: "Inventory", href: "/stock" },
-    { label: "Article recipes", href: "/articles" },
-    { label: "Purchase return", href: "/purchase-return" },
+  /* Receiving comes before the material catalogue: stock arriving is the
+     daily job, and the catalogue is the reference you consult while doing
+     it. "Inventory" said nothing about what the section was for. */
+  { label: "Receiving Stock", Icon: Boxes, children: [
+    { label: "Received", href: "/inventory" },
+    { label: "Sorting", href: "/inventory/sorting" },
   ] },
-
-  /* The catalogue itself — materials and their categories. */
-  { label: "Articles", href: "/raw-materials", Icon: Layers },
-
-  { label: "Cutting", Icon: Factory, children: [
-    { label: "Work & wages", href: "/process" },
-  ] },
-
-  /* Order moved below the material it draws on: you cannot place one until
-     the material and the article exist. */
+  /* Raw material that has been received and sorted, grouped the way it sits
+     on the shelf: material, then category, then size. */
+  { label: "Stock", href: "/stock", Icon: Warehouse },
+  /* An article and an order are the same conversation — what we make, and how
+     many of it. They were two separate menu entries for no reason. */
   { label: "Order", Icon: ClipboardList, children: [
+    { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Other material order", href: "/orders?tab=other" },
   ] },
+  /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
+     are labels on the work, not gates a piece passes through one at a time —
+     what matters is how many of the order are still out on the floor, and that
+     count lives on the unit.
 
-  /* Stock is what you buy. This is what you MAKE. */
-  { label: "Finished Goods", href: "/inventory/final-products", Icon: PackageCheck },
-
-  /* Stands alone: its own items, stock and in/out ledger (K138), gated on
-     khana.view — handed to one man, linked to no other department. */
-  { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
-
-  { label: "Suppliers", href: "/suppliers", Icon: Truck },
-
-  /* Supplier credit and labour are both money going out, but they behave
-     nothing alike: one is an invoice with terms, the other is a man waiting
-     at the end of a shift. */
-  { label: "Account Payable", Icon: Wallet, children: [
-    { label: "Supplier (credit)", href: "/payables/suppliers" },
-    { label: "Labour pay", href: "/payables/labour" },
+     Stock movements used to hang here as its own page. It is gone: issuing,
+     returning and writing off material all belong to an order, and they are on
+     the order now. A second door into the store is how 100 kg of unsorted
+     fabric reached Cutting with no order behind it. */
+  { label: "Main Factory Stitching Unit", Icon: Factory, children: [
+    { label: "Work & wages", href: "/process" },
   ] },
-
+  /* Finished garments. Not the same thing as Stock above, and named so the
+     difference is obvious: Stock is what you buy, Inventory is what you make. */
+  { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
+  /* Stands alone: its own items, stock and in/out ledger (K138), gated on
+     khana.view. Kept through the revert — the Final Inventory work is the
+     part that stays. */
+  { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
+  /* Not a step in the run — the catalogue you open when a material you have
+     never bought before turns up and needs adding. Below the flow, not inside
+     Receiving, so it is not hidden on the day you need it. */
+  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
+  { label: "Suppliers", href: "/suppliers", Icon: Truck },
   { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
   { label: "Approvals", href: "/approvals", Icon: CheckSquare, badge: 7 },
