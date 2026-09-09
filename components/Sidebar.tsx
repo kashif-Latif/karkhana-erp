@@ -18,46 +18,53 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-  /* Receiving comes before the material catalogue: stock arriving is the
-     daily job, and the catalogue is the reference you consult while doing
-     it. "Inventory" said nothing about what the section was for. */
-  { label: "Receiving Stock", Icon: Boxes, children: [
-    { label: "Received", href: "/inventory" },
+
+  /* RAW MATERIAL — everything about material you BUY, in the order it
+     happens: it arrives (GRN), it sits on the shelf (Inventory), it goes
+     back when it is wrong (Purchase return). Stock used to be a separate
+     top-level entry, which split one subject across two places. */
+  { label: "Raw Material", Icon: Boxes, children: [
+    { label: "GRN", href: "/inventory" },
+    { label: "Inventory", href: "/stock" },
     { label: "Sorting", href: "/inventory/sorting" },
+    { label: "Purchase return", href: "/purchase-return" },
   ] },
-  /* Raw material that has been received and sorted, grouped the way it sits
-     on the shelf: material, then category, then size. */
-  { label: "Stock", href: "/stock", Icon: Warehouse },
-  /* An article and an order are the same conversation — what we make, and how
-     many of it. They were two separate menu entries for no reason. */
+
+  /* What we make, and how many of it. */
   { label: "Order", Icon: ClipboardList, children: [
     { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Other material order", href: "/orders?tab=other" },
   ] },
-  /* Cutting, overlock, flatlock and singlelock sit inside one unit. The stages
-     are labels on the work, not gates a piece passes through one at a time —
-     what matters is how many of the order are still out on the floor, and that
-     count lives on the unit.
 
-     Stock movements used to hang here as its own page. It is gone: issuing,
-     returning and writing off material all belong to an order, and they are on
-     the order now. A second door into the store is how 100 kg of unsorted
-     fabric reached Cutting with no order behind it. */
-  { label: "Main Factory Stitching Unit", Icon: Factory, children: [
+  /* Cutting, overlock, flatlock and singlelock are stages inside one unit,
+     not gates a piece passes through one at a time. */
+  { label: "Cutting", Icon: Factory, children: [
     { label: "Work & wages", href: "/process" },
   ] },
-  /* Finished garments. Not the same thing as Stock above, and named so the
-     difference is obvious: Stock is what you buy, Inventory is what you make. */
-  { label: "Inventory", href: "/inventory/final-products", Icon: PackageCheck },
+
+  /* Stock is what you buy. Inventory here is what you MAKE — named so the
+     difference is obvious at a glance. */
+  { label: "Finished Goods", href: "/inventory/final-products", Icon: PackageCheck },
+
   /* Stands alone: its own items, stock and in/out ledger (K138), gated on
      khana.view — handed to one man, linked to no other department. */
   { label: "Final Inventory", href: "/final-inventory", Icon: Boxes },
-  /* Not a step in the run — the catalogue you open when a material you have
-     never bought before turns up and needs adding. Below the flow, not inside
-     Receiving, so it is not hidden on the day you need it. */
-  { label: "Raw Materials", href: "/raw-materials", Icon: Layers },
+
+  /* The catalogue you open when a material you have never bought turns up.
+     Below the flow, not inside it. */
+  { label: "Materials", href: "/raw-materials", Icon: Layers },
   { label: "Suppliers", href: "/suppliers", Icon: Truck },
+
+  /* ACCOUNT PAYABLE — who the factory owes. Supplier credit and labour are
+     both money going out, but they behave nothing alike: one is an invoice
+     with terms, the other is a man waiting at the end of a shift. Same
+     heading, separate screens. */
+  { label: "Account Payable", Icon: Wallet, children: [
+    { label: "Supplier (credit)", href: "/payables/suppliers" },
+    { label: "Labour pay", href: "/payables/labour" },
+  ] },
+
   { label: "Payments", href: "/payments", Icon: Wallet },
   { label: "Reports", href: "/reports", Icon: FileBarChart },
   { label: "Approvals", href: "/approvals", Icon: CheckSquare, badge: 7 },
