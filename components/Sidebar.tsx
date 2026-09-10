@@ -23,6 +23,11 @@ type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number;
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
 
+  /* Articles sit above Karkhana, not inside it: an article is a product
+     definition, and both departments read it — Karkhana to know the recipe,
+     the warehouse to know the barcode. */
+  { label: "Articles", href: "/articles", Icon: Shirt },
+
   /* ═══ KARKHANA ═══ material in, pieces out, finished and packed.
      Grouped in the order the work actually happens. */
   { label: "Karkhana", Icon: Factory, children: [
@@ -32,7 +37,6 @@ const NAV: NavItem[] = [
     { label: "Raw materials", href: "/raw-materials" },
 
     { label: "Order", heading: true },
-    { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Order by other material", href: "/orders?tab=other" },
 

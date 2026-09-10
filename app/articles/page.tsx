@@ -6,7 +6,13 @@ import { Loader2, Plus, Pencil, Shirt, X, Trash2, BookOpen } from "lucide-react"
 
 type Cat = { id: string; name: string };
 type Group = { id: string; name: string; has_category: boolean; has_size: boolean; units: { id: string; symbol: string }[]; categories: Cat[] };
-type Article = { id: string; code: string; name: string; garment_type: string | null; audience: string | null; size: string | null; notes: string | null; is_active: boolean; created_at: string; bomCount: number };
+type Article = { id: string; code: string; name: string; garment_type: string | null;
+                 audience: string | null; size: string | null; notes: string | null;
+                 is_active: boolean; created_at: string; bomCount: number;
+                 /* K148 */
+                 section: string | null; system_barcode: string | null;
+                 manual_barcode: string | null; cost_price: number | null;
+                 retail_price: number | null; gst_rate: number | null };
 type BomLine = { group_id: string; category_id: string; size_id: string; quantity: string; unit_id: string };
 
 const AUDIENCES = ["Kids", "Men", "Ladies", "Unisex"];
@@ -34,7 +40,7 @@ export default function Articles() {
     if (!supabase) return;
     setLoading(true);
     const [a, g, sz, pm] = await Promise.all([
-      supabase.from("articles").select("id,code,name,garment_type,audience,size,notes,is_active,created_at, article_bom(count)").order("code", { ascending: false }),
+      supabase.from("articles").select("id,code,name,garment_type,audience,size,notes,is_active,created_at,section,system_barcode,manual_barcode,cost_price,retail_price,gst_rate, article_bom(count)").order("code", { ascending: false }),
       supabase.from("material_groups").select("id,name,has_category,has_color,has_size, group_units(units(id,symbol)), material_categories(id,name)").eq("is_active", true).order("name"),
       supabase.from("sizes").select("id,name").eq("is_active", true).order("sort_order"),
       supabase.rpc("has_permission", { p_permission_code: "production.manage" }),
@@ -54,20 +60,65 @@ export default function Articles() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  function openAdd() { setArtModal({}); setName(""); setGtype(""); setAud(""); setSize(""); setNotes(""); setActive(true); setArtErr(""); }
-  function openEdit(a: Article) { setArtModal({ id: a.id }); setName(a.name); setGtype(a.garment_type || ""); setAud(a.audience || ""); setSize(a.size || ""); setNotes(a.notes || ""); setActive(a.is_active); setArtErr(""); }
+  function openAdd() { setArtModal({}); setName(""); setGtype(""); setAud(""); setSize(""); setNotes(""); setActive(true); setArtErr("");
+    setSection(""); setManualBc(""); setCost(""); setRetail(""); setGst(""); setMadeBc(null); }
+  function openEdit(a: Article) { setArtModal({ id: a.id }); setName(a.name); setGtype(a.garment_type || ""); setAud(a.audience || ""); setSize(a.size || ""); setNotes(a.notes || ""); setActive(a.is_active); setArtErr("");
+    setSection(a.section || ""); setManualBc(a.manual_barcode || "");
+    setCost(a.cost_price == null ? "" : String(a.cost_price));
+    setRetail(a.retail_price == null ? "" : String(a.retail_price));
+    setGst(a.gst_rate == null ? "" : String(a.gst_rate)); setMadeBc(null); }
+
+  /* K148 fields. The system barcode is NOT here — it is generated on save
+     and can never be typed, which is why two people cannot invent the same
+     one. */
+  const [section, setSection] = useState("");
+  const [manualBc, setManualBc] = useState("");
+  const [cost, setCost] = useState("");
+  const [retail, setRetail] = useState("");
+  const [gst, setGst] = useState("");
+  const [madeBc, setMadeBc] = useState<string | null>(null);
 
   async function saveArticle() {
     setArtErr(""); if (!supabase) return;
     if (!name.trim()) { setArtErr("Enter an article name."); return; }
     setSavingArt(true);
-    const args = { p_name: name.trim(), p_garment_type: gtype, p_audience: aud, p_size: size, p_notes: notes };
-    const { error } = artModal?.id
-      ? await supabase.rpc("update_article", { p_id: artModal.id, ...args, p_is_active: active })
-      : await supabase.rpc("create_article", args);
+    if (artModal?.id) {
+      const { error } = await supabase.rpc("update_article", {
+        p_id: artModal.id, p_name: name.trim(), p_garment_type: gtype,
+        p_audience: aud, p_size: size, p_notes: notes, p_is_active: active,
+      });
+      /* Prices, GST and the manual barcode are plain columns — written
+         directly rather than widening the RPC's signature. */
+      if (!error) {
+        await supabase.from("articles").update({
+          section: section || null,
+          manual_barcode: manualBc.trim() || null,
+          cost_price: cost ? parseFloat(cost) : null,
+          retail_price: retail ? parseFloat(retail) : null,
+          gst_rate: gst ? parseFloat(gst) : null,
+        }).eq("id", artModal.id);
+      }
+      setSavingArt(false);
+      if (error) { setArtErr(error.message); return; }
+      setArtModal(null); load();
+      return;
+    }
+
+    if (!section) { setSavingArt(false); setArtErr("Which section does it belong to?"); return; }
+    const { data, error } = await supabase.rpc("add_article", {
+      p_name: name.trim(), p_section: section,
+      p_manual_barcode: manualBc.trim() || null,
+      p_garment_type: gtype || null, p_size: size || null,
+      p_cost_price: cost ? parseFloat(cost) : null,
+      p_retail_price: retail ? parseFloat(retail) : null,
+      p_gst_rate: gst ? parseFloat(gst) : null, p_code: null,
+    });
     setSavingArt(false);
     if (error) { setArtErr(error.message); return; }
-    setArtModal(null); load();
+    /* Show the generated barcode before closing — otherwise somebody must go
+       and look it up before printing a tag. */
+    setMadeBc(String((data as Record<string, unknown>)?.system_barcode ?? ""));
+    load();
   }
 
   const groupById = (id: string) => groups.find((g) => g.id === id);
@@ -146,7 +197,17 @@ export default function Articles() {
                   <tbody>
                     {articles.map((a) => (
                       <tr key={a.id} className="border-b border-line/60 last:border-0">
-                        <td className="px-5 py-3 font-mono text-[12px] text-muted">{a.code}</td>
+                        <td className="px-5 py-3 font-mono text-[12px]">
+                          {/* The barcode is what goes on the tag, so it reads
+                              first; the internal code sits under it. */}
+                          {a.system_barcode
+                            ? <span className="font-bold text-ink">{a.system_barcode}</span>
+                            : <span className="text-hint">no barcode</span>}
+                          <span className="block text-[11px] text-muted">{a.code}</span>
+                          {a.retail_price != null && (
+                            <span className="block text-[11px] text-hint">Rs {Number(a.retail_price).toLocaleString()}{a.gst_rate ? ` +${a.gst_rate}%` : ""}</span>
+                          )}
+                        </td>
                         <td className="px-5 py-3 font-semibold text-ink">{a.name}</td>
                         <td className="px-5 py-3 text-ink/70">{a.garment_type || "—"}</td>
                         <td className="px-5 py-3 text-ink/70">{a.audience || "—"}</td>
@@ -171,6 +232,13 @@ export default function Articles() {
       {artModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4" onClick={() => !savingArt && setArtModal(null)}>
           <div className="w-full max-w-md rounded-card bg-surface p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+            {madeBc && (
+              <div className="mb-3 rounded-xl2 border border-[#166534]/25 bg-success-soft p-4 text-center">
+                <p className="text-[12px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
+                <p className="mt-1 font-mono text-[28px] font-extrabold tracking-tight text-ink">{madeBc}</p>
+                <button onClick={openAdd} className="mt-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-ink/70">Add another</button>
+              </div>
+            )}
             <div className="mb-3 flex items-center justify-between"><h2 className="text-[16px] font-extrabold">{artModal.id ? "Edit article" : "Add article"}</h2><button onClick={() => setArtModal(null)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button></div>
             <label className="block text-[12px] font-medium text-muted">Article name *</label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kids Cotton Shirt" className={inp} autoFocus />
@@ -182,6 +250,33 @@ export default function Articles() {
               <div><label className="block text-[12px] font-medium text-muted">Size (optional)</label><input value={size} onChange={(e) => setSize(e.target.value)} placeholder="e.g. 2-6Y" className={inp} /></div>
               {artModal.id && <div><label className="block text-[12px] font-medium text-muted">Status</label><select value={active ? "1" : "0"} onChange={(e) => setActive(e.target.value === "1")} className={inp}><option value="1">Active</option><option value="0">Inactive</option></select></div>}
             </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div><label className="block text-[12px] font-medium text-muted">Section {artModal.id ? "" : "*"}</label>
+                <select value={section} onChange={(e) => setSection(e.target.value)} className={inp}>
+                  <option value="">—</option>
+                  <option value="041">041 · Kids</option>
+                  <option value="042">042 · Child</option>
+                  <option value="043">043 · Ladies</option>
+                  <option value="044">044 · Men</option>
+                </select></div>
+              <div><label className="block text-[12px] font-medium text-muted">Manual barcode</label>
+                <input value={manualBc} onChange={(e) => setManualBc(e.target.value)} placeholder="if one already exists" className={inp} /></div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div><label className="block text-[12px] font-medium text-muted">Cost price</label>
+                <input type="number" value={cost} onChange={(e) => setCost(e.target.value)} className={inp} /></div>
+              <div><label className="block text-[12px] font-medium text-muted">Retail price</label>
+                <input type="number" value={retail} onChange={(e) => setRetail(e.target.value)} className={inp} /></div>
+              <div><label className="block text-[12px] font-medium text-muted">GST %</label>
+                <input type="number" value={gst} onChange={(e) => setGst(e.target.value)} placeholder="18" className={inp} /></div>
+            </div>
+            {cost && retail && (
+              <p className="mt-2 text-[12px] text-ink/70">
+                Margin <b>Rs {(parseFloat(retail) - parseFloat(cost)).toLocaleString()}</b>
+                {gst ? ` · GST Rs ${(parseFloat(retail) * parseFloat(gst) / 100).toFixed(0)}` : ""}
+              </p>
+            )}
+            {!artModal.id && <p className="mt-2 text-[12px] text-hint">Barcode is generated on save — {section || "0??"}5001 upward, counting inside its own section.</p>}
             <label className="mt-3 block text-[12px] font-medium text-muted">Notes</label>
             <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optional" className={inp} />
             {artErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{artErr}</p>}
