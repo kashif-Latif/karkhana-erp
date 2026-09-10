@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { Boxes, PackagePlus, Loader2, FileText, Ban, AlertTriangle, X, Pencil, Trash2 } from "lucide-react";
+import { Boxes, PackagePlus, Loader2, FileText, Ban, AlertTriangle, X, Pencil, Trash2, Plus } from "lucide-react";
 import IconChip from "@/components/IconChip";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -92,15 +92,64 @@ export default function InventoryPage() {
     setDetailLines(rows);
   }
 
+  /* ADD NEW ITEM — here rather than on its own page, because a new article
+     is almost always discovered while receiving: the delivery arrives and it
+     is something never bought before. Making somebody leave the GRN screen
+     to create it is how half-finished items get made. */
+  const [addOpen, setAddOpen] = useState(false);
+  const [aName, setAName] = useState("");
+  const [aSection, setASection] = useState("");
+  const [aManual, setAManual] = useState("");
+  const [aType, setAType] = useState("");
+  const [aSize, setASize] = useState("");
+  const [aCost, setACost] = useState("");
+  const [aRetail, setARetail] = useState("");
+  const [aGst, setAGst] = useState("");
+  const [aBusy, setABusy] = useState(false);
+  const [aErr, setAErr] = useState("");
+  const [aDone, setADone] = useState<Record<string, unknown> | null>(null);
+
+  function openAdd() {
+    setAddOpen(true); setAName(""); setASection(""); setAManual(""); setAType("");
+    setASize(""); setACost(""); setARetail(""); setAGst(""); setAErr(""); setADone(null);
+  }
+
+  async function saveItem() {
+    if (!supabase) return;
+    setAErr("");
+    if (!aName.trim()) { setAErr("Give the item a name."); return; }
+    if (!aSection) { setAErr("Which section does it belong to?"); return; }
+    setABusy(true);
+    const { data, error } = await supabase.rpc("add_article", {
+      p_name: aName.trim(), p_section: aSection,
+      p_manual_barcode: aManual.trim() || null,
+      p_garment_type: aType.trim() || null, p_size: aSize.trim() || null,
+      p_cost_price: aCost ? parseFloat(aCost) : null,
+      p_retail_price: aRetail ? parseFloat(aRetail) : null,
+      p_gst_rate: aGst ? parseFloat(aGst) : null, p_code: null,
+    });
+    setABusy(false);
+    if (error) { setAErr(error.message); return; }
+    /* Show the generated barcode immediately — otherwise somebody has to go
+       and look it up before they can print a tag. */
+    setADone(data as Record<string, unknown>);
+  }
+
   return (
     <>
       <Topbar title="Inventory" subtitle="Live stock & receiving" />
       <div className="px-6 pb-10">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <p className="text-[13px] text-muted">Stock is calculated live from every receipt — always reconcilable.</p>
-          <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
-            <PackagePlus size={16} /> Receive Stock
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={openAdd}
+              className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-4 py-2.5 text-[13px] font-semibold text-ink/80 hover:bg-panel">
+              <Plus size={16} /> Add new item
+            </button>
+            <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
+              <PackagePlus size={16} /> Receive Stock
+            </Link>
+          </div>
         </div>
 
         {!isSupabaseConfigured ? (
@@ -280,6 +329,87 @@ export default function InventoryPage() {
                 {busy && <Loader2 size={15} className="animate-spin" />}{confirm.mode === "delete" ? "Delete permanently" : "Void receipt"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {addOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => setAddOpen(false)}>
+          <div className="w-full max-w-lg rounded-card bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[16px] font-extrabold text-ink">Add new item</p>
+            {aDone ? (
+              <>
+                <div className="mt-4 rounded-xl2 border border-[#166534]/25 bg-success-soft p-4 text-center">
+                  <p className="text-[12px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
+                  <p className="mt-1 font-mono text-[30px] font-extrabold tracking-tight text-ink">{String(aDone.system_barcode ?? "—")}</p>
+                  <p className="mt-1.5 text-[12.5px] text-ink/70">{String(aDone.code)}{aDone.manual_barcode ? ` · also ${String(aDone.manual_barcode)}` : ""}</p>
+                </div>
+                <p className="mt-3 text-[12.5px] text-muted">Set its recipe on the Articles screen — what one piece takes in fabric, thread and stickers.</p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button onClick={openAdd} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Add another</button>
+                  <button onClick={() => setAddOpen(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-[12px] font-medium text-muted">Item name *</label>
+                    <input value={aName} onChange={(e) => setAName(e.target.value)} autoFocus placeholder="e.g. Men Cotton Tracksuit" className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Section *</label>
+                    <select value={aSection} onChange={(e) => setASection(e.target.value)} className={inp}>
+                      <option value="">Choose…</option>
+                      <option value="041">041 · Kids</option>
+                      <option value="042">042 · Child</option>
+                      <option value="043">043 · Ladies</option>
+                      <option value="044">044 · Men</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Manual barcode</label>
+                    <input value={aManual} onChange={(e) => setAManual(e.target.value)} placeholder="if one already exists" className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Type</label>
+                    <input value={aType} onChange={(e) => setAType(e.target.value)} placeholder="shirt, trouser…" className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Size</label>
+                    <input value={aSize} onChange={(e) => setASize(e.target.value)} placeholder="M, 2-6Y…" className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Cost price</label>
+                    <input type="number" value={aCost} onChange={(e) => setACost(e.target.value)} className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">Retail price</label>
+                    <input type="number" value={aRetail} onChange={(e) => setARetail(e.target.value)} className={inp} />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-muted">GST %</label>
+                    <input type="number" value={aGst} onChange={(e) => setAGst(e.target.value)} placeholder="18" className={inp} />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    {aRetail && aCost && (
+                      <p className="text-[12px] text-ink/70">
+                        Margin <b>Rs {(parseFloat(aRetail) - parseFloat(aCost)).toLocaleString()}</b>
+                        {aGst ? ` · GST Rs ${(parseFloat(aRetail) * parseFloat(aGst) / 100).toFixed(0)}` : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {aErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{aErr}</p>}
+                <p className="mt-3 text-[12px] text-hint">The system barcode is generated on save — {aSection || "0??"}5001 upward, counting inside its own section.</p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button onClick={() => setAddOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+                  <button onClick={saveItem} disabled={aBusy}
+                    className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+                    {aBusy && <Loader2 size={15} className="animate-spin" />} Create item
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
