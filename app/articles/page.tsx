@@ -47,7 +47,18 @@ export default function Articles() {
     ]);
     setArticles(((a.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
       const bc = (r.article_bom as { count: number }[] | null)?.[0]?.count ?? 0;
-      return { id: r.id as string, code: r.code as string, name: r.name as string, garment_type: (r.garment_type as string) || null, audience: (r.audience as string) || null, size: (r.size as string) || null, notes: (r.notes as string) || null, is_active: !!r.is_active, created_at: r.created_at as string, bomCount: Number(bc) };
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      return { id: r.id as string, code: r.code as string, name: r.name as string,
+        garment_type: (r.garment_type as string) || null, audience: (r.audience as string) || null,
+        size: (r.size as string) || null, notes: (r.notes as string) || null,
+        is_active: !!r.is_active, created_at: r.created_at as string, bomCount: Number(bc),
+        /* K148 — extended the type and the query last round but not the
+           mapper in between, which is what the build caught. */
+        section: (r.section as string) || null,
+        system_barcode: (r.system_barcode as string) || null,
+        manual_barcode: (r.manual_barcode as string) || null,
+        cost_price: num(r.cost_price), retail_price: num(r.retail_price),
+        gst_rate: num(r.gst_rate) };
     }));
     setGroups(((g.data as unknown as Record<string, unknown>[]) ?? []).map((r) => {
       const gu = (r.group_units as { units: { id: string; symbol: string } | null }[]) ?? [];
