@@ -178,7 +178,7 @@ export default function Articles() {
 
   return (
     <>
-      <Topbar title="Articles" subtitle="Your garments & their material recipe" />
+      <Topbar title="Articles" subtitle="Every garment you make — barcode, recipe and price" />
       <div className="px-6 pb-12">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage articles.</div>
@@ -201,29 +201,43 @@ export default function Articles() {
               <div className="overflow-hidden rounded-card bg-surface shadow-card">
                 <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13.5px]">
                   <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
-                    <th className="px-5 py-3 font-semibold">Code</th><th className="px-5 py-3 font-semibold">Article</th>
+                    <th className="px-5 py-3 font-semibold">Barcode</th><th className="px-5 py-3 font-semibold">Article</th>
                     <th className="px-5 py-3 font-semibold">Type</th><th className="px-5 py-3 font-semibold">Audience</th>
-                    <th className="px-5 py-3 font-semibold">Recipe</th><th className="px-5 py-3 font-semibold">Added</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
+                    <th className="px-5 py-3 font-semibold">Recipe</th>
+                    <th className="px-5 py-3 text-right font-semibold">Cost</th>
+                    <th className="px-5 py-3 text-right font-semibold">Retail</th>
+                    <th className="px-5 py-3 text-right font-semibold">GST</th>
+                    <th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
                     {articles.map((a) => (
                       <tr key={a.id} className="border-b border-line/60 last:border-0">
                         <td className="px-5 py-3 font-mono text-[12px]">
-                          {/* The barcode is what goes on the tag, so it reads
-                              first; the internal code sits under it. */}
                           {a.system_barcode
-                            ? <span className="font-bold text-ink">{a.system_barcode}</span>
+                            ? <span className="text-[13.5px] font-bold text-ink">{a.system_barcode}</span>
                             : <span className="text-hint">no barcode</span>}
-                          <span className="block text-[11px] text-muted">{a.code}</span>
-                          {a.retail_price != null && (
-                            <span className="block text-[11px] text-hint">Rs {Number(a.retail_price).toLocaleString()}{a.gst_rate ? ` +${a.gst_rate}%` : ""}</span>
+                          {a.manual_barcode && (
+                            <span className="block text-[11px] text-muted">also {a.manual_barcode}</span>
                           )}
                         </td>
                         <td className="px-5 py-3 font-semibold text-ink">{a.name}</td>
                         <td className="px-5 py-3 text-ink/70">{a.garment_type || "—"}</td>
                         <td className="px-5 py-3 text-ink/70">{a.audience || "—"}</td>
                         <td className="px-5 py-3">{a.bomCount > 0 ? <span className="rounded-full bg-success-soft px-2 py-0.5 text-[11.5px] font-semibold text-[#166534]">{a.bomCount} material{a.bomCount > 1 ? "s" : ""}</span> : <span className="rounded-full bg-panel px-2 py-0.5 text-[11.5px] font-semibold text-muted">Not set</span>}</td>
-                        <td className="px-5 py-3 text-[12.5px] text-muted">{when(a.created_at)}</td>
+                        <td className="px-5 py-3 text-right tnum text-[12.5px] text-muted">
+                          {a.cost_price == null ? "—" : `Rs ${Number(a.cost_price).toLocaleString()}`}
+                        </td>
+                        <td className="px-5 py-3 text-right tnum text-[13px] font-semibold text-ink">
+                          {a.retail_price == null ? "—" : `Rs ${Number(a.retail_price).toLocaleString()}`}
+                        </td>
+                        <td className="px-5 py-3 text-right tnum text-[12.5px] text-muted">
+                          {a.gst_rate == null ? "—" : `${a.gst_rate}%`}
+                          {a.retail_price != null && a.gst_rate != null && (
+                            <span className="block text-[11px] text-hint">
+                              Rs {(Number(a.retail_price) * (1 + Number(a.gst_rate) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })} inc
+                            </span>
+                          )}
+                        </td>
                         <td className="px-5 py-3">{a.is_active ? <span className="text-[12.5px] font-medium text-[#166534]">Active</span> : <span className="text-[12.5px] text-muted">Inactive</span>}</td>
                         <td className="px-5 py-3"><div className="flex justify-end gap-1.5">
                           <button onClick={() => openRecipe(a)} className="flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel"><BookOpen size={13} /> Recipe</button>
@@ -247,7 +261,14 @@ export default function Articles() {
               <div className="mb-3 rounded-xl2 border border-[#166534]/25 bg-success-soft p-4 text-center">
                 <p className="text-[12px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
                 <p className="mt-1 font-mono text-[28px] font-extrabold tracking-tight text-ink">{madeBc}</p>
-                <button onClick={openAdd} className="mt-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-ink/70">Add another</button>
+                <div className="mt-2.5 flex justify-center gap-2">
+                  {/* The recipe is the thing people forget, and an article
+                      without one cannot be ordered. Offer it while they are
+                      still here rather than hoping they come back. */}
+                  <button onClick={() => { const made = articles.find((x) => x.system_barcode === madeBc); setArtModal(null); if (made) openRecipe(made); }}
+                    className="rounded-full bg-ink px-3.5 py-1.5 text-[12px] font-semibold text-white">Add its recipe</button>
+                  <button onClick={openAdd} className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-ink/70">Add another</button>
+                </div>
               </div>
             )}
             <div className="mb-3 flex items-center justify-between"><h2 className="text-[16px] font-extrabold">{artModal.id ? "Edit article" : "Add article"}</h2><button onClick={() => setArtModal(null)} className="rounded-full p-1.5 text-muted hover:bg-panel"><X size={18} /></button></div>
@@ -293,7 +314,7 @@ export default function Articles() {
             {artErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{artErr}</p>}
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setArtModal(null)} disabled={savingArt} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
-              <button onClick={saveArticle} disabled={savingArt} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{savingArt && <Loader2 size={15} className="animate-spin" />}{artModal.id ? "Save changes" : "Add article"}</button>
+              <button onClick={saveArticle} disabled={savingArt} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{savingArt && <Loader2 size={15} className="animate-spin" />}{artModal.id ? "Save changes" : "Add new article"}</button>
             </div>
           </div>
         </div>

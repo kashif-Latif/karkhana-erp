@@ -37,6 +37,9 @@ const NAV: NavItem[] = [
     { label: "Raw materials", href: "/raw-materials" },
 
     { label: "Order", heading: true },
+    /* Also reachable from inside Karkhana, where you are standing when you
+       need it. Same screen, same data — the entry above is the shortcut. */
+    { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Order by other material", href: "/orders?tab=other" },
 
