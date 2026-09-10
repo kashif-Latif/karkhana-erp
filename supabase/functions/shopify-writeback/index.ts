@@ -42,12 +42,6 @@
 //            as payment pending. This is the one that makes Shopify's revenue
 //            reports agree with the money the courier actually settled.
 //
-// TAGS (8 Sep 2026)
-//   Every successful write also tags the order in Shopify: erp-settled,
-//   erp-returned or erp-delivered, and cpr:<settlement number>. That is how an
-//   agent in the Shopify admin sees "already on the CPR" without opening the
-//   ERP. Tagging failures are noted, never counted as a failed write.
-//
 //   { action: "close", from: "2024-01-01", to: "2026-06-30",
 //     stores: ["LM","TS","TRZ"], dry_run: true, max: 200, key: SYNC_KEY }
 //
@@ -110,46 +104,6 @@ async function storeCached(code: string) {
   const k = code.toUpperCase();
   if (!tokenCache.has(k)) tokenCache.set(k, await store(k));
   return tokenCache.get(k) ?? null;
-}
-
-/* THE TAG IS HOW AN AGENT SEES IT IN SHOPIFY.
-   After a successful write the order is tagged so anyone in the Shopify admin
-   can see the ERP already dealt with it and on which settlement — no need to
-   open this system to check. tagsAdd is additive and idempotent: existing
-   tags stay, repeats change nothing. A tag failure is reported but never
-   turns a successful close/cancel/paid into a failure. */
-async function addTags(st: { domain: string; token: string }, orderId: string, tags: string[]) {
-  try {
-    const r = await fetch(`https://${st.domain}/admin/api/${API_VERSION}/graphql.json`, {
-      method: "POST",
-      headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
-      body: JSON.stringify({
-        query: `mutation($id: ID!, $tags: [String!]!) {
-          tagsAdd(id: $id, tags: $tags) { userErrors { message } }
-        }`,
-        variables: { id: `gid://shopify/Order/${orderId}`, tags },
-      }),
-    });
-    const j = await r.json().catch(() => null);
-    const ue = j?.data?.tagsAdd?.userErrors ?? [];
-    const top = j?.errors ?? [];
-    if (!r.ok) return `tags: HTTP ${r.status}`;
-    if (top.length) return `tags: ${top.map((e: { message: string }) => e.message).join("; ")}`;
-    if (ue.length) return `tags: ${ue.map((e: { message: string }) => e.message).join("; ")}`;
-    return "";
-  } catch (e) {
-    return `tags: ${e instanceof Error ? e.message : String(e)}`;
-  }
-}
-
-/** Tags for a parcel: which settlement, and what the ERP did. */
-function tagsFor(action: string, cpr: unknown): string[] {
-  const out = ["erp-settled"];
-  if (action === "close" || action === "cancel") out.push("erp-returned");
-  if (action === "paid" || action === "deliver") out.push("erp-delivered");
-  const c = String(cpr ?? "").trim();
-  if (c) out.push(`cpr:${c}`);
-  return out;
 }
 
 Deno.serve(async (req) => {
@@ -236,7 +190,7 @@ Deno.serve(async (req) => {
       ? ["Delivered"] : ["Returned", "RTS"];
 
     let q = db.from("online_logistics")
-      .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at,cpr_number")
+      .select("tracking_id,order_number,store_code,delivery_status,delivery_date,dispatch_date,return_leg_started_at")
       // `open` reverses a mistake, so it must reach every named order — the
       // whole point is that the parcel attached to it was the wrong one.
       .in("delivery_status", action === "open"
@@ -389,11 +343,7 @@ Deno.serve(async (req) => {
           } else ok3 = true;
         } catch (err) { detail3 = err instanceof Error ? err.message : String(err); }
 
-        if (ok3) {
-          closed++;
-          const tagErr = await addTags(st, id, tagsFor(action, r.cpr_number));
-          results.push({ order: r.order_number, store: r.store_code, done: "marked paid", ...(tagErr ? { tag_note: tagErr } : {}) });
-        }
+        if (ok3) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "marked paid" }); }
         else     { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail3 }); }
 
         try {
@@ -464,11 +414,7 @@ Deno.serve(async (req) => {
           else ok2 = true;
         } catch (err) { detail2 = err instanceof Error ? err.message : String(err); }
 
-        if (ok2) {
-          closed++;
-          const tagErr = await addTags(st, id, tagsFor(action, r.cpr_number));
-          results.push({ order: r.order_number, store: r.store_code, done: "delivered", ...(tagErr ? { tag_note: tagErr } : {}) });
-        }
+        if (ok2) { closed++; results.push({ order: r.order_number, store: r.store_code, done: "delivered" }); }
         else     { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail2 }); }
 
         try {
@@ -499,38 +445,15 @@ Deno.serve(async (req) => {
         const res = await fetch(url, {
           method: "POST",
           headers: { "X-Shopify-Access-Token": st.token, "content-type": "application/json" },
-          /* A CANCEL ON A FULFILLED ORDER IS REFUSED WITHOUT INSTRUCTIONS.
-           Every one of these parcels was dispatched, so every order carries a
-           fulfillment. Shopify returns 422 unless it is told whether to restock
-           and whether to refund. These came back to us, so the stock returns to
-           the shelf; no money changed hands on a COD return, so there is
-           nothing to refund. */
-        body: action === "cancel"
-          ? JSON.stringify({ reason: "customer", email: false, restock: true, refund: false })
-          : "{}",
+          body: action === "cancel" ? JSON.stringify({ reason: "customer", email: false }) : "{}",
         });
         ok = res.ok;
-        if (!ok) {
-          /* 200 characters cut Shopify's reason off before it arrived — every
-             422 logged the start of the order object and none of the message.
-             The reason is the only reason to log at all. */
-          const raw = await res.text().catch(() => "");
-          let why = raw;
-          try {
-            const j = JSON.parse(raw);
-            why = typeof j.errors === "string" ? j.errors : JSON.stringify(j.errors ?? j).slice(0, 400);
-          } catch { why = raw.slice(0, 400); }
-          detail = `${res.status} ${why}`;
-        }
+        if (!ok) detail = `${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`;
       } catch (err) {
         detail = err instanceof Error ? err.message : String(err);
       }
 
-      if (ok) {
-        closed++;
-        const tagErr = action === "open" ? "" : await addTags(st, id, tagsFor(action, r.cpr_number));
-        results.push({ order: r.order_number, store: r.store_code, done: action, ...(tagErr ? { tag_note: tagErr } : {}) });
-      }
+      if (ok) { closed++; results.push({ order: r.order_number, store: r.store_code, done: action }); }
       else    { failed++; results.push({ order: r.order_number, store: r.store_code, failed: detail }); }
 
       // Recorded either way, and never allowed to break the run.

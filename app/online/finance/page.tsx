@@ -299,7 +299,7 @@ export default function FinancePage() {
                   {/* Store dropped: the order number already carries it —
                       #LM15237, #TS2761, #TRZ1760 — so the column repeated
                       itself in narrower form. */}
-                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Dispatched</th><th className="px-4 py-3 font-semibold">CPR / Invoice</th><th className="px-4 py-3 font-semibold">Courier</th>
+                  <th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Dispatched</th><th className="px-4 py-3 font-semibold">Delivered</th><th className="px-4 py-3 font-semibold">CPR / Invoice</th><th className="px-4 py-3 font-semibold">Courier</th>
                   <th className="px-4 py-3 text-right font-semibold">COD</th>
                   <th className="px-4 py-3 text-right font-semibold">Charges</th>
                   <th className="px-4 py-3 text-right font-semibold">Net received</th>
@@ -317,11 +317,11 @@ export default function FinancePage() {
             </thead>
             <tbody className="divide-y divide-line dark:divide-white/[0.05]">
               {loading ? (
-                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={10} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
+                Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={11} className="px-4 py-3"><div className="h-4 animate-pulse rounded bg-panel/70 dark:bg-white/[0.05]" /></td></tr>)
               ) : err ? (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-[13px] text-danger">Couldn&apos;t load: {err}</td></tr>
               ) : rowsF.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-16 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing here yet — this fills once the sync is live.</td></tr>
               ) : (
                 /* SELECTING TEXT IS NOT CLICKING A ROW.
                    The whole row was a click target, so dragging across a
@@ -347,6 +347,12 @@ export default function FinancePage() {
                           and it was only visible on another screen. */}
                       <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">
                         {String(r.dispatch_date ?? "—")}
+                      </td>
+                      {/* Dispatched, delivered, settled — left to right the row
+                          shows the cash cycle: how long the courier took to
+                          deliver, and how long after that the money arrived. */}
+                      <td className="px-4 py-3 tabular-nums text-muted dark:text-[#a89f93]">
+                        {String(r.delivery_date ?? "—")}
                       </td>
                       <td className="px-4 py-3 font-mono text-[11.5px]">
                         {r.cpr_number

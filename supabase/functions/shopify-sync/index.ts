@@ -198,7 +198,7 @@ const KNOWN_DISPLAY = new Set([
 /* `note` is the field the agent actually types the reason into — cancelReason
    is only Shopify's fixed list, so on its own it explains nothing. */
 const ORDER_Q = `query($a:String,$q:String){
-  orders(first:250, after:$a, query:$q, sortKey:UPDATED_AT, reverse:true){
+  orders(first:250, after:$a, query:$q, sortKey:CREATED_AT, reverse:true){
     edges{ node{
       id name createdAt updatedAt cancelledAt cancelReason
       cancellation { staffNote }
@@ -284,18 +284,10 @@ type ShopOrder = {
   fulfillments?: { createdAt: string; displayStatus: string; trackingInfo?: { number?: string; company?: string }[] }[];
 };
 
-/* THE ROLLING WINDOW IS BY updated_at, NOT created_at.
-   An agent cancels a return ten or twenty days after the order was placed.
-   A "last 3 days by created_at" window never sees that order again, so the
-   cancellation only arrived if the webhook caught it — and a 30-day nightly
-   sweep missed anything older. updated_at catches every order touched in the
-   window, whatever its age: cancellations, note edits, tag changes, refunds.
-   Explicit start/end windows keep created_at — those are backfills of a
-   period of orders, and a period is defined by when they were placed. */
 function dateFilter(since: string, start?: string, end?: string) {
   if (start && end) return `created_at:>='${start}' created_at:<='${end}' status:any`;
   if (start) return `created_at:>='${start}' status:any`;
-  return `updated_at:>='${since}' status:any`;
+  return `created_at:>='${since}' status:any`;
 }
 
 async function fetchOrders(call: (q: string, v?: unknown) => Promise<Record<string, unknown> | null>,

@@ -40,9 +40,6 @@ type Dispute = {
   raw_status: string | null;
   customer_name: string | null;
   city: string | null;
-  shopify_attempts: number | null;
-  shopify_last_attempt: string | null;
-  shopify_last_error: string | null;
 };
 
 const rs = (v: unknown) =>
@@ -137,30 +134,6 @@ export default function DisputesPage() {
   /* Everything currently visible, so "select all" respects the filters rather
      than quietly reaching past them. */
   const allShown = () => setPicked(shown.map((r) => r.tracking_id));
-
-  /* Shopify said no (404 on an order it cannot find, 422 on a fulfilled one)
-     and the return sat here forever. This records the decision on our side —
-     online_dispute_closures — and the view drops the row for good. Nothing is
-     sent to Shopify; the store still shows the order live, which is why the
-     button is separate and says so. */
-  async function closeHere() {
-    if (!supabase || !picked.length) return;
-    const ok = await confirm({
-      title: `Close ${picked.length} dispute${picked.length === 1 ? "" : "s"} on the website only?`,
-      body: "Shopify is not touched — the order stays live there. Use this when Shopify refused. The parcel leaves this list permanently.",
-      confirmLabel: "Close here",
-    });
-    if (!ok) return;
-    setBusy("here"); setErr(""); setMsg("");
-    const { data, error } = await supabase.rpc("hub_close_disputes", {
-      p_tracking: picked,
-      p_reason: "closed on website from Disputes (Shopify not updated)",
-    });
-    setBusy("");
-    if (error) { setErr(error.message); return; }
-    setMsg(`${data ?? 0} closed on the website.`);
-    load();
-  }
 
   async function push(action: "close" | "cancel") {
     if (!supabase || !picked.length) return;
@@ -303,12 +276,6 @@ export default function DisputesPage() {
             {busy === "cancel" && <Loader2 size={12} className="mr-1 inline animate-spin" />}
             Cancel {picked.length || ""}
           </button>
-          <button onClick={closeHere} disabled={!picked.length || !!busy}
-                  title="Shopify refused? Record the closure here; Shopify is not changed."
-                  className="rounded-full border border-line px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-panel disabled:opacity-40 dark:border-white/10 dark:text-[#a89f93] dark:hover:bg-white/10">
-            {busy === "here" && <Loader2 size={12} className="mr-1 inline animate-spin" />}
-            Close {picked.length || ""} here only
-          </button>
         </div>
       </div>
 
@@ -337,18 +304,17 @@ export default function DisputesPage() {
               <th className="px-4 py-3 font-semibold">Returned</th>
               <th className="px-4 py-3 text-right font-semibold">COD</th>
               <th className="px-4 py-3 text-right font-semibold">Charge</th>
-              <th className="px-4 py-3 font-semibold">Shopify</th>
               <th className="px-4 py-3 font-semibold">Reason</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line dark:divide-white/[0.06]">
             {loading && (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-muted">
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted">
                 <Loader2 size={15} className="inline animate-spin" /> Loading…
               </td></tr>
             )}
             {!loading && !shown.length && (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted dark:text-[#a89f93]">
                 {rows.length
                   ? "Nothing matches these filters."
                   : "No disputes. Every settled return is cancelled in Shopify too."}
@@ -377,22 +343,6 @@ export default function DisputesPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-semibold tabular-nums text-ink dark:text-[#e7e2d8]">{rs(r.cod_amount)}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-amber-700">{rs(r.return_charge)}</td>
-                  {/* Every row here is "still to be marked" — that is what the
-                      page is. What differs is whether Shopify was ever asked,
-                      and what it said. A 404 three times is a different problem
-                      from never having been tried. */}
-                  <td className="px-4 py-3 text-[11.5px]">
-                    {r.shopify_attempts ? (
-                      <span title={r.shopify_last_error ?? ""}
-                            className="inline-block rounded-full border border-red-200 bg-red-50 px-2 py-0.5 font-semibold text-red-700">
-                        Shopify refused ×{r.shopify_attempts}: {(r.shopify_last_error ?? "").slice(0, 40)}
-                      </span>
-                    ) : (
-                      <span className="inline-block rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800">
-                        Still to be marked
-                      </span>
-                    )}
-                  </td>
                   <td className="px-4 py-3 text-[11.5px] text-muted dark:text-[#a89f93]">
                     {r.courier_reason_text || r.raw_status || "—"}
                   </td>
