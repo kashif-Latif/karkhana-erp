@@ -9,8 +9,10 @@
  * coming back; this is the ledger of that, not a second place to type it.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Factory, Download } from "lucide-react";
+import { Factory, Download, Plus, Loader2 } from "lucide-react";
 import Topbar from "@/components/Topbar";
+import Modal, { Field } from "@/components/Modal";
+import { usePermissions } from "@/lib/usePermissions";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
 
@@ -20,11 +22,36 @@ type Row = { id: string; grn_no: string; received_at: string; quantity: number;
              article_code: string | null; article: string | null;
              system_barcode: string | null; floor: string | null; worker: string | null };
 
+type Pending = { id: string; assignment_no: string; order_number: string;
+                 article: string; assigned: number; pending: number; department: string };
+type Staff = { id: string; name: string };
+
+const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
 
 export default function GrnStitchingPage() {
+  const { can } = usePermissions();
+  const canReceive = can(["process.manage"]);
+
+  /* THE FORM LIVES HERE NOW, not on the Stitching unit page. One place per
+     thing: you receive goods on the GRN screen, and the unit page reports.
+     A receipt must name the assignment it came back against — without that
+     the order never closes and the wage attaches to nobody. */
+  const [pending, setPending] = useState<Pending[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [open, setOpen] = useState(false);
+  const [asg, setAsg] = useState("");
+  const [qty, setQty] = useState("");
+  const [rej, setRej] = useState("");
+  const [emp, setEmp] = useState("");
+  const [rate, setRate] = useState("");
+  const [rnote, setRnote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formErr, setFormErr] = useState("");
+  const [made, setMade] = useState<Record<string, unknown> | null>(null);
+
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -36,10 +63,15 @@ export default function GrnStitchingPage() {
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase.from("v_grn_stitching").select("*")
-      .order("received_at", { ascending: false });
-    if (error) setErr(error.message);
-    setRows((data as Row[]) ?? []);
+    const [g, p, e] = await Promise.all([
+      supabase.from("v_grn_stitching").select("*").order("received_at", { ascending: false }),
+      supabase.from("v_process_pending").select("*"),
+      supabase.from("v_factory_employees").select("id,name").order("name"),
+    ]);
+    if (g.error) setErr(g.error.message);
+    setRows((g.data as Row[]) ?? []);
+    setPending(((p.data as unknown as Pending[]) ?? []).filter((x) => Number(x.pending) > 0));
+    setStaff((e.data as Staff[]) ?? []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -64,6 +96,30 @@ export default function GrnStitchingPage() {
   const pieces = view.reduce((a, r) => a + Number(r.quantity || 0), 0);
   const rejected = view.reduce((a, r) => a + Number(r.rejected || 0), 0);
   const wages = view.reduce((a, r) => a + Number(r.wage || 0), 0);
+
+  const chosen = pending.find((x) => x.id === asg);
+
+  function openForm() {
+    setOpen(true); setAsg(""); setQty(""); setRej(""); setEmp(""); setRate("");
+    setRnote(""); setFormErr(""); setMade(null);
+  }
+
+  async function receive() {
+    if (!supabase) return;
+    setFormErr("");
+    if (!asg) { setFormErr("Which assignment did these come back against?"); return; }
+    if (!(parseFloat(qty) > 0)) { setFormErr("How many pieces came back?"); return; }
+    setBusy(true);
+    const { data, error } = await supabase.rpc("receive_from_process", {
+      p_assignment_id: asg, p_quantity: parseFloat(qty),
+      p_employee_id: emp || null, p_rejected: rej ? parseFloat(rej) : 0,
+      p_rate: rate ? parseFloat(rate) : null,
+      p_received_at: new Date().toISOString(), p_note: rnote.trim() || null,
+    });
+    setBusy(false);
+    if (error) { setFormErr(error.message); return; }
+    setMade(data as Record<string, unknown>); load();
+  }
 
   const table = (): ExportTable => ({
     title: "grn-stitching-unit",
@@ -116,6 +172,11 @@ export default function GrnStitchingPage() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          {canReceive && (
+            <button onClick={openForm} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white">
+              <Plus size={15} /> New GRN
+            </button>
+          )}
         </div>
 
         {loading && <p className="text-[13px] text-hint">Loading…</p>}
@@ -168,6 +229,78 @@ export default function GrnStitchingPage() {
           </div>
         )}
       </div>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="New GRN — receive from the floor">
+        {made ? (
+          <div className="text-center">
+            <p className="font-mono text-[26px] font-extrabold tracking-tight text-ink">{String(made.receipt ?? made.grn_no ?? "")}</p>
+            <p className="mt-1.5 text-[13px] text-ink/75">
+              {n(Number(made.received ?? qty))} pieces received{made.wage ? ` · wage ${rs(Number(made.wage))}` : ""}
+            </p>
+            {made.pending_now != null && (
+              <p className="mt-1 text-[12.5px] text-muted">{n(Number(made.pending_now))} still on the floor.</p>
+            )}
+            <div className="mt-4 flex justify-center gap-2">
+              <button onClick={openForm} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Receive more</button>
+              <button onClick={() => setOpen(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Field label="Which assignment? *">
+              <select value={asg} onChange={(e) => setAsg(e.target.value)} className={inp}>
+                <option value="">Choose…</option>
+                {pending.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.order_number} · {p.article} — {n(p.pending)} pending
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {pending.length === 0 && (
+              <p className="mt-2 text-[12.5px] text-muted">Nothing is out on the floor. Place an order first.</p>
+            )}
+
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Pieces received *">
+                <input type="number" value={qty} onChange={(e) => setQty(e.target.value)}
+                  className={`${inp} ${chosen && parseFloat(qty) > Number(chosen.pending) ? "border-danger" : ""}`} />
+              </Field>
+              <Field label="Rejected">
+                <input type="number" value={rej} onChange={(e) => setRej(e.target.value)} className={inp} />
+              </Field>
+              <Field label="Worker">
+                <select value={emp} onChange={(e) => setEmp(e.target.value)} className={inp}>
+                  <option value="">—</option>
+                  {staff.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Rate per piece">
+                <input type="number" value={rate} onChange={(e) => setRate(e.target.value)}
+                  placeholder="blank uses the set rate" className={inp} />
+              </Field>
+            </div>
+
+            {chosen && parseFloat(qty) > Number(chosen.pending) && (
+              <p className="mt-2 text-[12.5px] text-danger">Only {n(Number(chosen.pending))} are still out on that assignment.</p>
+            )}
+
+            <div className="mt-3"><Field label="Note (optional)">
+              <input value={rnote} onChange={(e) => setRnote(e.target.value)} className={inp} />
+            </Field></div>
+
+            {formErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{formErr}</p>}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+              <button onClick={receive} disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+                {busy && <Loader2 size={15} className="animate-spin" />} Receive
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
     </>
   );
 }

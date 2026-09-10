@@ -7,7 +7,7 @@
  * the two sides cannot drift apart.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PackageCheck, Download, Loader2, Truck } from "lucide-react";
+import { PackageCheck, Download, Loader2, Truck, Plus, Check } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -23,6 +23,11 @@ type Row = { id: string; grn_no: string; packed_at: string; quantity: number;
 type Ready = { article_id: string; code: string; name: string;
                system_barcode: string | null; manual_barcode: string | null;
                audience: string | null; retail_price: number | null; in_hand: number };
+
+type Queue = { article_id: string; code: string; name: string; stitched: number; packed: number };
+type Stock = { item_id: string; material: string; unit: string; usable: number };
+type Staff = { id: string; name: string };
+type MatLine = { item_id: string; quantity: string };
 
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -48,13 +53,37 @@ export default function GrnFinalPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Record<string, unknown> | null>(null);
 
+  /* THE PACKING FORM LIVES HERE NOW, not on its own page. Receiving finished
+     goods IS this GRN — doing it in two places would mean two ledgers of the
+     same event. */
+  const [queue, setQueue] = useState<Queue[]>([]);
+  const [stock, setStock] = useState<Stock[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [pkOpen, setPkOpen] = useState(false);
+  const [pkArticle, setPkArticle] = useState("");
+  const [pkQty, setPkQty] = useState("");
+  const [pkEmp, setPkEmp] = useState("");
+  const [pkName, setPkName] = useState("");
+  const [pkRate, setPkRate] = useState("");
+  const [pkMats, setPkMats] = useState<MatLine[]>([]);
+  const [pkNote, setPkNote] = useState("");
+  const [pkCheck, setPkCheck] = useState<Record<string, unknown> | null>(null);
+  const [pkBusy, setPkBusy] = useState(false);
+  const [pkErr, setPkErr] = useState("");
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
-    const [g, r] = await Promise.all([
+    const [g, r, qd, sd, ed] = await Promise.all([
       supabase.from("v_grn_final").select("*").order("packed_at", { ascending: false }),
       supabase.from("v_ready_to_ship").select("*").order("name"),
+      supabase.from("v_packing_queue").select("article_id,code,name,stitched,packed"),
+      supabase.from("v_usable_stock").select("item_id,material,unit,usable").gt("usable", 0).order("material"),
+      supabase.from("v_factory_employees").select("id,name").order("name"),
     ]);
+    setQueue(((qd.data as unknown as Queue[]) ?? []).filter((x) => Number(x.stitched) - Number(x.packed) > 0));
+    setStock((sd.data as unknown as Stock[]) ?? []);
+    setStaff((ed.data as Staff[]) ?? []);
     if (g.error) setErr(g.error.message);
     setRows((g.data as Row[]) ?? []);
     setReady(((r.data as Ready[]) ?? []).filter((x) => Number(x.in_hand) > 0));
@@ -94,6 +123,35 @@ export default function GrnFinalPage() {
     setBusy(false);
     if (error) { setErr(error.message); return; }
     setDone(data as Record<string, unknown>); load();
+  }
+
+  const pkPicked = queue.find((x) => x.article_id === pkArticle);
+  const pkAvail = pkPicked ? Number(pkPicked.stitched) - Number(pkPicked.packed) : 0;
+
+  function openPacking() {
+    setPkOpen(true); setPkArticle(""); setPkQty(""); setPkEmp(""); setPkName("");
+    setPkRate(""); setPkMats([]); setPkNote(""); setPkCheck(null); setPkErr("");
+  }
+
+  async function runPacking(dry: boolean) {
+    if (!supabase) return;
+    setPkErr("");
+    if (!pkArticle) { setPkErr("Which article was packed?"); return; }
+    if (!(parseFloat(pkQty) > 0)) { setPkErr("How many pieces?"); return; }
+    setPkBusy(true);
+    const { data, error } = await supabase.rpc("post_packing_job", {
+      p_article_id: pkArticle, p_quantity: parseFloat(pkQty),
+      p_worker_employee_id: pkEmp || null,
+      p_worker_name: pkEmp ? null : (pkName.trim() || null),
+      p_rate: pkRate ? parseFloat(pkRate) : 0,
+      p_materials: pkMats.filter((m) => m.item_id && parseFloat(m.quantity) > 0)
+        .map((m) => ({ item_id: m.item_id, quantity: parseFloat(m.quantity) })),
+      p_note: pkNote.trim() || null, p_dry_run: dry,
+    });
+    setPkBusy(false);
+    if (error) { setPkErr(error.message); setPkCheck(null); return; }
+    if (dry) { setPkCheck(data as Record<string, unknown>); return; }
+    setPkOpen(false); load();
   }
 
   const table = (): ExportTable => ({
@@ -179,6 +237,11 @@ export default function GrnFinalPage() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          {canShip && (
+            <button onClick={openPacking} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white">
+              <Plus size={15} /> New GRN
+            </button>
+          )}
         </div>
 
         {loading && <p className="text-[13px] text-hint">Loading…</p>}
@@ -224,6 +287,103 @@ export default function GrnFinalPage() {
           </div>
         )}
       </div>
+
+      <Modal open={pkOpen} onClose={() => setPkOpen(false)} title="New GRN — receive from packing" wide>
+        <Field label="Article *">
+          <select value={pkArticle} onChange={(e) => { setPkArticle(e.target.value); setPkCheck(null); }} className={inp}>
+            <option value="">Choose…</option>
+            {queue.map((x) => (
+              <option key={x.article_id} value={x.article_id}>
+                {x.code} — {x.name} ({n(Number(x.stitched) - Number(x.packed))} waiting)
+              </option>
+            ))}
+          </select>
+        </Field>
+        {queue.length === 0 && <p className="mt-2 text-[12.5px] text-muted">Nothing is waiting to be packed.</p>}
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Field label="Pieces packed *">
+            <input type="number" value={pkQty} onChange={(e) => { setPkQty(e.target.value); setPkCheck(null); }}
+              className={`${inp} ${pkPicked && parseFloat(pkQty) > pkAvail ? "border-danger" : ""}`} />
+          </Field>
+          <Field label="Packed by">
+            <select value={pkEmp} onChange={(e) => { setPkEmp(e.target.value); setPkCheck(null); }} className={inp}>
+              <option value="">Nobody on payroll…</option>
+              {staff.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </Field>
+          {!pkEmp && (
+            <Field label="His name *">
+              <input value={pkName} onChange={(e) => { setPkName(e.target.value); setPkCheck(null); }} placeholder="casual is fine" className={inp} />
+            </Field>
+          )}
+          <Field label="Rate per piece">
+            <input type="number" value={pkRate} onChange={(e) => { setPkRate(e.target.value); setPkCheck(null); }} className={inp} />
+          </Field>
+        </div>
+        {pkPicked && parseFloat(pkQty) > pkAvail && (
+          <p className="mt-2 text-[12.5px] text-danger">Only {n(pkAvail)} are stitched and waiting.</p>
+        )}
+
+        <div className="mt-4 rounded-xl2 border border-line p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[12.5px] font-semibold text-ink">Material used <span className="font-normal text-hint">stickers, shoppers, tape</span></p>
+            <button onClick={() => setPkMats((m) => [...m, { item_id: "", quantity: "" }])}
+              className="rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold text-ink/70">+ Material</button>
+          </div>
+          {pkMats.map((m, i) => {
+            const it = stock.find((x) => x.item_id === m.item_id);
+            const over = it && parseFloat(m.quantity) > Number(it.usable);
+            return (
+              <div key={i} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <select value={m.item_id} className={inp}
+                  onChange={(e) => { setPkMats((x) => x.map((y, j) => j === i ? { ...y, item_id: e.target.value } : y)); setPkCheck(null); }}>
+                  <option value="">Material…</option>
+                  {stock.map((x) => <option key={x.item_id} value={x.item_id}>{x.material} — {n(x.usable)} {x.unit}</option>)}
+                </select>
+                <input type="number" value={m.quantity} placeholder="Quantity" className={`${inp} ${over ? "border-danger" : ""}`}
+                  onChange={(e) => { setPkMats((x) => x.map((y, j) => j === i ? { ...y, quantity: e.target.value } : y)); setPkCheck(null); }} />
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-hint">{over ? `only ${n(Number(it!.usable))} in stock` : ""}</span>
+                  <button onClick={() => setPkMats((x) => x.filter((_, j) => j !== i))} className="ml-auto text-[11px] font-semibold text-danger/70">remove</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-3"><Field label="Note (optional)">
+          <input value={pkNote} onChange={(e) => setPkNote(e.target.value)} className={inp} />
+        </Field></div>
+
+        {pkCheck && (
+          <div className="mt-4 rounded-xl2 border border-line bg-panel px-3.5 py-3 text-[12.5px]">
+            <p className="flex items-center gap-1.5 font-semibold text-ink"><Check size={14} /> Checks out — nothing written yet.</p>
+            <p className="mt-1 text-ink/75">
+              {String(pkCheck.worker)} packing {n(Number(pkCheck.pieces))} · labour {rs(Number(pkCheck.labour_cost))} · material {rs(Number(pkCheck.material_cost))}
+            </p>
+            <p className="mt-1 text-[14px] font-extrabold text-ink">
+              {rs(Number(pkCheck.total_cost))} total · {rs(Number(pkCheck.cost_per_piece))} per piece
+            </p>
+          </div>
+        )}
+        {pkErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{pkErr}</p>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={() => setPkOpen(false)} disabled={pkBusy} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+          {!pkCheck ? (
+            <button onClick={() => runPacking(true)} disabled={pkBusy}
+              className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+              {pkBusy && <Loader2 size={15} className="animate-spin" />} Check
+            </button>
+          ) : (
+            <button onClick={() => runPacking(false)} disabled={pkBusy}
+              className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+              {pkBusy && <Loader2 size={15} className="animate-spin" />} Save GRN
+            </button>
+          )}
+        </div>
+      </Modal>
 
       <Modal open={!!ship} onClose={() => { setShip(null); setDone(null); }} title={`Send ${ship?.name ?? ""} to warehouse`}>
         {done ? (

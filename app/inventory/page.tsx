@@ -92,6 +92,22 @@ export default function InventoryPage() {
     setDetailLines(rows);
   }
 
+  /* All three GRN series in one place. Somebody standing at "GRN" should be
+     able to raise any of them without first working out which screen owns
+     which — the series differ, the act does not. */
+  const [grnCounts, setGrnCounts] = useState({ material: 0, stitching: 0, final: 0 });
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const [m, st, fi] = await Promise.all([
+        supabase.from("grns").select("id", { count: "exact", head: true }),
+        supabase.from("v_grn_stitching").select("id", { count: "exact", head: true }),
+        supabase.from("v_grn_final").select("id", { count: "exact", head: true }),
+      ]);
+      setGrnCounts({ material: m.count ?? 0, stitching: st.count ?? 0, final: fi.count ?? 0 });
+    })();
+  }, []);
+
   /* ADD NEW ITEM — here rather than on its own page, because a new article
      is almost always discovered while receiving: the delivery arrives and it
      is something never bought before. Making somebody leave the GRN screen
@@ -149,6 +165,22 @@ export default function InventoryPage() {
             <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
               <PackagePlus size={16} /> Add New GRN</Link>
           </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {[
+            { t: "Material", sub: "from a supplier", code: "GRN", n: grnCounts.material, href: "/inventory/receive", tone: "bg-periwinkle-soft" },
+            { t: "Stitching unit", sub: "ready goods from the floor", code: "GRS", n: grnCounts.stitching, href: "/grn/stitching", tone: "bg-amber-soft" },
+            { t: "Final inventory", sub: "packed and finished", code: "GRF", n: grnCounts.final, href: "/grn/final", tone: "bg-success-soft" },
+          ].map((c) => (
+            <Link key={c.code} href={c.href}
+              className={`rounded-card ${c.tone} p-4 transition hover:opacity-90`}>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-ink/55">{c.code} · {c.t}</p>
+              <p className="mt-1 text-[26px] font-extrabold leading-none tracking-tight text-ink">{c.n}</p>
+              <p className="mt-1 text-[12px] text-ink/60">{c.sub}</p>
+              <p className="mt-2 text-[12px] font-semibold text-ink">Open →</p>
+            </Link>
+          ))}
         </div>
 
         {!isSupabaseConfigured ? (

@@ -155,7 +155,7 @@ export default function PackingPage() {
 
   return (
     <>
-      <Topbar title="Stamping · Press · Packing" subtitle="Stitched pieces become sellable ones — and what that costs" />
+      <Topbar title="Stamping · Press · Packing" subtitle="Recorded on GRN — Final inventory. This is the picture." />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
@@ -188,11 +188,7 @@ export default function PackingPage() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
-          {canDo && (
-            <button onClick={() => openForm()} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white">
-              <Plus size={15} /> Record packing
-            </button>
-          )}
+          
         </div>
 
         {loading && <p className="text-[13px] text-hint">Loading…</p>}
@@ -229,10 +225,7 @@ export default function PackingPage() {
                       <td className="px-4 py-2.5 text-right tnum text-muted">{n(r.packed)}</td>
                       <td className={`px-4 py-2.5 text-right tnum text-[16px] font-extrabold ${r.waiting > 0 ? "text-ink" : "text-hint/60"}`}>{n(r.waiting)}</td>
                       <td className="px-4 py-2.5 text-right">
-                        {canDo && r.waiting > 0 && (
-                          <button onClick={() => openForm(r)}
-                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white">Pack</button>
-                        )}
+                        
                       </td>
                     </tr>
                   ))}
