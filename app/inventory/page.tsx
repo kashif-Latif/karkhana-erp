@@ -147,8 +147,7 @@ export default function InventoryPage() {
               <Plus size={16} /> Add new item
             </button>
             <Link href="/inventory/receive" className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[13px] font-semibold text-white">
-              <PackagePlus size={16} /> Receive Stock
-            </Link>
+              <PackagePlus size={16} /> Add New GRN</Link>
           </div>
         </div>
 

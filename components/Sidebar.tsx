@@ -45,6 +45,7 @@ const NAV: NavItem[] = [
 
     { label: "Production", heading: true },
     { label: "Stitching unit", href: "/process" },
+    { label: "GRN — stitching unit", href: "/grn/stitching" },
     { label: "Inventory", href: "/inventory/final-products" },
 
     /* Fixing, clipping and pressing are stages of the same job as packing —
@@ -52,6 +53,7 @@ const NAV: NavItem[] = [
        not four screens to fix every future bug in. */
     { label: "Finishing", heading: true },
     { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
+    { label: "GRN — final inventory", href: "/grn/final" },
   ] },
 
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
