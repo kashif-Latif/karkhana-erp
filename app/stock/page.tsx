@@ -18,7 +18,11 @@ import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/expor
 
 type Mat = { item_id: string; code: string; division: string; material: string;
              category: string | null; colour: string | null; size: string | null;
-             unit: string; in_stock: number };
+             unit: string; in_stock: number;
+             /* K152 — the rate and supplier of the most recent arrival. */
+             last_rate: number | null; last_supplier: string | null;
+             last_received: string | null; last_grn: string | null;
+             stock_value: number | null };
 type Fin = { article_id: string; code: string; name: string; system_barcode: string | null;
              audience: string | null; retail_price: number | null; in_hand: number };
 type Kind = "fabric" | "other" | "finished";
@@ -31,6 +35,7 @@ const DIV: { k: Kind; label: string; sub: string; Icon: typeof Boxes; tone: stri
 
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
+const when = (v: string | null) => (v ? new Date(v).toLocaleString() : "—");
 
 export default function StockPage() {
   const [kind, setKind] = useState<Kind>("fabric");
@@ -84,9 +89,11 @@ export default function StockPage() {
         rows: finView.map((x) => [x.system_barcode ?? x.code, x.name, x.audience ?? "",
           x.retail_price ?? "", x.in_hand]) }
     : { title: `stock-${kind}`,
-        headers: ["Code", "Material", "Category", "Colour", "Size", "Unit", "In stock"],
+        headers: ["Code", "Material", "Category", "Colour", "Size", "Unit", "In stock",
+                  "Rate", "Value", "Supplier", "Last GRN", "Last received"],
         rows: matView.map((x) => [x.code, x.material, x.category ?? "", x.colour ?? "",
-          x.size ?? "", x.unit, x.in_stock]) };
+          x.size ?? "", x.unit, x.in_stock, x.last_rate ?? "", x.stock_value ?? "",
+          x.last_supplier ?? "", x.last_grn ?? "", x.last_received ? when(x.last_received) : ""]) };
 
   return (
     <>
@@ -122,7 +129,9 @@ export default function StockPage() {
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
           <span className="ml-auto text-[12.5px] text-muted">
-            {kind === "finished" ? `${n(totalUnits)} pieces` : `${n(totalUnits)} units`}
+            {kind === "finished"
+              ? `${n(totalUnits)} pieces`
+              : `${n(totalUnits)} units · ${rs(matView.reduce((a, x) => a + Number(x.stock_value || 0), 0))}`}
           </span>
         </div>
 
@@ -140,22 +149,35 @@ export default function StockPage() {
               <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
                   <th className="px-4 py-3 font-bold">Material</th>
+                  <th className="px-4 py-3 font-bold">Category</th>
                   <th className="px-4 py-3 font-bold">Code</th>
                   <th className="px-4 py-3 text-right font-bold">In stock</th>
+                  <th className="px-4 py-3 text-right font-bold">Rate</th>
+                  <th className="px-4 py-3 text-right font-bold">Value</th>
+                  <th className="px-4 py-3 font-bold">Supplier</th>
+                  <th className="px-4 py-3 font-bold">Last received</th>
                 </tr></thead>
                 <tbody>
                   {matView.map((x, ix) => (
                     <tr key={x.item_id} className={`border-b border-line/60 last:border-0 ${ix % 2 ? "bg-panel/25" : ""}`}>
-                      <td className="px-4 py-3">
-                        <span className="font-semibold text-ink">{x.material}</span>
-                        <span className="block text-[11px] text-hint">
-                          {[x.category, x.colour, x.size].filter(Boolean).join(" · ") || "no category"}
-                        </span>
+                      <td className="px-4 py-3 font-semibold text-ink">{x.material}</td>
+                      <td className="px-4 py-3 text-[12.5px] text-ink/75">
+                        {[x.category, x.colour, x.size].filter(Boolean).join(" · ") || <span className="text-hint">none</span>}
                       </td>
                       <td className="px-4 py-3 font-mono text-[12px] text-muted">{x.code}</td>
                       <td className={`px-4 py-3 text-right tnum text-[15px] font-extrabold ${Number(x.in_stock) > 0 ? "text-ink" : "text-hint/60"}`}>
                         {n(x.in_stock)} <span className="text-[11px] font-medium text-muted">{x.unit}</span>
                       </td>
+                      {/* Rate and supplier are from the LAST arrival — the price
+                          you last paid and who you paid it to. Older stock may
+                          have cost less, so the value is close, not exact. */}
+                      <td className="px-4 py-3 text-right tnum text-muted">{x.last_rate == null ? "—" : rs(x.last_rate)}</td>
+                      <td className="px-4 py-3 text-right tnum font-semibold text-ink">{x.stock_value == null ? "—" : rs(x.stock_value)}</td>
+                      <td className="px-4 py-3 text-[12.5px] text-ink/80">
+                        {x.last_supplier ?? "—"}
+                        {x.last_grn && <span className="block font-mono text-[11px] text-hint">{x.last_grn}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-muted">{when(x.last_received)}</td>
                     </tr>
                   ))}
                 </tbody>
