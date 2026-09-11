@@ -59,11 +59,13 @@ const NAV: NavItem[] = [
      it exists this is one page with its own tabs, not a dead link. */
   /* One screen with tabs, surfaced as a dropdown so each is reachable in one
      click instead of landing on Stock and hunting for the right tab. */
+  /* Four screens, not one screen with tabs. Clicking Stock shows stock —
+     nothing else on the page. */
   { label: "Warehouse", Icon: Boxes, children: [
-    { label: "New GRN", href: "/final-inventory?tab=in" },
-    { label: "Out GRN", href: "/final-inventory?tab=out" },
-    { label: "Stock", href: "/final-inventory?tab=stock" },
-    { label: "Products", href: "/final-inventory?tab=materials" },
+    { label: "New GRN", href: "/warehouse/grn-in" },
+    { label: "Out GRN", href: "/warehouse/grn-out" },
+    { label: "Stock", href: "/warehouse/stock" },
+    { label: "Products", href: "/warehouse/products" },
   ] },
 
   /* ═══ PAYMENTS ═══ its own section, serving both departments. */

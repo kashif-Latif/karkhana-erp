@@ -6,11 +6,14 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
   "/grn": ["inventory.view"],
+  "/warehouse/products": ["khana.view"],
+  "/warehouse/stock": ["khana.view"],
+  "/warehouse/grn-in": ["khana.view"],
+  "/warehouse/grn-out": ["khana.view"],
   "/grn/out": ["inventory.view", "inventory.issue"],
   "/packing": ["production.view", "production.entry"],
   "/grn/stitching": ["production.view", "production.entry"],
   "/grn/final": ["production.view", "production.entry"],
-  "/final-inventory": ["khana.view"],
   /* K119 gave finished garments their own permission. This used to sit under
      inventory.view, which is the permission for raw material — someone who can
      see fabric on a shelf is not automatically someone who should see finished
