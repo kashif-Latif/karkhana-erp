@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import Topbar from "@/components/Topbar";
 import IconChip from "@/components/IconChip";
@@ -7,7 +8,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { Plus, Trash2, Loader2, PackagePlus, ArrowLeft, X, Building2 } from "lucide-react";
 import Link from "next/link";
 
-type Group = { id: string; code: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean };
+type Group = { id: string; code: string; name: string; has_category: boolean; has_color: boolean; has_size: boolean ; order_section: string };
 type Cat = { id: string; group_id: string; name: string };
 type Named = { id: string; name: string };
 type Unit = { id: string; name: string; symbol: string | null };
@@ -21,7 +22,11 @@ function dateToISO(dateStr: string) { const now = new Date(); const [y, m, d] = 
 function toDateInput(iso: string) { const d = new Date(iso); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 const fmt = (n: number) => "Rs " + (n || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 });
 
-export default function ReceiveStock() {
+function ReceiveStockInner() {
+  /* Which GRN this is — passed from the GRN screen. Without it the form
+     would happily mix cloth and stickers into one receipt. */
+  const kind = useSearchParams().get("kind") || "";
+
   const router = useRouter();
   const [groups, setGroups] = useState<Group[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
@@ -60,7 +65,7 @@ export default function ReceiveStock() {
     if (!supabase) return;
     supabase.from("suppliers").select("id, company_name").eq("is_active", true).order("company_name")
       .then(({ data }) => setSuppliers(((data as { id: string; company_name: string }[]) ?? []).map((s) => ({ id: s.id, name: s.company_name }))));
-    supabase.from("material_groups").select("id, code, name, has_category, has_color, has_size").eq("is_active", true).order("name")
+    supabase.from("material_groups").select("id, code, name, has_category, has_color, has_size, order_section").eq("is_active", true).order("name")
       .then(({ data }) => setGroups((data as Group[]) ?? []));
     supabase.from("material_categories").select("id, group_id, name").eq("is_active", true).order("name").then(({ data }) => setCats((data as Cat[]) ?? []));
     supabase.from("colors").select("id, name").eq("is_active", true).order("name").then(({ data }) => setColors((data as Named[]) ?? []));
@@ -311,7 +316,11 @@ export default function ReceiveStock() {
                         <div className="flex items-center gap-2">
                           <select value={l.group_id} onChange={(e) => chooseGroup(i, e.target.value)} className={`${inpSm} font-semibold`}>
                             <option value="">Choose material…</option>
-                            {groups.map((gr) => <option key={gr.id} value={gr.id}>{gr.name}</option>)}
+                            {/* A fabric GRN offers fabric and nothing else. The
+                                division is on the material itself (K150), so this
+                                cannot drift from what the database will accept. */}
+                            {groups.filter((gr) => !kind || gr.order_section === kind)
+                                   .map((gr) => <option key={gr.id} value={gr.id}>{gr.name}</option>)}
                           </select>
                           <button onClick={() => removeLine(i)} disabled={lines.length === 1} className="rounded-full p-2 text-muted hover:bg-danger-soft hover:text-danger disabled:opacity-30"><Trash2 size={15} /></button>
                         </div>
@@ -526,4 +535,10 @@ const inpSm = "w-full rounded-xl2 border border-line bg-surface px-2.5 py-2 text
 const inpTiny = "w-28 rounded-xl2 border border-line bg-canvas px-2.5 py-1.5 text-right text-[13px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><span className="mb-1 block text-[11px] font-medium text-muted">{label}</span>{children}</label>;
+}
+
+/* useSearchParams demands a Suspense boundary when Next prerenders the
+   route — the same thing that broke the Orders build. */
+export default function ReceiveStock() {
+  return <Suspense fallback={null}><ReceiveStockInner /></Suspense>;
 }
