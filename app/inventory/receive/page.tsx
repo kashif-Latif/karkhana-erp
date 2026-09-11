@@ -201,7 +201,7 @@ function ReceiveStockInner() {
       });
       setSaving(false);
       if (error) { setError(error.message); return; }
-      router.push("/inventory");
+      router.push(kind ? `/grn?kind=${kind}` : "/grn");
       return;
     }
     const { data: grnRes, error } = await supabase.rpc("post_grn_smart", {
@@ -242,7 +242,7 @@ function ReceiveStockInner() {
     }
     setSaving(false);
     if (canPay) { setPostedTotal(total); setPayAmount(String(total)); setPayMethod("cash"); setPayRef(""); setPayError(""); }
-    else router.push("/inventory");
+    else router.push(kind ? `/grn?kind=${kind}` : "/grn");
   }
 
   async function savePayment() {
@@ -255,14 +255,14 @@ function ReceiveStockInner() {
     });
     setPaySaving(false);
     if (error) { setPayError(error.message); return; }
-    router.push("/inventory");
+    router.push(kind ? `/grn?kind=${kind}` : "/grn");
   }
 
   return (
     <>
       <Topbar title={editId ? "Edit GRN" : "Receive Stock"} subtitle="Goods Receipt Note (GRN)" />
       <div className="px-6 pb-12">
-        <Link href="/inventory" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-ink"><ArrowLeft size={15} /> Back to Inventory</Link>
+        <Link href={kind ? `/grn?kind=${kind}` : "/grn"} className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-ink"><ArrowLeft size={15} /> Back to GRN</Link>
 
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to receive stock.</div>
@@ -495,7 +495,7 @@ function ReceiveStockInner() {
             {payError && <p className="mt-3 text-[12.5px] font-medium text-danger">{payError}</p>}
 
             <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <button onClick={() => router.push("/inventory")} disabled={paySaving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Pay later (on credit)</button>
+              <button onClick={() => router.push(kind ? `/grn?kind=${kind}` : "/grn")} disabled={paySaving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Pay later (on credit)</button>
               <button onClick={savePayment} disabled={paySaving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{paySaving && <Loader2 size={15} className="animate-spin" />}Save payment</button>
             </div>
           </div>

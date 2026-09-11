@@ -10,8 +10,9 @@
  * the whole point: two kinds of stock that look alike on a shelf but are
  * bought, priced and consumed completely differently.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Boxes, Layers, PackageCheck, Download, Plus } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -32,8 +33,12 @@ const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFract
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
 
-export default function GrnPage() {
-  const [kind, setKind] = useState<Kind>("fabric");
+function GrnInner() {
+  /* Coming back from a receipt, land on the division just received rather
+     than snapping back to fabric. */
+  const urlKind = useSearchParams().get("kind");
+  const [kind, setKind] = useState<Kind>(
+    urlKind === "other" || urlKind === "finished" ? urlKind : "fabric");
   const [rows, setRows] = useState<Grn[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -187,4 +192,8 @@ export default function GrnPage() {
       </div>
     </>
   );
+}
+
+export default function GrnPage() {
+  return <Suspense fallback={null}><GrnInner /></Suspense>;
 }
