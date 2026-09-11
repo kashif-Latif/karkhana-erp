@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle, Activity } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
@@ -37,6 +37,12 @@ const NAV: NavItem[] = [
       { label: "Attendance", href: "/online/attendance", Icon: CalendarCheck },
       { label: "Employees",  href: "/online/employees",  Icon: Users },
   ] },
+  /* SYSTEM sits last because it is not a job anybody does daily — it is the
+     screen that answers "is the machine still running", and the only place
+     where a fault that belongs to Kashif rather than to a courier is written
+     down where he will see it. Everything on it is counted when it is opened,
+     so a check that nobody looks at for a week is still true when they do. */
+  { label: "System", href: "/online/system", Icon: Activity },
 ];
 
 export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClose?: () => void }) {
