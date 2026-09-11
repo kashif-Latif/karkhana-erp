@@ -30,9 +30,10 @@ const NAV: NavItem[] = [
 
   /* ═══ KARKHANA ═══ material in, pieces out, finished and packed.
      Grouped in the order the work actually happens. */
-  { label: "Karkhana", Icon: Factory, children: [
+  { label: "Factory", Icon: Factory, children: [
     { label: "Receiving store", heading: true },
-    { label: "New GRN", href: "/inventory" },
+    { label: "GRN", href: "/grn" },
+    { label: "GRN out", href: "/grn/out" },
     { label: "Stock", href: "/stock" },
     { label: "Raw materials", href: "/raw-materials" },
 
@@ -45,15 +46,12 @@ const NAV: NavItem[] = [
 
     { label: "Production", heading: true },
     { label: "Stitching unit", href: "/process" },
-    { label: "GRN — stitching unit", href: "/grn/stitching" },
-    { label: "Inventory", href: "/inventory/final-products" },
 
     /* Fixing, clipping and pressing are stages of the same job as packing —
        same men, same bench, same wage rule. One screen with a stage on it,
        not four screens to fix every future bug in. */
     { label: "Finishing", heading: true },
     { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
-    { label: "GRN — final inventory", href: "/grn/final" },
   ] },
 
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */

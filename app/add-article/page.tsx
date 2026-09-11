@@ -31,6 +31,9 @@ export default function AddArticlePage() {
   const [name, setName] = useState("");
   const [section, setSection] = useState("");
   const [manual, setManual] = useState("");
+  /* Factory articles are made; warehouse articles are bought and resold.
+     Kept apart so a recipe never lands on something that was never cut. */
+  const [owner, setOwner] = useState("factory");
   const [gtype, setGtype] = useState("");
   const [size, setSize] = useState("");
   const [cost, setCost] = useState("");
@@ -41,7 +44,7 @@ export default function AddArticlePage() {
   const [made, setMade] = useState<Made | null>(null);
 
   function reset() {
-    setName(""); setSection(""); setManual(""); setGtype(""); setSize("");
+    setName(""); setSection(""); setManual(""); setOwner("factory"); setGtype(""); setSize("");
     setCost(""); setRetail(""); setGst(""); setErr(""); setMade(null);
   }
 
@@ -61,7 +64,11 @@ export default function AddArticlePage() {
     });
     setBusy(false);
     if (error) { setErr(error.message); return; }
-    setMade(data as Made);
+    const row = data as Made & { id?: string };
+    if (owner !== "factory" && row?.id) {
+      await supabase.from("articles").update({ owner }).eq("id", row.id);
+    }
+    setMade(row);
   }
 
   const margin = cost && retail ? parseFloat(retail) - parseFloat(cost) : null;
@@ -113,6 +120,13 @@ export default function AddArticlePage() {
               </div>
 
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[12px] font-medium text-muted">Belongs to *</label>
+                  <select value={owner} onChange={(e) => setOwner(e.target.value)} className={inp}>
+                    <option value="factory">Factory — we make it</option>
+                    <option value="warehouse">Warehouse — we buy and resell it</option>
+                  </select>
+                </div>
                 <div>
                   <label className="block text-[12px] font-medium text-muted">Section *</label>
                   <select value={section} onChange={(e) => setSection(e.target.value)} className={inp}>
