@@ -30,7 +30,7 @@ const NAV: NavItem[] = [
 
   /* ═══ KARKHANA ═══ material in, pieces out, finished and packed.
      Grouped in the order the work actually happens. */
-  { label: "Factory", Icon: Factory, children: [
+  { label: "Karkhana", Icon: Factory, children: [
     { label: "Receiving store", heading: true },
     { label: "GRN", href: "/grn" },
     { label: "GRN out", href: "/grn/out" },
@@ -57,7 +57,14 @@ const NAV: NavItem[] = [
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
   /* The warehouse GRN — receiving from Karkhana — is the next build. Until
      it exists this is one page with its own tabs, not a dead link. */
-  { label: "Warehouse", href: "/final-inventory", Icon: Boxes },
+  /* One screen with tabs, surfaced as a dropdown so each is reachable in one
+     click instead of landing on Stock and hunting for the right tab. */
+  { label: "Warehouse", Icon: Boxes, children: [
+    { label: "New GRN", href: "/final-inventory?tab=in" },
+    { label: "Out GRN", href: "/final-inventory?tab=out" },
+    { label: "Stock", href: "/final-inventory?tab=stock" },
+    { label: "Products", href: "/final-inventory?tab=materials" },
+  ] },
 
   /* ═══ PAYMENTS ═══ its own section, serving both departments. */
   { label: "Payments", Icon: Wallet, children: [
@@ -119,7 +126,7 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
       <div className="flex items-center gap-2.5 px-6 pb-5 pt-4">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white"><Gem size={18} /></span>
         <div className="leading-tight">
-          <div className="text-[15px] font-extrabold tracking-tight">Karkhana</div>
+          <div className="text-[15px] font-extrabold tracking-tight">Factory</div>
           <div className="text-[11px] text-muted">Head Office ERP</div>
         </div>
       </div>

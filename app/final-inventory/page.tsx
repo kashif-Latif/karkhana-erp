@@ -10,7 +10,8 @@
  * the box, the item resolves, type the quantity, done. A scanner types the
  * code then presses Enter — so Enter is the trigger everywhere.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
@@ -37,11 +38,13 @@ const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const when = (v: string) => new Date(v).toLocaleString();
 
-export default function FinalInventoryPage() {
+function WarehouseInner() {
   const { can } = usePermissions();
   const canManage = can(["khana.manage"]);
 
-  const [tab, setTab] = useState<Tab>("stock");
+  const urlTab = useSearchParams().get("tab");
+  const [tab, setTab] = useState<Tab>(
+    urlTab === "in" || urlTab === "out" || urlTab === "materials" ? urlTab : "stock");
   const [items, setItems] = useState<Item[]>([]);
   const [moves, setMoves] = useState<Move[]>([]);
   const [q, setQ] = useState("");
@@ -361,14 +364,16 @@ export default function FinalInventoryPage() {
           m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
           m.delivery_no ?? "", m.invoice_no ?? "", m.note ?? "", m.voided_at ? "yes" : ""]) };
 
+  /* In and Out ARE the warehouse's GRNs — goods arriving and goods leaving.
+     Naming them so makes the whole system speak one language. */
   const TABS: { k: Tab; label: string }[] = [
-    { k: "materials", label: "Product list" }, { k: "stock", label: "Stock" },
-    { k: "in", label: "In" }, { k: "out", label: "Out" },
+    { k: "in", label: "New GRN" }, { k: "out", label: "Out GRN" },
+    { k: "stock", label: "Stock" }, { k: "materials", label: "Products" },
   ];
 
   return (
     <>
-      <Topbar title="Final Inventory" subtitle="Ready stock by barcode — its own materials, its own in and out" />
+      <Topbar title="Warehouse" subtitle="Ready stock by barcode — its own GRNs in and out" />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
@@ -886,4 +891,8 @@ export default function FinalInventoryPage() {
       </Modal>
     </>
   );
+}
+
+export default function FinalInventoryPage() {
+  return <Suspense fallback={null}><WarehouseInner /></Suspense>;
 }
