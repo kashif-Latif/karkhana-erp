@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle, Activity } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle, Activity, PhoneCall } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
@@ -18,9 +18,14 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/online/dashboard", Icon: LayoutDashboard },
   { label: "Orders", href: "/online/orders", Icon: ClipboardList },
+  /* Chase sits under Logistics for the same reason Returns does: a parcel the
+     courier has not paid for, or never delivered, is a parcel problem before
+     it is a money problem, and the person who rings the courier is the
+     logistics person. */
   { label: "Logistics", href: "/online/logistics", Icon: Truck, children: [
       { label: "Shipments", href: "/online/logistics", Icon: Truck },
       { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },
+      { label: "Chase", href: "/online/logistics/chase", Icon: PhoneCall },
   ] },
   /* Finance gains children for the same reason Logistics has them: disputes are
      a separate job with its own worklist, not a tab inside the settlements

@@ -53,6 +53,10 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/online/orders": ["hub.orders.view", "hub.orders.manage"],
   "/online/logistics": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/logistics/returns": ["hub.logistics.view", "hub.logistics.manage"],
+  /* The chase list shows money outstanding, so Finance can reach it too —
+     hub_chase_list() accepts the same four permissions itself. */
+  "/online/logistics/chase": ["hub.logistics.view", "hub.logistics.manage",
+                              "hub.finance.view", "hub.finance.manage"],
   "/online/finance": ["hub.finance.view", "hub.finance.manage"],
   "/online/attendance": ["hub.attendance.view", "hub.attendance.manage"],
   "/online/employees": ["hub.attendance.view", "hub.attendance.manage"],
