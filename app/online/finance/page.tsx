@@ -75,7 +75,10 @@ export default function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [editRow, setEditRow] = useState<Row | null>(null);
-  const [preset, setPreset] = useState("30d");
+  /* Must be one of MONEY_PRESETS. A default that is no longer offered leaves
+     every chip unselected while the page quietly filters to a range nobody
+     chose. */
+  const [preset, setPreset] = useState("60d");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
 
   /* THE CARDS COME FROM THE DATABASE, THE TABLE IS A PAGE OF ROWS.
