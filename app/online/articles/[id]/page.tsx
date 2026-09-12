@@ -38,8 +38,9 @@ type Detail = {
   article: Record<string, unknown> & {
     id: string; code: string; rough_name: string; final_name: string | null;
     exact_cost: number | null; retail_price: number | null; ads_budget: number | null;
-    ads_spent: number; ads_pending: number; status: string; brief: string | null;
-    created_by_name: string | null; created_at: string; age: string; decision_note: string | null;
+    ads_basis: string; ads_spent: number; ads_spent_period: number; ads_pending: number;
+    period_label: string; status: string; brief: string | null;
+    created_by_name: string | null; created_at: string; age: string;
   };
   stages: Stage[]; ads: Ads[]; events: Ev[];
 };
@@ -58,7 +59,7 @@ export default function ArticleDetail() {
   const [spend, setSpend] = useState({ spent_on: new Date().toISOString().slice(0, 10), amount: "", campaign_name: "", campaign_id: "", notes: "" });
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [edit, setEdit] = useState({ rough_name: "", final_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "" });
+  const [edit, setEdit] = useState({ rough_name: "", final_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "", ads_basis: "total" });
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase || !id) { setLoading(false); return; }
@@ -95,9 +96,13 @@ export default function ArticleDetail() {
 
   const a = d.article;
   const budget = Number(a.ads_budget || 0);
-  const spent = Number(a.ads_spent || 0);
+  const spent = Number(a.ads_spent || 0);                    // everything ever approved
+  const spentNow = Number(a.ads_spent_period ?? a.ads_spent); // what counts against the cap
   const pending = Number(a.ads_pending || 0);
-  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+  /* The bar measures the period the boss chose, not all time — on a daily cap
+     an all-time bar is past 100% by the second day and says nothing. */
+  const pct = budget > 0 ? Math.min(100, Math.round((spentNow / budget) * 100)) : 0;
+  const basisWord = a.ads_basis === "daily" ? "a day" : a.ads_basis === "monthly" ? "a month" : "in total";
   const margin = Number(a.retail_price) > 0
     ? Math.round(((Number(a.retail_price) - Number(a.exact_cost || 0)) / Number(a.retail_price)) * 1000) / 10 : null;
 
@@ -130,6 +135,7 @@ export default function ArticleDetail() {
               retail_price: a.retail_price == null ? "" : String(a.retail_price),
               ads_budget: a.ads_budget == null ? "" : String(a.ads_budget),
               brief: String(a.brief ?? ""),
+              ads_basis: String(a.ads_basis ?? "total"),
             }); setEditing(true); }}
             className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
             <Pencil size={14} /> Edit
@@ -171,6 +177,23 @@ export default function ArticleDetail() {
               ))}
             </div>
 
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">That ads budget is…</label>
+            <div className="mt-1 flex w-full gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.06]">
+              {([["total", "In total"], ["daily", "Per day"], ["monthly", "Per month"]] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setEdit({ ...edit, ads_basis: k })}
+                  className={`flex-1 rounded-full px-3 py-2 text-[12.5px] font-semibold transition ${
+                    edit.ads_basis === k ? "bg-ink text-white dark:bg-white dark:text-[#141414]"
+                                         : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Changing this re-reads every spend already entered against the
+                new period — no figure is stored, so nothing has to be fixed up. */}
+            <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+              Changing this changes what the figures mean straight away. Nothing already entered is lost.
+            </p>
+
             <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Brief</label>
             <textarea value={edit.brief} onChange={(e) => setEdit({ ...edit, brief: e.target.value })} rows={3}
               className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[13px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
@@ -190,6 +213,7 @@ export default function ArticleDetail() {
                   p_retail_price: edit.retail_price === "" ? null : Number(edit.retail_price),
                   p_ads_budget: edit.ads_budget === "" ? null : Number(edit.ads_budget),
                   p_brief: edit.brief || null,
+                  p_ads_basis: edit.ads_basis,
                 }).then(() => setEditing(false))}
                 className="flex items-center gap-2 rounded-full bg-ink px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
                 {busy && <Loader2 size={14} className="animate-spin" />} Save
@@ -243,8 +267,10 @@ export default function ArticleDetail() {
         {[
           ["Cost", a.exact_cost != null ? rs(Number(a.exact_cost)) : "—", ""],
           ["Retail", a.retail_price != null ? rs(Number(a.retail_price)) : "—", margin != null ? `${margin}% margin` : ""],
-          ["Ads budget", rs(budget), ""],
-          ["Ads approved", rs(spent), pending > 0 ? `${rs(pending)} waiting on you` : `${rs(budget - spent)} left`],
+          ["Ads budget", rs(budget), basisWord],
+          [`Approved ${a.period_label}`, rs(spentNow),
+            pending > 0 ? `${rs(pending)} waiting on you`
+                        : `${rs(Math.max(0, budget - spentNow))} left${a.ads_basis === "total" ? "" : ` ${a.period_label}`}`],
         ].map(([label, value, sub]) => (
           <div key={label} className="rounded-card border border-line bg-surface p-4 dark:border-white/[0.06] dark:bg-[#201c17]">
             <div className="text-[17px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{value}</div>
@@ -259,7 +285,10 @@ export default function ArticleDetail() {
           <div className="h-2 overflow-hidden rounded-full bg-panel dark:bg-white/[0.08]">
             <div className={`h-full rounded-full ${pct >= 100 ? "bg-danger" : "bg-ink dark:bg-white"}`} style={{ width: `${pct}%` }} />
           </div>
-          <div className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">{pct}% of the ads budget approved</div>
+          <div className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+            {pct}% of the {rs(budget)} {basisWord}
+            {a.ads_basis !== "total" && ` · ${rs(spent)} approved in total since this started`}
+          </div>
         </div>
       )}
 

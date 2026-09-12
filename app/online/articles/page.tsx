@@ -24,10 +24,21 @@ import { rs } from "@/lib/dateRange";
 type Row = {
   id: string; code: string; name: string; status: string; created_at: string;
   exact_cost: number | null; retail_price: number | null; margin: number | null;
-  ads_budget: number | null; ads_spent: number; ads_pending: number;
+  ads_budget: number | null; ads_basis: string; ads_spent: number;
+  ads_spent_period: number; ads_pending: number; period_label: string;
   stages_done: number; stages_total: number;
   waiting_on: string | null; waiting_days: number | null; age: string;
 };
+
+/* WHAT Rs 30,000 MEANS is a decision, not a default. A pot for the whole
+   launch, a cap per day, or an allowance per month — the same number reads
+   three different ways, and the screen cannot guess which one the boss had in
+   mind. So it is asked on the form and stored with the article. */
+const BASIS = [
+  { key: "total",   label: "In total",  hint: "one pot for the whole launch" },
+  { key: "daily",   label: "Per day",   hint: "a cap for each day" },
+  { key: "monthly", label: "Per month", hint: "an allowance each month" },
+];
 
 /* A JOB THAT IS NOT AN ARTICLE.
    "Rehman, go and check which collections are empty" is work, it needs the
@@ -65,7 +76,7 @@ export default function ArticlesPage() {
   const [err, setErr] = useState("");
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ rough_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "" });
+  const [form, setForm] = useState({ rough_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "", ads_basis: "total" });
 
   const [people, setPeople] = useState<Person[]>([]);
   const [assigned, setAssigned] = useState<Assigned[]>([]);
@@ -114,13 +125,14 @@ export default function ArticlesPage() {
       p_retail_price: form.retail_price === "" ? null : Number(form.retail_price),
       p_ads_budget: form.ads_budget === "" ? null : Number(form.ads_budget),
       p_brief: form.brief || null,
+      p_ads_basis: form.ads_basis,
     });
     setBusy(false);
     const res = data as { ok?: boolean; error?: string; code?: string } | null;
     if (error) { setErr(error.message); return; }
     if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
     setAdding(false);
-    setForm({ rough_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "" });
+    setForm({ rough_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "", ads_basis: "total" });
     load();
   }
 
@@ -159,11 +171,14 @@ export default function ArticlesPage() {
 
       {/* four numbers, and only four */}
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* No "total budget given" card. Adding a Rs 30,000 pot to a Rs 1,000
+            daily cap produces a number that means nothing — the budgets are
+            only comparable inside one article, so they are only shown there. */}
         {[
           ["In progress", String(totals.live), ""],
           ["Waiting on somebody", String(totals.waiting), ""],
-          ["Ads budget given", rs(totals.budget), ""],
-          ["Ads approved / waiting", rs(totals.spent), totals.pending > 0 ? `${rs(totals.pending)} to approve` : ""],
+          ["Ads approved, all time", rs(totals.spent), ""],
+          ["Waiting for your approval", rs(totals.pending), totals.pending > 0 ? "ad spends to decide" : "nothing to decide"],
         ].map(([label, value, sub]) => (
           <div key={label} className="rounded-card border border-line bg-surface p-4 dark:border-white/[0.06] dark:bg-[#201c17]">
             <div className="text-[18px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{loading ? "—" : value}</div>
@@ -273,10 +288,19 @@ export default function ArticlesPage() {
                 )}
               </div>
 
+              {/* The cap and what has gone against it, in the period the boss
+                  chose. The running total sits underneath, because "spent so
+                  far" is wanted whatever the cap is measured against. */}
               <div className="text-right">
                 <div className="text-[12.5px] font-semibold tabular-nums text-ink dark:text-[#f4f1ea]">
-                  {rs(Number(r.ads_spent))} <span className="font-normal text-hint dark:text-[#8a8175]">of {rs(Number(r.ads_budget || 0))}</span>
+                  {rs(Number(r.ads_spent_period))}
+                  <span className="font-normal text-hint dark:text-[#8a8175]">
+                    {" "}of {rs(Number(r.ads_budget || 0))} {r.period_label}
+                  </span>
                 </div>
+                {r.ads_basis !== "total" && (
+                  <div className="text-[11px] text-hint dark:text-[#8a8175]">{rs(Number(r.ads_spent))} in total</div>
+                )}
                 {Number(r.ads_pending) > 0 && (
                   <div className="text-[11px] font-semibold text-amber-strong dark:text-amber">{rs(Number(r.ads_pending))} to approve</div>
                 )}
@@ -359,6 +383,27 @@ export default function ArticlesPage() {
                 </div>
               ))}
             </div>
+
+            {/* Asked right under the budget box, because it changes what the
+                number means and there is no sensible guess. */}
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">
+              That ads budget is…
+            </label>
+            <div className="mt-1 flex w-full gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.06]">
+              {BASIS.map((b) => (
+                <button key={b.key} type="button" onClick={() => setForm({ ...form, ads_basis: b.key })}
+                  className={`flex-1 rounded-full px-3 py-2 text-[12.5px] font-semibold transition ${
+                    form.ads_basis === b.key ? "bg-ink text-white dark:bg-white dark:text-[#141414]"
+                                             : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+              {BASIS.find((b) => b.key === form.ads_basis)?.hint}
+              {form.ads_budget && form.ads_basis !== "total" &&
+                ` — ${rs(Number(form.ads_budget))} every ${form.ads_basis === "daily" ? "day" : "month"}, and the running total is still shown.`}
+            </p>
 
             {/* Shown live, because a margin typed wrong is obvious the moment it
                 is worked out and invisible until then. */}
