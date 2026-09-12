@@ -53,20 +53,9 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/online/orders": ["hub.orders.view", "hub.orders.manage"],
   "/online/logistics": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/logistics/returns": ["hub.logistics.view", "hub.logistics.manage"],
-  /* The chase list shows money outstanding, so Finance can reach it too —
-     hub_chase_list() accepts the same four permissions itself. */
-  "/online/logistics/chase": ["hub.logistics.view", "hub.logistics.manage",
-                              "hub.finance.view", "hub.finance.manage"],
   "/online/finance": ["hub.finance.view", "hub.finance.manage"],
   "/online/attendance": ["hub.attendance.view", "hub.attendance.manage"],
   "/online/employees": ["hub.attendance.view", "hub.attendance.manage"],
-  /* System is the one screen that reports on the machine rather than the
-     business, so it is not tied to one area of it. Anyone already trusted with
-     any part of the Hub can see whether the syncs ran — hiding that from the
-     person looking at a stale figure helps nobody. hub_system_checks() asks
-     for the same three permissions itself, so the rule is enforced in the
-     database and not only here. */
-  "/online/system": ["hub.dashboard.view", "hub.logistics.view", "hub.finance.view"],
   "/me": null,
 };
 
