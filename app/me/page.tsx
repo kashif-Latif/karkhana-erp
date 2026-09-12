@@ -23,6 +23,8 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarDays, HandCoins, Wallet, Loader2, AlertTriangle, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import MyWork from "@/components/MyWork";
+import HubBell from "@/components/HubBell";
 
 type Me = { emp_id: string; name: string; designation: string | null; department: string | null; salary: number };
 type Pay = {
@@ -141,10 +143,16 @@ export default function MyPortal() {
                 {me.designation ?? "—"} · {rs(me.salary)} a month
               </p>
             </div>
-            <button onClick={signOut} aria-label="Sign out"
-                    className="shrink-0 rounded-full border border-white/20 p-2 text-white/70 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
-              <LogOut size={15} />
-            </button>
+            {/* The bell sits on the dark band, where the person is already
+                looking when the page opens. Work assigned to them is the one
+                thing here that is time-sensitive; their wages are not. */}
+            <div className="flex shrink-0 items-center gap-2">
+              <HubBell dark />
+              <button onClick={signOut} aria-label="Sign out"
+                      className="rounded-full border border-white/20 p-2 text-white/70 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                <LogOut size={15} />
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
@@ -187,6 +195,14 @@ export default function MyPortal() {
           evidence. On a wide screen the calendar sits beside the figures rather
           than a screen below them. */}
       <div className="mx-auto -mt-4 max-w-5xl px-4 sm:px-6">
+
+        {/* WORK COMES BEFORE WAGES on this page now. A man opening his portal
+            in the morning needs to know what he has been given today; what he
+            has earned so far has not changed since last night. The section
+            renders nothing at all when he has no work, so the portal stays
+            exactly as it was for anybody outside the article workflow. */}
+        <div className="mb-4"><MyWork /></div>
+
         <div className="grid gap-4 lg:grid-cols-[1fr_1.05fr] lg:items-start">
 
           <div className="space-y-4">

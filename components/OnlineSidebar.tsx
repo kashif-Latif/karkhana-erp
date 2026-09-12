@@ -2,7 +2,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Truck, Wallet, CalendarCheck, Users, ArrowLeft, LogOut, ShoppingBag, Undo2, ChevronDown, type LucideIcon, AlertTriangle, PackageSearch } from "lucide-react";
+import HubBell from "@/components/HubBell";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 import { ROUTE_PERMS } from "@/lib/access";
@@ -18,6 +19,11 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/online/dashboard", Icon: LayoutDashboard },
   { label: "Orders", href: "/online/orders", Icon: ClipboardList },
+  /* ARTICLES — the product-launch pipeline. It sits above Logistics because a
+     product is created before it is ever shipped, and the administration opens
+     this one several times a day to ask the only question it exists to answer:
+     who is holding my article right now. */
+  { label: "Articles", href: "/online/articles", Icon: PackageSearch },
   { label: "Logistics", href: "/online/logistics", Icon: Truck, children: [
       { label: "Shipments", href: "/online/logistics", Icon: Truck },
       { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },
@@ -76,12 +82,17 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
         <Link href="/" onClick={onClose} className="flex items-center gap-2 px-5 pt-5 text-[12.5px] font-semibold text-muted transition hover:text-ink dark:text-[#a89f93] dark:hover:text-white">
           <ArrowLeft size={15} /> All departments
         </Link>
+        {/* The bell sits with the department name because that is the first
+            place the eye lands on opening the panel, and an unread count is
+            only useful if it is seen before the person starts doing something
+            else. */}
         <div className="flex items-center gap-2.5 px-5 pb-5 pt-4">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white dark:bg-white dark:text-[#141414]"><ShoppingBag size={18} /></span>
-          <div className="leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <div className="text-[15px] font-extrabold tracking-tight dark:text-[#f4f1ea]">Hub Department</div>
             <div className="text-[11px] text-muted dark:text-[#a89f93]">Online orders</div>
           </div>
+          <HubBell />
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
           {ready && visible.map(({ label, href, Icon, soon, children }) => {
