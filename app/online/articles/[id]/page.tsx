@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, CheckCircle2, XCircle, Clock3, CornerUpLeft, Loader2, Plus, Wallet,
+  ArrowLeft, Pencil, Trash2, Clock3, CornerUpLeft, Loader2, Plus, Wallet,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rs } from "@/lib/dateRange";
@@ -56,6 +56,9 @@ export default function ArticleDetail() {
   const [busy, setBusy] = useState(false);
   const [addSpend, setAddSpend] = useState(false);
   const [spend, setSpend] = useState({ spent_on: new Date().toISOString().slice(0, 10), amount: "", campaign_name: "", campaign_id: "", notes: "" });
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [edit, setEdit] = useState({ rough_name: "", final_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "" });
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase || !id) { setLoading(false); return; }
@@ -114,26 +117,119 @@ export default function ArticleDetail() {
             {a.code} · created by {a.created_by_name ?? "—"} on {when(a.created_at)} · running <b className="text-ink dark:text-[#e7e2d8]">{a.age}</b>
           </p>
         </div>
+        {/* EDIT AND DELETE, and nothing else. Approving a finished article told
+            nobody anything and left a word on the list that disagreed with the
+            five stages underneath it. What is actually needed is the ordinary
+            pair: fix a number typed wrong, or remove an article that should
+            never have been created. Both administrator-only — the employees
+            never reach this page at all. */}
         <div className="flex flex-wrap items-center gap-2">
-          <button disabled={busy} onClick={() => call("hub_article_decide", { p_article_id: a.id, p_decision: "approved", p_note: null })}
+          <button disabled={busy} onClick={() => { setEdit({
+              rough_name: String(a.rough_name ?? ""), final_name: String(a.final_name ?? ""),
+              exact_cost: a.exact_cost == null ? "" : String(a.exact_cost),
+              retail_price: a.retail_price == null ? "" : String(a.retail_price),
+              ads_budget: a.ads_budget == null ? "" : String(a.ads_budget),
+              brief: String(a.brief ?? ""),
+            }); setEditing(true); }}
             className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
-            <CheckCircle2 size={14} /> Approve
+            <Pencil size={14} /> Edit
           </button>
-          <button disabled={busy} onClick={() => {
-              const why = window.prompt("Why is it rejected?");
-              if (why && why.trim()) call("hub_article_decide", { p_article_id: a.id, p_decision: "rejected", p_note: why.trim() });
-            }}
-            className="flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] font-semibold text-ink disabled:opacity-40 dark:border-white/15 dark:text-white">
-            <XCircle size={14} /> Reject
+          <button disabled={busy} onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] font-semibold text-danger disabled:opacity-40 dark:border-white/15">
+            <Trash2 size={14} /> Delete
           </button>
         </div>
       </div>
 
       {err && <p className="mt-3 rounded-card border border-line bg-danger-soft px-4 py-3 text-[12.5px] font-medium text-danger">{err}</p>}
-      {a.decision_note && (
-        <p className="mt-3 rounded-card border border-line bg-panel px-4 py-2.5 text-[12.5px] text-ink dark:border-white/10 dark:bg-white/[0.05] dark:text-[#e7e2d8]">
-          <b>Your note:</b> {a.decision_note}
-        </p>
+
+      {/* ── edit ─────────────────────────────────────────────────────────── */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-6" onClick={() => !busy && setEditing(false)}>
+          <div className="w-full max-w-lg rounded-t-card bg-surface p-5 shadow-card dark:bg-[#201c17] sm:rounded-card" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[16px] font-extrabold text-ink dark:text-[#f4f1ea]">Edit {a.code}</h2>
+            <p className="mt-1 text-[12.5px] text-muted dark:text-[#a89f93]">
+              Changing a figure here is written into the history with your name on it. It does not move the work.
+            </p>
+
+            <label className="mt-4 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Name</label>
+            <input value={edit.rough_name} onChange={(e) => setEdit({ ...edit, rough_name: e.target.value })}
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[14px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Final name (once Hamza Mukhtar has set it)</label>
+            <input value={edit.final_name} onChange={(e) => setEdit({ ...edit, final_name: e.target.value })}
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[14px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {([["exact_cost", "Cost"], ["retail_price", "Retail"], ["ads_budget", "Ads budget"]] as const).map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-[12px] font-semibold text-muted dark:text-[#a89f93]">{label}</label>
+                  <input type="number" inputMode="numeric" value={edit[k]}
+                    onChange={(e) => setEdit({ ...edit, [k]: e.target.value })}
+                    className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[14px] tabular-nums text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                </div>
+              ))}
+            </div>
+
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Brief</label>
+            <textarea value={edit.brief} onChange={(e) => setEdit({ ...edit, brief: e.target.value })} rows={3}
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[13px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+            <p className="mt-1 text-[11.5px] text-hint dark:text-[#8a8175]">
+              Changing the brief does not change what is already on somebody&rsquo;s panel — tell him, or send the work back.
+            </p>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setEditing(false)} disabled={busy}
+                className="rounded-full border border-line px-4 py-2 text-[13px] font-semibold text-ink dark:border-white/15 dark:text-white">Cancel</button>
+              <button disabled={busy || !edit.rough_name.trim()}
+                onClick={() => call("hub_article_update", {
+                  p_article_id: a.id,
+                  p_rough_name: edit.rough_name,
+                  p_final_name: edit.final_name || null,
+                  p_exact_cost: edit.exact_cost === "" ? null : Number(edit.exact_cost),
+                  p_retail_price: edit.retail_price === "" ? null : Number(edit.retail_price),
+                  p_ads_budget: edit.ads_budget === "" ? null : Number(edit.ads_budget),
+                  p_brief: edit.brief || null,
+                }).then(() => setEditing(false))}
+                className="flex items-center gap-2 rounded-full bg-ink px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
+                {busy && <Loader2 size={14} className="animate-spin" />} Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── delete ───────────────────────────────────────────────────────── */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onClick={() => !busy && setConfirmDelete(false)}>
+          <div className="w-full max-w-sm rounded-card bg-surface p-5 shadow-card dark:bg-[#201c17]" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[16px] font-extrabold text-ink dark:text-[#f4f1ea]">Delete {a.code}?</h2>
+            {/* Said plainly, because the five men have this on their panels and
+                it disappears from all of them at once. */}
+            <p className="mt-2 text-[13px] leading-relaxed text-muted dark:text-[#a89f93]">
+              This removes the article, everything anybody has submitted on it, its history and its ad entries.
+              It vanishes from the men&rsquo;s panels too. It cannot be undone.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setConfirmDelete(false)} disabled={busy}
+                className="rounded-full border border-line px-4 py-2 text-[13px] font-semibold text-ink dark:border-white/15 dark:text-white">Keep it</button>
+              <button disabled={busy}
+                onClick={async () => {
+                  if (!supabase) return;
+                  setBusy(true);
+                  const { data, error } = await supabase.rpc("hub_article_delete", { p_article_id: a.id });
+                  setBusy(false);
+                  const res = data as { ok?: boolean; error?: string } | null;
+                  if (error) { setErr(error.message); setConfirmDelete(false); return; }
+                  if (res && res.ok === false) { setErr(res.error ?? "Refused."); setConfirmDelete(false); return; }
+                  router.push("/online/articles");
+                }}
+                className="flex items-center gap-2 rounded-full bg-danger px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
+                {busy && <Loader2 size={14} className="animate-spin" />} Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {a.brief && (

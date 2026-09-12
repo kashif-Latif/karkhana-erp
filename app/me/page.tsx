@@ -58,6 +58,9 @@ export default function MyPortal() {
   const [hols, setHols] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  /* Work first. It is the half that changes during the day; the wage figure
+     has not moved since last night. */
+  const [tab, setTab] = useState<"work" | "pay">("work");
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -194,16 +197,28 @@ export default function MyPortal() {
           somebody reads in: the money first, then the days behind it, then the
           evidence. On a wide screen the calendar sits beside the figures rather
           than a screen below them. */}
+      {/* TWO TABS, ONE PORTAL.
+          A man opening this in the morning wants one of exactly two things:
+          what have I been given to do, or what am I owed. Stacking them made a
+          long scroll on a phone where the second half was never reached. Work
+          is first because it is the half that changes during the day.
+          The same two tabs on a phone and on a desktop — there is no third
+          layout to keep in step. */}
       <div className="mx-auto -mt-4 max-w-5xl px-4 sm:px-6">
+        <div className="mb-4 flex w-full gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.06] sm:w-max">
+          {([["work", "My work"], ["pay", "Attendance & pay"]] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`flex-1 whitespace-nowrap rounded-full px-5 py-2 text-[13px] font-semibold transition sm:flex-none ${
+                tab === key ? "bg-ink text-white shadow-soft dark:bg-white dark:text-[#141414]"
+                            : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {/* WORK COMES BEFORE WAGES on this page now. A man opening his portal
-            in the morning needs to know what he has been given today; what he
-            has earned so far has not changed since last night. The section
-            renders nothing at all when he has no work, so the portal stays
-            exactly as it was for anybody outside the article workflow. */}
-        <div className="mb-4"><MyWork /></div>
+        {tab === "work" && <MyWork />}
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_1.05fr] lg:items-start">
+        <div className={`grid gap-4 lg:grid-cols-[1fr_1.05fr] lg:items-start ${tab === "pay" ? "" : "hidden"}`}>
 
           <div className="space-y-4">
 
@@ -338,7 +353,7 @@ export default function MyPortal() {
           </div>
         </div>
 
-        <p className="mt-5 px-1 text-[11.5px] leading-relaxed text-hint dark:text-[#8a8175]">
+        <p className={`mt-5 px-1 text-[11.5px] leading-relaxed text-hint dark:text-[#8a8175] ${tab === "pay" ? "" : "hidden"}`}>
           Sundays and public holidays are paid. Working one adds a day. An absent day is
           not counted, and it is the only thing that reduces what you earn.
           {isCurrent && " This month is still running, so the figure grows each day you are marked present."}

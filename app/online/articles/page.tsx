@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, RefreshCw, Search, Loader2, PackagePlus } from "lucide-react";
+import { Plus, RefreshCw, Search, Loader2, PackagePlus, UserPlus, CheckCircle2, ChevronDown } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rs } from "@/lib/dateRange";
 
@@ -29,18 +29,31 @@ type Row = {
   waiting_on: string | null; waiting_days: number | null; age: string;
 };
 
+/* A JOB THAT IS NOT AN ARTICLE.
+   "Rehman, go and check which collections are empty" is work, it needs the
+   same clock and the same submitted-with-a-note ending, and it has nothing to
+   do with a product launch. It runs through the same machinery — it simply has
+   no article attached — so there is one submit path and one notification path
+   rather than two that drift apart. */
+type Person = { id: string; name: string; designation: string | null; is_stage_owner: boolean };
+type Assigned = {
+  task_id: string; person: string; title: string; detail: string | null;
+  status: string; opened_at: string; submitted_at: string | null;
+  submit_note: string | null; held: string | null;
+};
+
+/* Two states, both derived from the work: in progress until the last man has
+   submitted, completed after. There is no Approved and no Rejected — a word
+   somebody sets by hand can disagree with the five stages underneath it, and
+   then nobody can say which is right. */
 const TABS = [
   { key: "all", label: "All" },
   { key: "in_progress", label: "In progress" },
   { key: "completed", label: "Completed" },
-  { key: "approved", label: "Approved" },
-  { key: "rejected", label: "Rejected" },
 ];
 
 function statusChip(s: string) {
   if (s === "completed") return "bg-success-soft text-success dark:bg-white/[0.10]";
-  if (s === "approved")  return "bg-success-soft text-emerald-800 dark:bg-white/[0.10]";
-  if (s === "rejected")  return "bg-danger-soft text-danger dark:bg-white/[0.10]";
   return "bg-amber-soft text-amber-strong dark:bg-white/[0.10] dark:text-amber";
 }
 
@@ -54,17 +67,43 @@ export default function ArticlesPage() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ rough_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "" });
 
+  const [people, setPeople] = useState<Person[]>([]);
+  const [assigned, setAssigned] = useState<Assigned[]>([]);
+  const [showAssigned, setShowAssigned] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [task, setTask] = useState({ user_id: "", title: "", detail: "" });
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
-    const { data, error } = await supabase.rpc("hub_articles_list", {
-      p_status: tab === "all" ? null : tab, p_q: q.trim() || null,
-    });
-    if (error) setErr(error.message);
-    setRows((data as Row[]) ?? []);
+    const [list, ppl, asg] = await Promise.all([
+      supabase.rpc("hub_articles_list", { p_status: tab === "all" ? null : tab, p_q: q.trim() || null }),
+      supabase.rpc("hub_people"),
+      supabase.rpc("hub_assigned_tasks", { p_include_done: true }),
+    ]);
+    if (list.error) setErr(list.error.message);
+    setRows((list.data as Row[]) ?? []);
+    setPeople((ppl.data as Person[]) ?? []);
+    setAssigned((asg.data as Assigned[]) ?? []);
     setLoading(false);
   }, [tab, q]);
   useEffect(() => { load(); }, [load]);
+
+  async function assign() {
+    if (!supabase) return;
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("hub_task_assign", {
+      p_user: task.user_id, p_title: task.title, p_detail: task.detail || null,
+    });
+    setBusy(false);
+    const res = data as { ok?: boolean; error?: string } | null;
+    if (error) { setErr(error.message); return; }
+    if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
+    setAssigning(false);
+    setTask({ user_id: "", title: "", detail: "" });
+    setShowAssigned(true);
+    load();
+  }
 
   async function create() {
     if (!supabase) return;
@@ -107,6 +146,10 @@ export default function ArticlesPage() {
             className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-[#141414]">
             <Plus size={15} /> New article
           </button>
+          <button onClick={() => setAssigning(true)}
+            className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+            <UserPlus size={15} /> Assign a task
+          </button>
           <button onClick={load}
             className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-[13px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
@@ -147,6 +190,39 @@ export default function ArticlesPage() {
       </div>
 
       {err && <p className="mt-4 rounded-card border border-line bg-danger-soft px-4 py-3 text-[12.5px] font-medium text-danger">{err}</p>}
+
+      {/* TASKS YOU HANDED OUT, kept folded. They are not articles and they are
+          not the main job of this screen — but a task assigned and then never
+          mentioned again is one the boss has to hold in his head, which is the
+          thing he was trying to hand over. Open with the count visible. */}
+      {assigned.length > 0 && (
+        <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
+          <button onClick={() => setShowAssigned((v) => !v)}
+            className="flex w-full items-center gap-2 px-4 py-3 text-left">
+            <UserPlus size={15} className="text-muted dark:text-[#a89f93]" />
+            <span className="text-[13px] font-bold text-ink dark:text-[#f4f1ea]">Tasks you assigned</span>
+            <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] font-bold text-muted dark:bg-white/[0.06] dark:text-[#a89f93]">
+              {assigned.filter((t) => t.status === "open").length} open
+            </span>
+            <ChevronDown size={15} className={`ml-auto text-hint transition ${showAssigned ? "rotate-180" : ""}`} />
+          </button>
+          {showAssigned && assigned.map((t) => (
+            <div key={t.task_id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line px-4 py-2.5 text-[12.5px] dark:border-white/[0.06]">
+              <span className="font-semibold text-ink dark:text-[#f4f1ea]">{t.person}</span>
+              <span className="min-w-0 flex-1 text-ink dark:text-[#e7e2d8]">{t.title}</span>
+              {t.status === "open" ? (
+                <span className="rounded-full bg-amber-soft px-2 py-0.5 text-[11px] font-semibold text-amber-strong dark:bg-white/[0.08] dark:text-amber">
+                  with him {t.held}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted dark:text-[#a89f93]">
+                  <CheckCircle2 size={12} className="text-success" /> {t.submit_note} · took {t.held}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 space-y-2">
         {loading ? (
@@ -213,6 +289,51 @@ export default function ArticlesPage() {
           </Link>
         ))}
       </div>
+
+      {/* ── assign a task to one person ──────────────────────────────────── */}
+      {assigning && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6" onClick={() => !busy && setAssigning(false)}>
+          <div className="w-full max-w-md rounded-t-card bg-surface p-5 shadow-card dark:bg-[#201c17] sm:rounded-card" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[16px] font-extrabold text-ink dark:text-[#f4f1ea]">Assign a task</h2>
+            <p className="mt-1 text-[12.5px] text-muted dark:text-[#a89f93]">
+              Work for one person that has nothing to do with an article. It lands on his portal
+              with the same Submit button, and you are told when he has done it.
+            </p>
+
+            <label className="mt-4 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Who</label>
+            <select value={task.user_id} onChange={(e) => setTask({ ...task, user_id: e.target.value })}
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[14px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]">
+              <option value="">Choose a person…</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{p.designation ? ` — ${p.designation}` : ""}
+                </option>
+              ))}
+            </select>
+
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">What has to be done</label>
+            <input value={task.title} onChange={(e) => setTask({ ...task, title: e.target.value })}
+              placeholder="Check which collections are empty on TopShop"
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[14px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+
+            <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">Anything else he should know</label>
+            <textarea value={task.detail} onChange={(e) => setTask({ ...task, detail: e.target.value })} rows={3}
+              placeholder="Go through all 14 collections and list the empty ones with screenshots"
+              className="mt-1 w-full rounded-xl2 border border-line bg-canvas px-3 py-2 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+
+            {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setAssigning(false)} disabled={busy}
+                className="rounded-full border border-line px-4 py-2 text-[13px] font-semibold text-ink dark:border-white/15 dark:text-white">Cancel</button>
+              <button onClick={assign} disabled={busy || !task.user_id || !task.title.trim()}
+                className="flex items-center gap-2 rounded-full bg-ink px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
+                {busy && <Loader2 size={14} className="animate-spin" />} Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── new article ──────────────────────────────────────────────────── */}
       {adding && (

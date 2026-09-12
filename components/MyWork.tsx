@@ -68,7 +68,9 @@ export default function MyWork() {
     return <div className="flex items-center gap-2 px-1 py-6 text-[13px] text-muted dark:text-[#a89f93]">
       <Loader2 size={14} className="animate-spin" /> Loading your work…</div>;
   }
-  if (rows.length === 0) return null;   // nothing assigned: say nothing at all
+  /* It used to hide itself when there was nothing assigned. Now it lives
+     behind its own tab, so an empty tab has to say it is empty — a blank
+     panel reads as a page that failed to load. */
 
   return (
     <section className="overflow-hidden rounded-card border border-line bg-surface shadow-card dark:border-white/10 dark:bg-[#201c17]">

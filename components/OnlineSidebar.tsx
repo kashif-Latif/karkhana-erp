@@ -23,7 +23,7 @@ const NAV: NavItem[] = [
      product is created before it is ever shipped, and the administration opens
      this one several times a day to ask the only question it exists to answer:
      who is holding my article right now. */
-  { label: "Articles", href: "/online/articles", Icon: PackageSearch },
+  { label: "Articles Management", href: "/online/articles", Icon: PackageSearch },
   { label: "Logistics", href: "/online/logistics", Icon: Truck, children: [
       { label: "Shipments", href: "/online/logistics", Icon: Truck },
       { label: "Returns", href: "/online/logistics/returns", Icon: Undo2 },

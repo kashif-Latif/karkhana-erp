@@ -6,8 +6,6 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
   "/grn": ["inventory.view"],
-  "/str/factory": ["production.view", "production.entry"],
-  "/str/warehouse": ["khana.view", "khana.manage"],
   "/warehouse/products": ["khana.view"],
   "/warehouse/stock": ["khana.view"],
   "/warehouse/grn-in": ["khana.view"],
@@ -53,6 +51,11 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/online": null,
   "/online/dashboard": ["hub.dashboard.view"],
   "/online/orders": ["hub.orders.view", "hub.orders.manage"],
+  /* The article workflow. `view` lets somebody watch the pipeline; every
+     control — create, approve, reject, reassign, approve ads spending —
+     requires `manage` and is checked again inside the database, so listing
+     both here only decides who is shown the door, never who may act. */
+  "/online/articles": ["hub.articles.view", "hub.articles.manage"],
   "/online/logistics": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/logistics/returns": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/finance": ["hub.finance.view", "hub.finance.manage"],
