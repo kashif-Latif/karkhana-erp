@@ -77,9 +77,10 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
     half: a.half + Number(r.half),
     absent: a.absent + Number(r.absent),
     lost: a.lost + Number(r.absent_deduction),
+    gross: a.gross + Number(r.gross),
     advances: a.advances + Number(r.advances),
     payable: a.payable + Number(r.payable),
-  }), { present: 0, half: 0, absent: 0, lost: 0, advances: 0, payable: 0 });
+  }), { present: 0, half: 0, absent: 0, lost: 0, gross: 0, advances: 0, payable: 0 });
 
   const isCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
 
@@ -123,6 +124,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
               <th className="px-3 py-3 text-right font-semibold text-red-700">Lost</th>
               <th className="px-3 py-3 text-right font-semibold">Paid off</th>
               <th className="px-3 py-3 text-right font-semibold">Counted</th>
+              <th className="px-3 py-3 text-right font-semibold">Earned</th>
               <th className="px-3 py-3 text-right font-semibold">Advance</th>
               <th className="px-3 py-3 text-right font-semibold">Payable</th>
               <th className="px-3 py-3 text-right font-semibold">Paid</th>
@@ -164,6 +166,12 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
                   {r.paid_off}{Number(r.extra_days) > 0 && <span className="text-emerald-700"> +{r.extra_days}</span>}
                 </td>
                 <td className="px-3 py-3 text-right font-semibold tabular-nums">{r.counted_days}</td>
+                {/* EARNED — what the counted days are worth, before advances.
+                    Payable is that minus what has already been taken, so when
+                    somebody has drawn more than they have earned the payable
+                    goes negative and the reason was nowhere on the row. Now the
+                    three read left to right: earned, advance, payable. */}
+                <td className="px-3 py-3 text-right tabular-nums">{rs(r.gross)}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-muted dark:text-[#a89f93]">
                   {Number(r.advances) ? rs(r.advances) : "—"}
                 </td>
@@ -190,6 +198,7 @@ export default function MonthlySummary({ department = "HUB" }: { department?: st
                 <td className="px-3 py-3 text-right tabular-nums text-red-700">{t.absent}</td>
                 <td className="px-3 py-3 text-right tabular-nums text-red-700">− {rs(t.lost)}</td>
                 <td /><td />
+                <td className="px-3 py-3 text-right tabular-nums">{rs(t.gross)}</td>
                 <td className="px-3 py-3 text-right tabular-nums">{rs(t.advances)}</td>
                 <td className="px-3 py-3 text-right text-[15px] tabular-nums">{rs(t.payable)}</td>
                 <td />
