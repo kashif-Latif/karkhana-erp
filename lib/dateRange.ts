@@ -21,6 +21,8 @@ export const PRESETS = [
    Kept separate rather than swapped in, because changing a shared list to suit
    one page changes every other page that never asked. */
 export const MONEY_PRESETS = [
+  { key: "7d", label: "7 days" },
+  { key: "30d", label: "1 month" },
   { key: "60d", label: "2 months" },
   { key: "90d", label: "3 months" },
   { key: "all", label: "All time" },

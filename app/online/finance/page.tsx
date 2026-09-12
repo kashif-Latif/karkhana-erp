@@ -18,6 +18,7 @@ type Summary = {
   pending_value: number; pending_count: number; oldest_pending_days: number;
   received_gross: number; received_net: number; received_count: number;
   gross_cod: number; courier_fees: number; net_expected: number;
+  older_pending_value: number; older_pending_count: number;
 };
 /** PostEx and OwnEx kept apart deliberately: OwnEx has no payment API, so its
  *  share of the receivable can only move by import or by hand. A blended figure
@@ -173,7 +174,11 @@ export default function FinancePage() {
         : 0;
       return [
         { label: "Pending payment", value: money(s?.pending_value), Icon: Clock, bg: "bg-amber-soft",
-          note: s ? `${Number(s.pending_count).toLocaleString()} parcels · oldest ${Number(s.oldest_pending_days)} days` : "",
+          note: s
+            ? `${Number(s.pending_count).toLocaleString()} parcels · oldest ${Number(s.oldest_pending_days)} days`
+              + (Number(s.older_pending_value) > 0
+                 ? ` · + ${money(s.older_pending_value)} older than this range` : "")
+            : "",
           key: "pending" as const },
         { label: "Received", value: money(s?.received_net), Icon: CheckCircle2, bg: "bg-success-soft",
           note: s ? `${Number(s.received_count).toLocaleString()} parcels settled` : "", key: "received" as const },
