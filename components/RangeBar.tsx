@@ -3,17 +3,21 @@ import { PRESETS } from "@/lib/dateRange";
 
 export default function RangeBar({
   preset, setPreset, cf, setCf, ct, setCt, right,
+  /* A page may pass its own ranges. Omitted means the usual set, so every
+     existing caller is untouched. */
+  presets,
 }: {
   preset: string; setPreset: (v: string) => void;
   cf: string; setCf: (v: string) => void;
   ct: string; setCt: (v: string) => void;
   right?: React.ReactNode;
+  presets?: { key: string; label: string }[];
 }) {
   return (
     <div className="mt-5 flex flex-wrap items-center gap-2">
       <div className="-mx-4 w-full overflow-x-auto px-4 sm:mx-0 sm:w-auto sm:px-0">
         <div className="flex w-max gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05]">
-          {PRESETS.map((p) => (
+          {(presets ?? PRESETS).map((p) => (
             <button key={p.key} onClick={() => setPreset(p.key)}
               className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition ${preset === p.key ? "bg-ink text-white dark:bg-white dark:text-[#141414]" : "text-muted hover:text-ink dark:text-[#a89f93] dark:hover:text-white"}`}>
               {p.label}

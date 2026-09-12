@@ -5,7 +5,7 @@ import { Wallet, FileText, Undo2, RefreshCw, CheckCircle2, Clock, Truck } from "
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import ReturnsPanel from "@/components/ReturnsPanel";
 import RangeBar from "@/components/RangeBar";
-import { rangeDates } from "@/lib/dateRange";
+import { rangeDates, MONEY_PRESETS } from "@/lib/dateRange";
 import { AddFinanceRow, EditFinanceRow } from "@/components/FinanceEntry";
 import CprImport from "@/components/CprImport";
 import CprDetail from "@/components/CprDetail";
@@ -67,6 +67,11 @@ export default function FinancePage() {
      trust, and this page exists precisely because those were wrong. */
   const [pick, setPick] = useState<"" | "pending" | "received" | "charges">("");
   const [byCourier, setByCourier] = useState<CourierRow[]>([]);
+  /* Search on both tabs. Debounced, because re-filtering a thousand rows on
+     every keystroke is what made the disputes page feel sticky. */
+  const [qLive, setQLive] = useState("");
+  const [q, setQ] = useState("");
+  useEffect(() => { const t = setTimeout(() => setQ(qLive), 180); return () => clearTimeout(t); }, [qLive]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [editRow, setEditRow] = useState<Row | null>(null);
@@ -138,8 +143,16 @@ export default function FinancePage() {
     if (tab === "payments" && pick === "received") out = out.filter((r) => r.is_paid);
     if (tab === "payments" && pick === "charges")
       out = out.filter((r) => (Number(r.courier_fee) || 0) + (Number(r.courier_tax) || 0) > 0);
+
+    /* A leading # is stripped so "4715" and "#4715" find the same order, and a
+       CPR reference matches on either tab — the settlement number is how people
+       actually look these up. */
+    const n = q.trim().toLowerCase().replace("#", "");
+    if (n) out = out.filter((r) =>
+      [r.order_number, r.tracking_id, r.cpr_number, r.courier, r.store_code]
+        .some((v) => String(v ?? "").toLowerCase().replace("#", "").includes(n)));
     return out;
-  }, [rows, store, tab, pick]);
+  }, [rows, store, tab, pick, q]);
 
   const cards = useMemo(() => {
     if (tab === "payments") {
@@ -227,7 +240,22 @@ export default function FinancePage() {
         </div>
       </div>
 
-      <RangeBar preset={preset} setPreset={setPreset} cf={cf} setCf={setCf} ct={ct} setCt={setCt} />
+      {/* Money ranges here only. A courier settles over days or weeks, so Today
+          and Yesterday answer nothing on a payments screen — but they are right
+          on Orders and in Retail, which keep them. */}
+      <RangeBar preset={preset} setPreset={setPreset} cf={cf} setCf={setCf} ct={ct} setCt={setCt}
+                presets={MONEY_PRESETS} />
+
+      <div className="mt-3">
+        <input value={qLive} onChange={(e) => setQLive(e.target.value)}
+               placeholder={tab === "cpr" ? "Search CPR / invoice number, courier" : "Search order, tracking, CPR"}
+               className="w-full max-w-sm rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] outline-none focus:border-ink dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
+        {q.trim() && (
+          <span className="ml-2 text-[12px] text-muted dark:text-[#a89f93]">
+            {rowsF.length} match{rowsF.length === 1 ? "" : "es"}
+          </span>
+        )}
+      </div>
 
       <div className="mt-5 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><div className="flex w-max gap-1 rounded-full bg-panel p-1 dark:bg-white/[0.05]">
         {TABS.map((t) => (
