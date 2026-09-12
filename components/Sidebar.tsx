@@ -61,6 +61,10 @@ const NAV: NavItem[] = [
      click instead of landing on Stock and hunting for the right tab. */
   /* Four screens, not one screen with tabs. Clicking Stock shows stock —
      nothing else on the page. */
+  /* STR sits between the two departments because it belongs to neither —
+     it is the act of moving between them. */
+  { label: "STR — Transfer", href: "/str", Icon: ArrowLeftRight },
+
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
     { label: "Out GRN", href: "/warehouse/grn-out" },
