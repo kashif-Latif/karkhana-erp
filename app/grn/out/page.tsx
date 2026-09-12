@@ -1,5 +1,5 @@
 "use client";
-/* GRN OUT — the same three divisions, going the other way.
+/* GR OUT — the same three divisions, going the other way.
  *
  * Fabric and other materials leave stock; finished goods leave the factory
  * for the warehouse. The database refuses more than exists and names both
@@ -124,7 +124,7 @@ export default function GrnOutPage() {
 
   return (
     <>
-      <Topbar title="GRN Out" subtitle="Goods leaving — fabric, other materials and finished goods" />
+      <Topbar title="GR out" subtitle="Goods leaving — fabric, other materials and finished goods" />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}

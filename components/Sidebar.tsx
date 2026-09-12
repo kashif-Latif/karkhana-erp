@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
   { label: "Karkhana", Icon: Factory, children: [
     { label: "Receiving store", heading: true },
     { label: "GRN", href: "/grn" },
-    { label: "GRN out", href: "/grn/out" },
+    { label: "GR out", href: "/grn/out" },
     { label: "Stock", href: "/stock" },
     { label: "Raw materials", href: "/raw-materials" },
 

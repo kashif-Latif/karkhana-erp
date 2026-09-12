@@ -18,8 +18,10 @@ import { usePermissions } from "@/lib/usePermissions";
 
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2.5 text-[13.5px] text-ink outline-none focus:border-ink/30";
 const SECTIONS = [
-  { v: "041", l: "041 · Kids" }, { v: "042", l: "042 · Child" },
-  { v: "043", l: "043 · Ladies" }, { v: "044", l: "044 · Men" },
+    { v: "40", l: "40 · Baby blanket" }, { v: "41", l: "41 · Kids" },
+  { v: "42", l: "42 · Child" }, { v: "43", l: "43 · Ladies" },
+  { v: "44", l: "44 · Men" }, { v: "60", l: "60 · Shoes" },
+  { v: "61", l: "61 · Accessories" },
 ];
 
 type Made = { code?: string; system_barcode?: string; manual_barcode?: string; section?: string };
@@ -110,7 +112,7 @@ export default function AddArticlePage() {
           ) : (
             <div className="rounded-card border border-line bg-surface p-6 shadow-card">
               <p className="text-[13px] text-muted">
-                The barcode is generated when you save — {section || "0??"}5001 upward, counting inside its own section. It cannot be typed.
+                The barcode is generated when you save — {section || "??"}_000001 upward, counting inside its own section. It cannot be typed.
               </p>
 
               <div className="mt-4">
@@ -124,7 +126,7 @@ export default function AddArticlePage() {
                   <label className="block text-[12px] font-medium text-muted">Belongs to *</label>
                   <select value={owner} onChange={(e) => setOwner(e.target.value)} className={inp}>
                     <option value="factory">Factory — we make it</option>
-                    <option value="warehouse">Warehouse — we buy and resell it</option>
+                    <option value="warehouse">Warehouse — we store and supply</option>
                   </select>
                 </div>
                 <div>
