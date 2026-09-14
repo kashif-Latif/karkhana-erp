@@ -34,8 +34,7 @@ const NAV: NavItem[] = [
 
   /* ═══ KARKHANA ═══ material in, pieces out, finished and packed.
      Grouped in the order the work actually happens. */
-  { label: "Karkhana", Icon: Factory, children: [
-    { label: "Receiving store", heading: true },
+  { label: "Factory", Icon: Factory, children: [
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
     { label: "STR", href: "/str/factory" },
@@ -43,31 +42,12 @@ const NAV: NavItem[] = [
       { label: "New GRN report", href: "/reports/factory/grn" },
       { label: "GR out report", href: "/reports/factory/grout" },
       { label: "STR report", href: "/reports/factory/str" },
-      { label: "Low quantity", href: "/reports/factory/low" },
       { label: "Stock report", href: "/reports/factory/stock" },
+      { label: "Low quantity", href: "/reports/factory/low" },
       { label: "Blocked items", href: "/reports/factory/blocked" },
     ] },
     { label: "Graph", href: "/reports/factory/graph" },
-
-
-    { label: "Order", heading: true },
-    { label: "Articles", href: "/articles" },
-    { label: "Order by cloth", href: "/orders" },
-    { label: "Order by other material", href: "/orders?tab=other" },
-
-    { label: "Production", heading: true },
-    { label: "Stitching unit", href: "/process" },
-
-    { label: "Finishing", heading: true },
-    { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
-
     { label: "Stock", href: "/stock" },
-
-    /* Stock and Raw materials are gone: everything they showed is now read
-       back through a report, filtered however you need it. One place to look
-       instead of two that could disagree. */
-
-
   ] },
 
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
@@ -85,14 +65,12 @@ const NAV: NavItem[] = [
       { label: "New GRN report", href: "/reports/warehouse/grn" },
       { label: "GR out report", href: "/reports/warehouse/grout" },
       { label: "STR report", href: "/reports/warehouse/str" },
-      { label: "Low quantity", href: "/reports/warehouse/low" },
       { label: "Stock report", href: "/reports/warehouse/stock" },
+      { label: "Low quantity", href: "/reports/warehouse/low" },
       { label: "Blocked items", href: "/reports/warehouse/blocked" },
     ] },
     { label: "Graph", href: "/reports/warehouse/graph" },
-    { label: "Inventory", href: "/warehouse/products" },
-
-
+    { label: "Stock", href: "/warehouse/stock" },
   ] },
 
   /* ═══ PAYMENTS ═══ its own section, serving both departments. */
@@ -159,7 +137,7 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
       <div className="flex items-center gap-2.5 px-6 pb-5 pt-4">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink text-white"><Gem size={18} /></span>
         <div className="leading-tight">
-          <div className="text-[15px] font-extrabold tracking-tight">Factory</div>
+          <div className="text-[15px] font-extrabold tracking-tight">Management system</div>
           <div className="text-[11px] text-muted">Head Office ERP</div>
         </div>
       </div>
