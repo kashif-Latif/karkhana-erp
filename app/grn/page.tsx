@@ -54,6 +54,7 @@ function GrnInner() {
   const [linesBusy, setLinesBusy] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [voidWhy, setVoidWhy] = useState("");
+  const [killOpen, setKillOpen] = useState(false);
   /* edit_grn replaces the whole receipt in one call — supplier, date, freight,
      discount and every line — so a half-edited GRN cannot exist. */
   const [editing, setEditing] = useState(false);
@@ -91,7 +92,7 @@ function GrnInner() {
 
   async function openDetail(g: Grn) {
     if ((window.getSelection()?.toString() ?? "").length > 0) return;
-    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr(""); setEditing(false); setHdr(null);
+    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr(""); setEditing(false); setHdr(null); setKillOpen(false);
     const [ln, hd] = await Promise.all([
       supabase!.from("v_grn_lines").select("*").eq("grn_id", g.id),
       supabase!.from("grns").select("supplier_id,freight,discount").eq("id", g.id).single(),
@@ -130,6 +131,16 @@ function GrnInner() {
     setEBusy(false);
     if (error) { setErr(error.message); return; }
     setEditing(false); setOpenGrn(null); load();
+  }
+
+  async function deleteGrn() {
+    if (!supabase || !openGrn) return;
+    const { error } = await supabase.rpc("delete_grn", { p_grn_id: openGrn.id });
+    if (error) {
+      setErr("This cannot be deleted — its stock has already been used or issued. Void it instead, which reverses it and keeps the record.");
+      return;
+    }
+    setOpenGrn(null); load();
   }
 
   async function voidGrn() {
@@ -365,9 +376,8 @@ function GrnInner() {
             {err && <p className="mt-2 text-[12.5px] font-medium text-danger">{err}</p>}
 
             <div className="mt-5 flex items-center gap-2">
-              {/* Voiding reverses the stock this GRN added. Editing a posted
-                  receipt is not offered: the honest record is "this was wrong,
-                  here is the reversal", not a number quietly changed. */}
+              {/* Edit changes it · Void reverses it and keeps the record ·
+                  Delete removes a receipt that should never have existed. */}
               {editing ? (
                 <>
                   <button onClick={saveEdit} disabled={eBusy}
@@ -389,7 +399,14 @@ function GrnInner() {
                   </button>
                   <button onClick={() => setDelOpen(false)} className="text-[12px] text-ink/60">cancel</button>
                 </span>
-              ) : (
+              ) : killOpen ? (
+                <span className="flex items-center gap-2">
+                  <button onClick={deleteGrn} className="rounded-xl2 bg-danger px-3.5 py-2 text-[12.5px] font-semibold text-white">
+                    Delete permanently
+                  </button>
+                  <button onClick={() => setKillOpen(false)} className="text-[12px] text-ink/60">cancel</button>
+                </span>
+                ) : (
                 <>
                   <button onClick={startEdit}
                     className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-ink/75 hover:bg-panel">
@@ -398,6 +415,12 @@ function GrnInner() {
                   <button onClick={() => setDelOpen(true)}
                     className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
                     Void
+                  </button>
+                  {/* Delete for a receipt typed in error; void for one that
+                      happened and was undone. */}
+                  <button onClick={() => setKillOpen(true)}
+                    className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
+                    Delete
                   </button>
                 </>
               )}
