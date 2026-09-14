@@ -248,7 +248,7 @@ export default function Orders() {
                   <button onClick={saveStatus} disabled={savingStatus || detailStatus === detail.status} className="flex shrink-0 items-center gap-1.5 rounded-xl2 bg-ink px-5 text-[13px] font-semibold text-white disabled:opacity-40">{savingStatus && <Loader2 size={15} className="animate-spin" />}Save</button>
                 </div>
                 {!confirmDel ? (
-                  <button onClick={() => setConfirmDel(true); setDelReason(""); setDelErr("");} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
+                  <button onClick={() => { setConfirmDel(true); setDelReason(""); setDelErr(""); }} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
                 ) : (
                   <div className="mt-4 rounded-xl2 bg-danger-soft p-3">
                     <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? This can&apos;t be undone.</p>
