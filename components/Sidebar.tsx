@@ -45,8 +45,8 @@ const NAV: NavItem[] = [
       { label: "STR report", href: "/reports/factory/str" },
       { label: "Low quantity", href: "/reports/factory/low" },
       { label: "Blocked items", href: "/reports/factory/blocked" },
-      { label: "Top transfers", href: "/reports/factory/graph" },
     ] },
+    { label: "Graph", href: "/reports/factory/graph" },
 
 
     { label: "Order", heading: true },
@@ -84,8 +84,8 @@ const NAV: NavItem[] = [
       { label: "STR report", href: "/reports/warehouse/str" },
       { label: "Low quantity", href: "/reports/warehouse/low" },
       { label: "Blocked items", href: "/reports/warehouse/blocked" },
-      { label: "Top transfers", href: "/reports/warehouse/graph" },
     ] },
+    { label: "Graph", href: "/reports/warehouse/graph" },
     { label: "Products", href: "/warehouse/products" },
 
 
