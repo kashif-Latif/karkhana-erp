@@ -73,12 +73,16 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     : rep === "grout" ? (side === "factory" ? "moved_at" : "created_at")
     : rep === "str" ? "moved_at" : "updated_at";
 
+  /* Categories CASCADE from the division: choosing Fabric must not offer
+     Sticker or Zip. Derived from the rows that survive the division filter,
+     so the list can only ever contain categories that actually exist there. */
   const cats = useMemo(() => {
     const set = new Set<string>();
-    rows.forEach((r) => String(r.categories ?? r.category ?? "").split(" · ")
-      .filter(Boolean).forEach((c) => set.add(c)));
-    return [...set].sort();
-  }, [rows]);
+    rows.filter((r) => div === "all" || String(r.kind ?? r.division ?? "") === div)
+      .forEach((r) => String(r.categories ?? r.category ?? "").split(" · ")
+        .filter(Boolean).forEach((c) => set.add(c)));
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [rows, div]);
 
   const view = useMemo(() => rows.filter((r) => {
     if (div !== "all" && String(r.kind ?? r.division ?? "") !== div) return false;
@@ -160,7 +164,7 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
           <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setWeeks(null); }}
             className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
           {side === "factory" && (rep === "grn" || rep === "grout" || rep === "low") && (
-            <select value={div} onChange={(e) => setDiv(e.target.value)}
+            <select value={div} onChange={(e) => { setDiv(e.target.value); setCat("all"); }}
               className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none">
               <option value="all">All divisions</option>
               <option value="fabric">Fabric</option>
