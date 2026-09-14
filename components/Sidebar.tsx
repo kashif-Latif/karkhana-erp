@@ -34,12 +34,8 @@ const NAV: NavItem[] = [
     { label: "Receiving store", heading: true },
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
-    { label: "Stock", href: "/stock" },
-    { label: "Raw materials", href: "/raw-materials" },
 
     { label: "Order", heading: true },
-    /* Also reachable from inside Karkhana, where you are standing when you
-       need it. Same screen, same data — the entry above is the shortcut. */
     { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
     { label: "Order by other material", href: "/orders?tab=other" },
@@ -47,18 +43,21 @@ const NAV: NavItem[] = [
     { label: "Production", heading: true },
     { label: "Stitching unit", href: "/process" },
 
-    /* Fixing, clipping and pressing are stages of the same job as packing —
-       same men, same bench, same wage rule. One screen with a stage on it,
-       not four screens to fix every future bug in. */
     { label: "Finishing", heading: true },
     { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
-    { label: "STR", href: "/str/factory" },
+
+    /* Stock and Raw materials are gone: everything they showed is now read
+       back through a report, filtered however you need it. One place to look
+       instead of two that could disagree. */
     { label: "Reports", heading: true },
     { label: "New GRN report", href: "/reports/factory?r=grn" },
     { label: "GR out report", href: "/reports/factory?r=grout" },
     { label: "STR report", href: "/reports/factory?r=str" },
     { label: "Low quantity", href: "/reports/factory?r=low" },
     { label: "Blocked items", href: "/reports/factory?r=blocked" },
+
+    { label: "STR", href: "/str/factory" },
+
   ] },
 
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
@@ -71,14 +70,17 @@ const NAV: NavItem[] = [
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
     { label: "GR out", href: "/warehouse/grn-out" },
-    { label: "Stock", href: "/warehouse/stock" },
-    { label: "STR", href: "/str/warehouse" },
+    { label: "Products", href: "/warehouse/products" },
+
+    { label: "Reports", heading: true },
     { label: "New GRN report", href: "/reports/warehouse?r=grn" },
     { label: "GR out report", href: "/reports/warehouse?r=grout" },
     { label: "STR report", href: "/reports/warehouse?r=str" },
     { label: "Low quantity", href: "/reports/warehouse?r=low" },
     { label: "Blocked items", href: "/reports/warehouse?r=blocked" },
-    { label: "Products", href: "/warehouse/products" },
+
+    { label: "STR", href: "/str/warehouse" },
+
   ] },
 
   /* ═══ PAYMENTS ═══ its own section, serving both departments. */
@@ -88,7 +90,7 @@ const NAV: NavItem[] = [
     { label: "Approvals", href: "/approvals" },
   ] },
 
-  { label: "Reports", href: "/reports", Icon: FileBarChart },
+
 ];
 
 /* ADMINISTRATION AND EMPLOYEES ARE NOT KARKHANA THINGS.
