@@ -133,6 +133,7 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
 
   const [status, setStatus] = useState("P");
   const [timeIn, setTimeIn] = useState("");
+  const [timeOut, setTimeOut] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
@@ -167,7 +168,10 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
       id: `${emp_id}-${y}-${m}-${day}`,
       emp_id, year: y, month: m, day,
       status,
-      time_in: status === "P" || status === "H" ? timeIn : "",
+      time_in:  status === "P" || status === "H" ? timeIn  : "",
+      /* Cleared when the day is not worked, so a leftover time from a previous
+         edit cannot claim somebody was present on a day marked absent. */
+      time_out: status === "P" || status === "H" ? timeOut : "",
     }));
 
     const { error } = await supabase.from("online_att_records").upsert(rowsToSave, { onConflict: "emp_id,year,month,day" });
@@ -194,6 +198,10 @@ export function MarkAttendance({ emps, onDone }: { emps: EmpLite[]; onDone: () =
           <Field label="Time in">
             <input type="time" className={inputCls} value={timeIn} disabled={status !== "P" && status !== "H"}
               onChange={(e) => setTimeIn(e.target.value)} />
+          </Field>
+          <Field label="Time out">
+            <input type="time" className={inputCls} value={timeOut} disabled={status !== "P" && status !== "H"}
+              onChange={(e) => setTimeOut(e.target.value)} />
           </Field>
         </div>
 

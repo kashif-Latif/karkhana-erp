@@ -23,7 +23,7 @@ type Row = {
   absent_deduction: number; paid_off: number; extra_days: number;
   counted_days: number; gross: number; advances: number; payable: number; is_paid: boolean;
 };
-type Day = { day: number; status: string };
+type Day = { day: number; status: string; time_in?: string | null; time_out?: string | null };
 type Adv = { date: string; amount: number; note: string | null };
 
 const MONTHS = ["", "January", "February", "March", "April", "May", "June",
@@ -49,7 +49,7 @@ export default function EmployeeMonthDetail({
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
     const [d, a, h] = await Promise.all([
-      supabase.from("online_att_records").select("day,status")
+      supabase.from("online_att_records").select("day,status,time_in,time_out")
         .eq("emp_id", row.emp_id).eq("year", year).eq("month", month).order("day"),
       supabase.from("online_att_advances").select("date,amount,note")
         .eq("emp_id", row.emp_id).eq("deduct_year", year).eq("deduct_month", month).order("date"),
@@ -76,6 +76,11 @@ export default function EmployeeMonthDetail({
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDow = new Date(year, month - 1, 1).getDay();
   const byDay = new Map(days.map((d) => [d.day, (d.status || "").toUpperCase()]));
+  /* The hours were being recorded and shown nowhere, so a short day and a full
+     day looked identical on the calendar once the month had passed. */
+  const timesByDay = new Map(days.map((d) => [d.day, {
+    in: (d.time_in ?? "").trim(), out: (d.time_out ?? "").trim(),
+  }]));
   // From the database: a local salary ÷ 30 × days cannot see a mid-month raise.
   const gross = Number(row.gross ?? 0);
 
@@ -166,13 +171,23 @@ export default function EmployeeMonthDetail({
                       <div className="text-[9px] font-normal">
                         {workedOff ? (holiday ? "Hol+" : "Sun+") : st ?? (holiday ? "Hol" : sunday ? "Sun" : "")}
                       </div>
+                      {(() => {
+                        const t = timesByDay.get(dnum);
+                        if (!t || (!t.in && !t.out)) return null;
+                        return (
+                          <div className="text-[8.5px] font-normal leading-tight opacity-80">
+                            {t.in || "—"}{t.out ? ` · ${t.out}` : ""}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
               </div>
               <div className="mt-2 text-[10.5px] text-hint dark:text-[#8a8175]">
                 P present · H half · L leave (paid) · A absent · Sun paid Sunday ·
-                Sun+ worked a day off (+1) · blank not marked
+                Sun+ worked a day off (+1) · blank not marked.
+                Times below a day are clock-in · clock-out, where they were recorded.
               </div>
             </>
           )}
