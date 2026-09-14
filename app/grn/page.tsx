@@ -60,6 +60,11 @@ function GrnInner() {
   const [eLines, setELines] = useState<Line[]>([]);
   const [eNote, setENote] = useState("");
   const [eBusy, setEBusy] = useState(false);
+  /* edit_grn REPLACES the receipt, so anything not sent is wiped. The header
+     fields must be read back and passed through unchanged, or editing a
+     quantity would silently erase the supplier, the freight and the discount. */
+  const [hdr, setHdr] = useState<{ supplier_id: string | null; freight: number | null;
+                                   discount: number | null } | null>(null);
   const [days, setDays] = useState<number | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -86,9 +91,18 @@ function GrnInner() {
 
   async function openDetail(g: Grn) {
     if ((window.getSelection()?.toString() ?? "").length > 0) return;
-    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr(""); setEditing(false);
-    const { data } = await supabase!.from("v_grn_lines").select("*").eq("grn_id", g.id);
-    setLines((data as unknown as Line[]) ?? []);
+    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr(""); setEditing(false); setHdr(null);
+    const [ln, hd] = await Promise.all([
+      supabase!.from("v_grn_lines").select("*").eq("grn_id", g.id),
+      supabase!.from("grns").select("supplier_id,freight,discount").eq("id", g.id).single(),
+    ]);
+    setLines((ln.data as unknown as Line[]) ?? []);
+    const h = hd.data as Record<string, unknown> | null;
+    setHdr(h ? {
+      supplier_id: (h.supplier_id as string) ?? null,
+      freight: h.freight == null ? null : Number(h.freight),
+      discount: h.discount == null ? null : Number(h.discount),
+    } : null);
     setLinesBusy(false);
   }
 
@@ -100,11 +114,14 @@ function GrnInner() {
 
   async function saveEdit() {
     if (!supabase || !openGrn) return;
+    if (!hdr) { setErr("Still loading this receipt — try again in a moment."); return; }
     setEBusy(true); setErr("");
     const { error } = await supabase.rpc("edit_grn", {
       p_grn_id: openGrn.id,
-      p_supplier_id: null, p_received_at: openGrn.received_at,
-      p_freight: null, p_discount: null,
+      p_supplier_id: hdr?.supplier_id ?? null,
+      p_received_at: openGrn.received_at,
+      p_freight: hdr?.freight ?? null,
+      p_discount: hdr?.discount ?? null,
       p_note: eNote.trim() || null,
       p_lines: eLines.filter((l) => Number(l.quantity) > 0).map((l) => ({
         item_id: l.item_id, quantity: Number(l.quantity), rate: l.rate == null ? null : Number(l.rate),
