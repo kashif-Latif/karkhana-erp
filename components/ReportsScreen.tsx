@@ -41,6 +41,9 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [div, setDiv] = useState("all");
+  /* Category, not just division. "Fabric" is not an answer when you hold
+     Fleece, Jersey and Lycra — which was the whole complaint. */
+  const [cat, setCat] = useState("all");
 
 
 
@@ -70,8 +73,16 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     : rep === "grout" ? (side === "factory" ? "moved_at" : "created_at")
     : rep === "str" ? "moved_at" : "updated_at";
 
+  const cats = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((r) => String(r.categories ?? r.category ?? "").split(" · ")
+      .filter(Boolean).forEach((c) => set.add(c)));
+    return [...set].sort();
+  }, [rows]);
+
   const view = useMemo(() => rows.filter((r) => {
     if (div !== "all" && String(r.kind ?? r.division ?? "") !== div) return false;
+    if (cat !== "all" && !String(r.categories ?? r.category ?? "").split(" · ").includes(cat)) return false;
     const raw = r[dateKey];
     if (raw) {
       const day = String(raw).slice(0, 10);
@@ -88,13 +99,14 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
       return Object.values(r).some((v) => String(v ?? "").toLowerCase().includes(t));
     }
     return true;
-  }), [rows, q, weeks, from, to, div, dateKey]);
+  }), [rows, q, weeks, from, to, div, cat, dateKey]);
 
   /* Columns per report — named, so an export means the same thing as the
      screen rather than dumping whatever the view happened to return. */
   const COLS: Record<Rep, { k: string; h: string; align?: "r"; fmt?: (v: unknown) => string }[]> = {
     grn: side === "factory"
-      ? [{ k: "grn_number", h: "GRN" }, { k: "kind", h: "Division" }, { k: "supplier", h: "Supplier" },
+      ? [{ k: "grn_number", h: "GRN" }, { k: "kind", h: "Division" },
+         { k: "categories", h: "Category" }, { k: "supplier", h: "Supplier" },
          { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "total", h: "Value", align: "r", fmt: rs },
          { k: "received_at", h: "Received", fmt: when }]
       : [{ k: "movement_no", h: "Movement" }, { k: "barcode", h: "Barcode" }, { k: "name", h: "Product" },
@@ -156,6 +168,13 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
               {rep !== "low" && <option value="finished">Market goods</option>}
             </select>
           )}
+          {cats.length > 0 && (
+            <select value={cat} onChange={(e) => setCat(e.target.value)}
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none">
+              <option value="all">All categories</option>
+              {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -196,7 +215,14 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
               </tr></thead>
               <tbody>
                 {view.map((r, ix) => (
-                  <tr key={ix} className={`border-b border-line/60 last:border-0 ${ix % 2 ? "bg-panel/25" : ""}`}>
+                  <tr key={ix}
+                    onClick={() => {
+                      /* A GRN row opens its receipt. Selecting text does not. */
+                      if (rep !== "grn" || side !== "factory") return;
+                      if ((window.getSelection()?.toString() ?? "").length > 0) return;
+                      window.location.href = "/grn?open=" + String(r.id ?? "");
+                    }}
+                    className={`border-b border-line/60 last:border-0 ${rep === "grn" && side === "factory" ? "cursor-pointer hover:bg-panel/40" : ""} ${ix % 2 ? "bg-panel/25" : ""}`}>
                     {cols.map((c) => (
                       <td key={c.k} className={`px-4 py-3 ${c.align === "r" ? "text-right tnum font-semibold text-ink" : "text-ink/85"}`}>
                         {c.fmt ? c.fmt(r[c.k]) : String(r[c.k] ?? "—")}

@@ -22,7 +22,7 @@ type Grn = { id: string; grn_number: string; kind: string; received_at: string;
              total: number | null; note: string | null; status: string | null;
              supplier: string | null; lines: number; quantity: number;
              categories: string | null };
-type Line = { id: string; item_code: string; material: string; category: string | null;
+type Line = { id: string; item_id: string; item_code: string; material: string; category: string | null;
               colour: string | null; size: string | null; unit: string;
               quantity: number; rate: number | null; line_total: number };
 type Kind = "fabric" | "other" | "finished";
@@ -54,6 +54,12 @@ function GrnInner() {
   const [linesBusy, setLinesBusy] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [voidWhy, setVoidWhy] = useState("");
+  /* edit_grn replaces the whole receipt in one call — supplier, date, freight,
+     discount and every line — so a half-edited GRN cannot exist. */
+  const [editing, setEditing] = useState(false);
+  const [eLines, setELines] = useState<Line[]>([]);
+  const [eNote, setENote] = useState("");
+  const [eBusy, setEBusy] = useState(false);
   const [days, setDays] = useState<number | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -69,12 +75,44 @@ function GrnInner() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /* Arriving from a report with ?open=<id> lands straight on that receipt. */
+  const openId = useSearchParams().get("open");
+  useEffect(() => {
+    if (!openId || rows.length === 0) return;
+    const g = rows.find((r) => r.id === openId);
+    if (g) openDetail(g);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, rows]);
+
   async function openDetail(g: Grn) {
     if ((window.getSelection()?.toString() ?? "").length > 0) return;
-    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr("");
+    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr(""); setEditing(false);
     const { data } = await supabase!.from("v_grn_lines").select("*").eq("grn_id", g.id);
     setLines((data as unknown as Line[]) ?? []);
     setLinesBusy(false);
+  }
+
+  function startEdit() {
+    if (!openGrn) return;
+    setEditing(true); setELines(lines.map((l) => ({ ...l })));
+    setENote(openGrn.note ?? ""); setErr("");
+  }
+
+  async function saveEdit() {
+    if (!supabase || !openGrn) return;
+    setEBusy(true); setErr("");
+    const { error } = await supabase.rpc("edit_grn", {
+      p_grn_id: openGrn.id,
+      p_supplier_id: null, p_received_at: openGrn.received_at,
+      p_freight: null, p_discount: null,
+      p_note: eNote.trim() || null,
+      p_lines: eLines.filter((l) => Number(l.quantity) > 0).map((l) => ({
+        item_id: l.item_id, quantity: Number(l.quantity), rate: l.rate == null ? null : Number(l.rate),
+      })),
+    });
+    setEBusy(false);
+    if (error) { setErr(error.message); return; }
+    setEditing(false); setOpenGrn(null); load();
   }
 
   async function voidGrn() {
@@ -273,8 +311,24 @@ function GrnInner() {
                             {[l.colour, l.size, l.item_code].filter(Boolean).join(" · ")}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(l.quantity)} <span className="text-[11px] font-normal text-muted">{l.unit}</span></td>
-                        <td className="px-3 py-2 text-right tnum text-muted">{l.rate == null ? "—" : rs(l.rate)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {editing ? (
+                            <input type="number" defaultValue={String(l.quantity)}
+                              onChange={(e) => setELines((x) => x.map((y) => y.id === l.id ? { ...y, quantity: parseFloat(e.target.value) || 0 } : y))}
+                              className="w-24 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12.5px] outline-none" />
+                          ) : (
+                            <span className="tnum font-semibold text-ink">{n(l.quantity)} <span className="text-[11px] font-normal text-muted">{l.unit}</span></span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {editing ? (
+                            <input type="number" defaultValue={l.rate == null ? "" : String(l.rate)}
+                              onChange={(e) => setELines((x) => x.map((y) => y.id === l.id ? { ...y, rate: e.target.value === "" ? null : parseFloat(e.target.value) } : y))}
+                              className="w-24 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12.5px] outline-none" />
+                          ) : (
+                            <span className="tnum text-muted">{l.rate == null ? "—" : rs(l.rate)}</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right tnum font-bold text-ink">{rs(l.line_total)}</td>
                       </tr>
                     ))}
@@ -287,14 +341,26 @@ function GrnInner() {
               <span className="text-muted">{openGrn.lines} line(s) · {n(openGrn.quantity)} units</span>
               <span className="text-[16px] font-extrabold text-ink">{rs(openGrn.total ?? 0)}</span>
             </div>
-            {openGrn.note && <p className="mt-2 text-[12.5px] text-muted">{openGrn.note}</p>}
+            {editing ? (
+              <input value={eNote} onChange={(e) => setENote(e.target.value)} placeholder="Note"
+                className="mt-2 w-full rounded-xl2 border border-line px-3 py-2 text-[12.5px] outline-none focus:border-ink/30" />
+            ) : openGrn.note ? <p className="mt-2 text-[12.5px] text-muted">{openGrn.note}</p> : null}
             {err && <p className="mt-2 text-[12.5px] font-medium text-danger">{err}</p>}
 
             <div className="mt-5 flex items-center gap-2">
               {/* Voiding reverses the stock this GRN added. Editing a posted
                   receipt is not offered: the honest record is "this was wrong,
                   here is the reversal", not a number quietly changed. */}
-              {delOpen ? (
+              {editing ? (
+                <>
+                  <button onClick={saveEdit} disabled={eBusy}
+                    className="rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
+                    {eBusy ? "Saving…" : "Save changes"}
+                  </button>
+                  <button onClick={() => setEditing(false)} className="text-[12px] text-ink/60">cancel</button>
+                  <span className="text-[11.5px] text-muted">Stock adjusts to match the new quantities.</span>
+                </>
+              ) : delOpen ? (
                 <span className="flex flex-1 items-center gap-2">
                   <input value={voidWhy} autoFocus onChange={(e) => setVoidWhy(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") voidGrn(); if (e.key === "Escape") setDelOpen(false); }}
@@ -307,12 +373,18 @@ function GrnInner() {
                   <button onClick={() => setDelOpen(false)} className="text-[12px] text-ink/60">cancel</button>
                 </span>
               ) : (
-                <button onClick={() => setDelOpen(true)}
-                  className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
-                  Void this GRN
-                </button>
+                <>
+                  <button onClick={startEdit}
+                    className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-ink/75 hover:bg-panel">
+                    Edit
+                  </button>
+                  <button onClick={() => setDelOpen(true)}
+                    className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
+                    Void
+                  </button>
+                </>
               )}
-              <button onClick={() => setOpenGrn(null)} className="ml-auto rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Close</button>
+              {!editing && <button onClick={() => setOpenGrn(null)} className="ml-auto rounded-xl2 border border-line px-5 py-2.5 text-[13px] font-semibold text-ink/70">Close</button>}
             </div>
           </div>
         </div>
