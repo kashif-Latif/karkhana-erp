@@ -189,7 +189,12 @@ export default function Articles() {
           <>
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-[12.5px] text-muted">Each article is a garment you make. Set its <b>recipe</b> (fabric + zip per piece) so orders can auto-calculate material.{!canManage && " (View only.)"}</p>
-              {canManage && <Link href="/edit-record" className="mr-2 inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-2 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">Edit record</Link><button onClick={openAdd} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add article</button>}
+              {canManage && (
+                <span className="flex shrink-0 items-center gap-2">
+                  <Link href="/edit-record" className="inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-2 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">Edit record</Link>
+                  <button onClick={openAdd} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add article</button>
+                </span>
+              )}
             </div>
 
             {articles.length === 0 ? (
