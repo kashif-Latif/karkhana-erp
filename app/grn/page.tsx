@@ -137,7 +137,10 @@ function GrnInner() {
     if (!supabase || !openGrn) return;
     const { error } = await supabase.rpc("delete_grn", { p_grn_id: openGrn.id });
     if (error) {
-      setErr("This cannot be deleted — its stock has already been used or issued. Void it instead, which reverses it and keeps the record.");
+      /* Show what the database actually said. Replacing it with a guess about
+         stock sent Kashif hunting a problem that did not exist — the real
+         refusal was a permission one. */
+      setErr(error.message);
       return;
     }
     setOpenGrn(null); load();
