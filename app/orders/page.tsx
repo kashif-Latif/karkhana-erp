@@ -1,46 +1,12 @@
 "use client";
-import { useEffect, useState, useCallback, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { useEffect, useState, useCallback } from "react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2, Download } from "lucide-react";
+import { Loader2, Plus, ClipboardList, X, Check, AlertTriangle, Trash2 } from "lucide-react";
 
 type Article = { id: string; name: string; code: string };
 type Order = { id: string; order_number: string; quantity: number; status: string; target_date: string | null; created_at: string; notes: string | null; article_id: string; article: { name?: string; code?: string } | null };
-type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean;
-             owned: number; awaiting_sorting: number;
-             /* K128. "You have none" and "you have 560 kg of the wrong kind"
-                need different actions from whoever is at the screen. Showing
-                both as 0 sends them hunting for stock that is right there. */
-             problem: "ok" | "no_item" | "wrong_kind" | "unsorted" | "short";
-             fix: string | null };
-
-type Receipt = { id: string; receipt_no: string; quantity: number; rejected: number;
-                 received_at: string; wage_amount: number | null; paid_at: string | null };
-type Move = { id: string; movement_number: string; type: string; moved_at: string;
-              material: string; item_code: string; quantity: number; unit: string;
-              reason: string | null; department: string | null };
-
-/* K123. Two numbers, both true: what you own, and what you can actually cut.
-   Unsorted fabric is yours and it is on your floor — it just cannot be cut
-   until somebody opens the Bora. */
-type UsableItem = { item_id: string; item_code: string; group_id: string; material: string;
-                    unit: string; usable: number; in_stock: number };
-type Estimate =
-  | { ok: false; guard: string; meaning: string; usable?: number; you_entered?: number }
-  | { ok: true; pieces: number; from_this_material: number; limited_by: string | null;
-      material_given: number; meaning: string };
-
-/* What place_production_order (K120) hands back. It either refuses the whole
-   order and lists every short line, or it succeeds and reports what it took
-   out of stock. It never half-does the job. */
-type ShortLine = { material?: string; item?: string; need: number; have: number; short: number; unit?: string };
-type IssuedLine = { material?: string; item?: string; quantity: number };
-type PlaceResult =
-  | { ok: false; guard: string; wrote: number; short: ShortLine[]; meaning: string }
-  | { ok: true; wrote: number; order: string; quantity: number; issued: IssuedLine[];
-      material_cost: number; pending: number; floor: string };
+type Req = { material_label: string; required: number; unit_symbol: string; available: number; enough: boolean };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-panel text-muted" },
@@ -60,34 +26,15 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
   return (
     <div className="overflow-hidden rounded-xl2 border border-line">
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[12.5px]">
-        <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted"><th className="px-3 py-2 font-semibold">Material</th><th className="px-3 py-2 text-right font-semibold">Needed</th><th className="px-3 py-2 text-right font-semibold">Can cut</th><th className="px-3 py-2 text-right font-semibold">OK?</th></tr></thead>
+        <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted"><th className="px-3 py-2 font-semibold">Material</th><th className="px-3 py-2 text-right font-semibold">Needed</th><th className="px-3 py-2 text-right font-semibold">In stock</th><th className="px-3 py-2 text-right font-semibold">OK?</th></tr></thead>
         <tbody>
           {reqs.map((r, i) => (
             <tr key={i} className="border-t border-line/60">
-              <td className="px-3 py-2 font-medium text-ink">
-                {r.material_label}
-                {/* Each shortage names its own remedy. Without this, "0"
-                    against 560 kg of stickers reads as the system lying. */}
-                {r.fix && <span className="mt-0.5 block text-[11px] font-normal leading-snug text-hint">{r.fix}</span>}
-              </td>
-              <td className="px-3 py-2 align-top text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
-              <td className="px-3 py-2 align-top text-right tnum text-muted">
-                {n(r.available)} {r.unit_symbol}
-                {Number(r.awaiting_sorting) > 0 && (
-                  <span className="block text-[11px] text-hint">
-                    {n(r.owned)} owned · {n(r.awaiting_sorting)} not sorted yet
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-2 align-top text-right">
-                {r.enough ? <Check size={15} className="ml-auto text-[#166534]" /> : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger">
-                    <AlertTriangle size={11} />
-                    {r.problem === "no_item" ? "No item" :
-                     r.problem === "wrong_kind" ? "Wrong kind" :
-                     r.problem === "unsorted" ? "Unsorted" : "Short"}
-                  </span>
-                )}
+              <td className="px-3 py-2 font-medium text-ink">{r.material_label}</td>
+              <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(r.required)} {r.unit_symbol}</td>
+              <td className="px-3 py-2 text-right tnum text-muted">{n(r.available)} {r.unit_symbol}</td>
+              <td className="px-3 py-2 text-right">
+                {r.enough ? <Check size={15} className="ml-auto text-[#166534]" /> : <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger"><AlertTriangle size={11} /> Short</span>}
               </td>
             </tr>
           ))}
@@ -97,7 +44,7 @@ function Requirements({ reqs, loading }: { reqs: Req[] | null; loading: boolean 
   );
 }
 
-function OrdersInner() {
+export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [canManage, setCanManage] = useState(false);
@@ -109,152 +56,16 @@ function OrdersInner() {
   const [targetDate, setTargetDate] = useState(todayInput());
   const [notes, setNotes] = useState("");
   const [reqs, setReqs] = useState<Req[] | null>(null);
-
-  /* K123 — the order works both ways. "I want 100 shirts, what material?"
-     and "I am giving 100 kg, how many shirts?" are the same question asked
-     from opposite ends, and the second one is how the floor actually thinks. */
-  const [mode, setMode] = useState<"pieces" | "material">("pieces");
-  const [usableItems, setUsableItems] = useState<UsableItem[]>([]);
-  const [srcItem, setSrcItem] = useState("");
-  const [srcQty, setSrcQty] = useState("");
-  const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const [estLoading, setEstLoading] = useState(false);
   const [reqLoading, setReqLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState<PlaceResult | null>(null);
 
   const [detail, setDetail] = useState<Order | null>(null);
-  const [delWhy, setDelWhy] = useState("");
-  /* Receipts are the reason a delete gets refused, so they must be visible
-     and voidable from the same screen — otherwise the refusal is a dead end. */
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [rVoid, setRVoid] = useState<string | null>(null);
-  const [rWhy, setRWhy] = useState("");
-
-  /* K125 — issue, return and wastage live on the order now, not on a
-     separate screen. Giving material out and getting it back are two halves
-     of the same sentence: "we gave 25 kg, we got 2 back". Split across two
-     screens with no order attached, that sentence cannot be written down. */
-  const [moves, setMoves] = useState<Move[]>([]);
-  const [mvType, setMvType] = useState<"return" | "wastage">("return");
-  const [mvItem, setMvItem] = useState("");
-  const [mvQty, setMvQty] = useState("");
-  const [mvReason, setMvReason] = useState("");
-  const [mvBusy, setMvBusy] = useState(false);
-  const [mvErr, setMvErr] = useState("");
-  /* A return has to name the floor it came back from, and only one
-     department receives work — the unit K118 created. Read it rather than
-     hardcoding a code that could be renamed. */
-  const [unitId, setUnitId] = useState<string | null>(null);
-
-  /* K132 — the order has TWO sections, because they are two different
-     moments. A RAW material order (fabric + thread) starts production and
-     goes to the floor. OTHER materials (sticker, shopper, zip) are added
-     onto the order later, when the pieces are back and being finished. One
-     dropdown offering everything mixes the two moments and invites fabric
-     mistakes at packing time. */
-  const [section, setSection] = useState<"raw" | "other">("raw");
-  const [groupCodes, setGroupCodes] = useState<Record<string, string>>({}); // group_id -> code
-  const [otherItem, setOtherItem] = useState("");
-  const [otherQty, setOtherQty] = useState("");
-  const [otherPrice, setOtherPrice] = useState("");
-  const [otherPriceTouched, setOtherPriceTouched] = useState(false);
-  const [otherBusy, setOtherBusy] = useState(false);
-  const [otherErr, setOtherErr] = useState("");
-  const [orderCosts, setOrderCosts] = useState<{ material: string; issued: number | null; unit: string; material_cost: number }[]>([]);
-
-  type OtherOrder = { id: string; movement_number: string; moved_at: string;
-                      order_number: string | null; material: string; quantity: number;
-                      unit: string; unit_price: number | null; line_value: number };
-  const [otherOrders, setOtherOrders] = useState<OtherOrder[]>([]);
-  const loadOther = useCallback(async () => {
-    if (!supabase) return;
-    const { data } = await supabase.from("v_order_movements")
-      .select("id,movement_number,moved_at,order_number,material,quantity,unit,unit_price,line_value,order_section,type")
-      .eq("type", "issue").eq("order_section", "other").is("department", null)
-      .order("moved_at", { ascending: false });
-    /* Belt and braces: the database returns each line once (verified), but a
-       row must be IMPOSSIBLE to show twice — production screens do not get
-       the benefit of the doubt. Dedupe on the full identity of the line. */
-    const raw = (data as unknown as OtherOrder[]) ?? [];
-    setOtherOrders(Array.from(new Map(raw.map((m) =>
-      [`${m.id}|${m.material}|${m.quantity}|${m.line_value}`, m])).values()));
-  }, []);
-  useEffect(() => { if (section === "other") loadOther(); }, [section, loadOther]);
-  const router = useRouter();
-  const spTab = useSearchParams().get("tab");
-  /* The URL owns the tab — sidebar links, the toggle, back/forward all just
-     move the URL and this one effect follows. Two writers was the flicker. */
-  useEffect(() => { setSection(spTab === "other" ? "other" : "raw"); }, [spTab]);
-
-  /* Search runs on the number — which IS the barcode (PO-…, ISS-…) — plus
-     article and material, so a scanner pointed at a printed order finds it.
-     Dates: same day in both boxes = that one day; different = the range. */
-  const [q, setQ] = useState("");
-  const [dFrom, setDFrom] = useState("");
-  const [dTo, setDTo] = useState("");
-  /* New order on the Other screen — its own document from day one, not only
-     an edit inside a PO. It still names the PO it serves, because a sticker
-     with no order is a cost with no home. */
-  const [omOpen, setOmOpen] = useState(false);
-  const [omOrder, setOmOrder] = useState("");
-  const [omItem, setOmItem] = useState("");
-  const [omQty, setOmQty] = useState("");
-  const [omPrice, setOmPrice] = useState("");
-  const [omBusy, setOmBusy] = useState(false);
-  const [omErr, setOmErr] = useState("");
-  async function createOtherOrder() {
-    if (!supabase) return;
-    setOmErr("");
-    if (!omOrder) { setOmErr("Which production order is this for?"); return; }
-    if (!omItem) { setOmErr("Pick the material."); return; }
-    if (!(parseFloat(omQty) > 0)) { setOmErr("Enter a quantity."); return; }
-    setOmBusy(true);
-    const { error } = await supabase.rpc("post_stock_movement", {
-      p_type: "issue", p_department_id: null, p_employee_id: null,
-      p_reason: null, p_moved_at: new Date().toISOString(), p_direction: null,
-      p_lines: [{ item_id: omItem, quantity: parseFloat(omQty),
-                  unit_price: omPrice ? parseFloat(omPrice) : null }],
-      p_production_order_id: omOrder,
-    });
-    setOmBusy(false);
-    if (error) { setOmErr(error.message); return; }
-    setOmOpen(false); setOmOrder(""); setOmItem(""); setOmQty(""); setOmPrice("");
-    loadOther();
-  }
-  const inRange = (iso: string) => {
-    const day = String(iso).slice(0, 10);
-    if (dFrom && day < dFrom) return false;
-    if (dTo && day > dTo) return false;
-    return true;
-  };
-  const hit = (...vals: (string | null | undefined)[]) =>
-    !q.trim() || vals.some((v) => String(v ?? "").toLowerCase().includes(q.trim().toLowerCase()));
-  const fRaw = (o: Order) => hit(o.order_number, o.article?.name, o.article?.code) && inRange(o.created_at);
-  const fOther = (m: OtherOrder) => hit(m.movement_number, m.material, m.order_number) && inRange(m.moved_at);
-
-  const rawTable = (): ExportTable => ({
-    title: "raw-material-orders",
-    headers: ["Order", "Article", "Pieces", "Target", "Placed", "Status"],
-    rows: orders.filter(fRaw).map((o) => [o.order_number, o.article?.name ?? "", o.quantity,
-      fmtDate(o.target_date), when(o.created_at), o.status]),
-  });
-  const otherTable = (): ExportTable => ({
-    title: "other-material-orders",
-    headers: ["Number", "Date", "Production order", "Material", "Qty", "Unit", "Price", "Value Rs"],
-    rows: otherOrders.filter(fOther).map((m) => [m.movement_number, when(m.moved_at), m.order_number ?? "",
-      m.material, m.quantity, m.unit, m.unit_price ?? "batch rate", m.line_value]),
-  });
-
-  const RAW = ["FAB", "THR"];
-  const OTHER = ["STK", "PKG", "ZIP"];
-  const rawItems = usableItems.filter((u) => RAW.includes(groupCodes[u.group_id] ?? ""));
-  const otherItems = usableItems.filter((u) => OTHER.includes(groupCodes[u.group_id] ?? ""));
   const [detailReqs, setDetailReqs] = useState<Req[] | null>(null);
   const [detailStatus, setDetailStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false); const [deleting, setDeleting] = useState(false); const [delErr, setDelErr] = useState("");
+  const [delReason, setDelReason] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -286,196 +97,27 @@ function OrdersInner() {
     return () => { off = true; };
   }, [articleId, qty]);
 
-  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); setResult(null); setMode("pieces"); setSrcItem(""); setSrcQty(""); setEstimate(null); }
+  function openCreate() { setModal(true); setArticleId(""); setQty(""); setTargetDate(todayInput()); setNotes(""); setReqs(null); setErr(""); }
 
-  /* Only material you can actually cut is offered. Listing unsorted fabric
-     here would invite somebody to plan an order against it and be refused
-     at the last step, which teaches people the system is unreliable when it
-     is in fact being careful. */
-  useEffect(() => {
-    if (!supabase || !modal) return;
-    supabase.from("v_usable_stock").select("item_id,item_code,group_id,material,unit,usable,in_stock")
-      .gt("usable", 0).order("material")
-      .then(({ data }) => setUsableItems((data as UsableItem[]) ?? []));
-  }, [modal]);
-
-  useEffect(() => {
-    if (!supabase) return;
-    supabase.from("v_usable_stock").select("item_id,item_code,group_id,material,unit,usable,in_stock")
-      .gt("usable", 0).order("material")
-      .then(({ data }) => setUsableItems((prev) => prev.length ? prev : ((data as UsableItem[]) ?? [])));
-    supabase.from("departments").select("id").eq("kind", "section").eq("in_process", true)
-      .limit(1).maybeSingle()
-      .then(({ data }) => setUnitId((data as { id: string } | null)?.id ?? null));
-    supabase.from("material_groups").select("id,code")
-      .then(({ data }) => setGroupCodes(Object.fromEntries(
-        ((data as { id: string; code: string }[]) ?? []).map((g) => [g.id, g.code]))));
-  }, []);
-
-  useEffect(() => {
-    if (!supabase || mode !== "material" || !articleId || !srcItem || !(parseFloat(srcQty) > 0)) {
-      setEstimate(null); return;
-    }
-    let off = false; setEstLoading(true);
-    supabase.rpc("estimate_pieces_from_material", {
-      p_article_id: articleId, p_item_id: srcItem, p_quantity: parseFloat(srcQty),
-    }).then(({ data, error }) => {
-      if (off) return;
-      setEstLoading(false);
-      setEstimate(error ? { ok: false, guard: "could not calculate", meaning: error.message } : (data as Estimate));
-    });
-    return () => { off = true; };
-  }, [mode, articleId, srcItem, srcQty]);
-
-  /* PLACING AN ORDER IS FOUR THINGS AT ONCE (K120): the recipe multiplies out,
-     the material leaves stock, the order is created, and the floor is handed
-     the pending count. They happen in one transaction so they can never drift
-     apart.
-
-     The old call, create_production_order, only wrote the order row. Material
-     stayed on the shelf and nobody told the floor — so the screen said an
-     order existed while the factory disagreed. */
   async function create() {
-    setErr(""); setResult(null);
+    setErr("");
     if (!supabase) return;
     if (!articleId) { setErr("Choose an article."); return; }
     if (!(parseInt(qty) > 0)) { setErr("Enter a quantity."); return; }
     setSaving(true);
-    const { data, error } = await supabase.rpc("place_production_order", {
-      p_article_id: articleId,
-      p_quantity: parseInt(qty),
-      p_target_date: targetDate || null,
-      p_notes: notes,
-      p_lines: null,
-      p_dry_run: false,
-    });
+    const { error } = await supabase.rpc("create_production_order", { p_article_id: articleId, p_quantity: parseInt(qty), p_target_date: targetDate || null, p_notes: notes });
     setSaving(false);
     if (error) { setErr(error.message); return; }
-
-    const r = data as PlaceResult;
-    /* A refusal is not an error. The database looked, found the order could
-       not be made, and deliberately wrote nothing. Showing it as a red crash
-       would teach people to ignore it. */
-    if (!r?.ok) { setResult(r); return; }
-    setResult(r);
-    load();
+    setModal(false); load();
   }
 
   async function openDetail(o: Order) {
     setDetail(o); setDetailReqs(null); setDetailStatus(o.status);
-    setMoves([]); setReceipts([]); setDelWhy(""); setRVoid(null); setMvItem(""); setMvQty(""); setMvReason(""); setMvErr(""); setMvType("return");
-    setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false); setOtherErr(""); setOrderCosts([]);
-    if (!supabase) return;
-    loadMoves(o.id);
-    loadCosts(o.id);
-    loadReceipts(o.id);
     setConfirmDel(false); setDelErr("");
     if (!supabase) return;
     const { data } = await supabase.rpc("get_order_requirements", { p_article_id: o.article_id, p_quantity: o.quantity });
     setDetailReqs((data as Req[]) ?? []);
   }
-  async function loadMoves(orderId: string) {
-    if (!supabase) return;
-    const { data } = await supabase.from("v_order_movements")
-      .select("id,movement_number,type,moved_at,material,item_code,quantity,unit,reason,department")
-      .eq("production_order_id", orderId).order("moved_at", { ascending: false });
-    setMoves((data as Move[]) ?? []);
-  }
-
-  async function loadReceipts(orderId: string) {
-    if (!supabase) return;
-    const { data } = await supabase.from("process_receipts")
-      .select("id,receipt_no,quantity,rejected,received_at,wage_amount,paid_at,process_assignments!inner(order_id)")
-      .eq("process_assignments.order_id", orderId)
-      .order("received_at", { ascending: false });
-    setReceipts(((data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
-      id: r.id as string, receipt_no: r.receipt_no as string,
-      quantity: Number(r.quantity), rejected: Number(r.rejected ?? 0),
-      received_at: r.received_at as string,
-      wage_amount: r.wage_amount == null ? null : Number(r.wage_amount),
-      paid_at: (r.paid_at as string) ?? null,
-    })));
-  }
-
-  async function voidReceipt(id: string) {
-    if (!supabase || !rWhy.trim() || !detail) return;
-    const { error } = await supabase.rpc("void_process_receipt", { p_receipt_id: id, p_reason: rWhy.trim() });
-    if (error) { setDelErr(error.message); return; }
-    setRVoid(null); setRWhy("");
-    loadReceipts(detail.id); loadMoves(detail.id); load();
-  }
-
-  async function loadCosts(orderId: string) {
-    if (!supabase) return;
-    const { data } = await supabase.from("v_order_material")
-      .select("material,issued,unit,material_cost")
-      .eq("order_id", orderId);
-    setOrderCosts((data as typeof orderCosts) ?? []);
-  }
-
-  /* The sticker's price "comes up automatically" — the latest batch rate for
-     that item — and stays editable, because what you agreed for THIS job can
-     differ from what the supplier last charged. Whatever ends up in the box
-     is frozen onto the line by K132, so next month's purchase cannot reprice
-     this order. */
-  useEffect(() => {
-    if (!supabase || !otherItem || otherPriceTouched) return;
-    let off = false;
-    supabase.from("stock_lots").select("rate").eq("item_id", otherItem)
-      .order("received_at", { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }) => { if (!off) setOtherPrice(String((data as { rate: number } | null)?.rate ?? "")); });
-    return () => { off = true; };
-  }, [otherItem, otherPriceTouched]);
-
-  async function addOther() {
-    if (!supabase || !detail) return;
-    setOtherErr("");
-    if (!otherItem) { setOtherErr("Choose the material."); return; }
-    if (!(parseFloat(otherQty) > 0)) { setOtherErr("Enter a quantity."); return; }
-    if (!(parseFloat(otherPrice) >= 0)) { setOtherErr("Enter the price."); return; }
-    setOtherBusy(true);
-    const { error } = await supabase.rpc("post_stock_movement", {
-      p_type: "issue",
-      p_department_id: null,     // stickers go on at packing — no floor
-      p_employee_id: null,
-      p_reason: "other material added to order",
-      p_moved_at: new Date().toISOString(),
-      p_direction: null,
-      p_lines: [{ item_id: otherItem, quantity: parseFloat(otherQty), unit_price: parseFloat(otherPrice) }],
-      p_production_order_id: detail.id,
-    });
-    setOtherBusy(false);
-    if (error) { setOtherErr(error.message); return; }
-    setOtherItem(""); setOtherQty(""); setOtherPrice(""); setOtherPriceTouched(false);
-    loadMoves(detail.id); loadCosts(detail.id); loadOther();
-  }
-
-  /* A return puts material back on the shelf; wastage writes it off. Both
-     name this order, so v_order_material can work out what a shirt actually
-     cost instead of what the recipe hoped it would cost. */
-  async function recordMove() {
-    if (!supabase || !detail) return;
-    setMvErr("");
-    if (!mvItem) { setMvErr("Choose the material."); return; }
-    if (!(parseFloat(mvQty) > 0)) { setMvErr("Enter a quantity."); return; }
-    if (mvType === "wastage" && !mvReason.trim()) { setMvErr("Say what happened to it."); return; }
-    setMvBusy(true);
-    const { error } = await supabase.rpc("post_stock_movement", {
-      p_type: mvType,
-      p_department_id: mvType === "return" ? unitId : null,
-      p_employee_id: null,
-      p_reason: mvReason || null,
-      p_moved_at: new Date().toISOString(),
-      p_direction: null,
-      p_lines: [{ item_id: mvItem, quantity: parseFloat(mvQty) }],
-      p_production_order_id: detail.id,
-    });
-    setMvBusy(false);
-    if (error) { setMvErr(error.message); return; }
-    setMvItem(""); setMvQty(""); setMvReason("");
-    loadMoves(detail.id);
-  }
-
   async function saveStatus() {
     if (!supabase || !detail) return;
     setSavingStatus(true);
@@ -486,20 +128,25 @@ function OrdersInner() {
 
   async function doDelete() {
     if (!supabase || !detail) return;
-    /* Deleting an order puts its material BACK on the shelf first (K135) —
-       so the reason travels into the ledger next to every restored kilo. */
-    if (!delWhy.trim()) { setDelErr("Give a reason — it goes into the ledger beside every kilo that returns."); return; }
-    const reason = delWhy;
     setDelErr(""); setDeleting(true);
-    const { error } = await supabase.rpc("delete_production_order", { p_order_id: detail.id, p_reason: reason.trim() });
+    /* Try the plain delete first — it is the strict one and leaves receipts
+       alone. If receipts exist it refuses, and the cascade unwinds them in
+       the right order inside one transaction rather than making somebody
+       void three things by hand. */
+    const first = await supabase.rpc("delete_production_order", { p_id: detail.id });
+    if (!first.error) { setDeleting(false); setDetail(null); load(); return; }
+
+    const second = await supabase.rpc("delete_production_order_cascade", {
+      p_order_id: detail.id, p_reason: delReason.trim(),
+    });
     setDeleting(false);
-    if (error) { setDelErr(error.message); return; }
+    if (second.error) { setDelErr(second.error.message); return; }
     setDetail(null); load();
   }
 
   return (
     <>
-      <Topbar title={section === "other" ? "Other Material Orders" : "Raw Material Orders"} subtitle={section === "other" ? "Sticker, shopper and zip — added onto finished pieces, priced on their own" : "Fabric and thread out to the floor — the recipe multiplied, stock deducted"} />
+      <Topbar title="Production Orders" subtitle="Make N pieces of an article — material is calculated for you" />
       <div className="px-6 pb-12">
         {!isSupabaseConfigured ? (
           <div className="rounded-card bg-surface p-8 text-center text-[14px] text-muted shadow-card">Connect Supabase to manage production orders.</div>
@@ -507,104 +154,12 @@ function OrdersInner() {
           <div className="flex items-center justify-center gap-2 py-16 text-muted"><Loader2 size={18} className="animate-spin" /> Loading…</div>
         ) : (
           <>
-            {/* THE TWO SECTIONS. Raw starts production; Other finishes it.
-                Same orders underneath — the tab changes what you DO to one. */}
-            {/* toggle removed — each order type is its own screen, reached only from the sidebar */}
-
             <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-[12.5px] text-muted">
-                {section === "raw"
-                  ? <>Create an order and the system multiplies the article&apos;s recipe to show exactly what material you need.{!canManage && " (View only.)"}</>
-                  : <>Open an order and add sticker, shopper or zip onto it — the price comes up on its own and adds to the order&apos;s cost.</>}
-              </p>
-              <div className="flex shrink-0 items-center gap-2">
-                {(() => { const t = section === "raw" ? rawTable : otherTable; return (
-                  <>
-                    <button onClick={() => exportCSV(t())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
-                    <button onClick={() => exportExcel(t())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
-                    <button onClick={() => exportPDF(t())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
-                  </>
-                ); })()}
-                {canManage && section === "other" && <button onClick={() => setOmOpen(true)} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
-                {canManage && section === "raw" && <button onClick={openCreate} className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
-              </div>
+              <p className="text-[12.5px] text-muted">Create an order and the system multiplies the article&apos;s recipe to show exactly what material you need.{!canManage && " (View only.)"}</p>
+              {canManage && <button onClick={openCreate} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> New order</button>}
             </div>
 
-            {omOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => setOmOpen(false)}>
-                <div className="w-full max-w-md rounded-card bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
-                  <p className="text-[16px] font-extrabold text-ink">New other-material order</p>
-                  <label className="mt-3 block text-[12px] font-medium text-muted">For production order *</label>
-                  <select value={omOrder} onChange={(e) => setOmOrder(e.target.value)} className={inp}>
-                    <option value="">Choose…</option>
-                    {orders.map((o) => <option key={o.id} value={o.id}>{o.order_number} — {o.article?.name}</option>)}
-                  </select>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <div><label className="block text-[12px] font-medium text-muted">Material *</label>
-                      <select value={omItem} onChange={(e) => setOmItem(e.target.value)} className={inp}>
-                        <option value="">Choose…</option>
-                        {otherItems.map((u) => <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code} — {n(u.usable)} {u.unit}</option>)}
-                      </select></div>
-                    <div><label className="block text-[12px] font-medium text-muted">Quantity *</label>
-                      <input type="number" value={omQty} onChange={(e) => setOmQty(e.target.value)} className={inp} /></div>
-                  </div>
-                  <label className="mt-2 block text-[12px] font-medium text-muted">Price per unit (blank = batch rate)</label>
-                  <input type="number" value={omPrice} onChange={(e) => setOmPrice(e.target.value)} className={inp} />
-                  {omErr && <p className="mt-2 text-[12.5px] font-medium text-danger">{omErr}</p>}
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button onClick={() => setOmOpen(false)} className="rounded-xl2 border border-line px-4 py-2 text-[13px] font-semibold text-ink/70">Cancel</button>
-                    <button onClick={createOtherOrder} disabled={omBusy} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{omBusy && <Loader2 size={14} className="animate-spin" />}Place order</button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <input value={q} onChange={(e) => setQ(e.target.value)}
-                placeholder="Search number / barcode / article…"
-                className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
-              <input type="date" value={dFrom} onChange={(e) => setDFrom(e.target.value)}
-                className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none" />
-              <span className="text-[12px] text-hint">to</span>
-              <input type="date" value={dTo} onChange={(e) => setDTo(e.target.value)}
-                className="rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none" />
-              {(q || dFrom || dTo) && (
-                <button onClick={() => { setQ(""); setDFrom(""); setDTo(""); }}
-                  className="rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-ink/60 hover:bg-panel">Clear</button>
-              )}
-            </div>
-            {section === "other" ? (
-              otherOrders.length === 0 ? (
-                <div className="rounded-card bg-surface p-10 text-center shadow-card">
-                  <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-panel text-ink"><ClipboardList size={26} /></span>
-                  <p className="mt-3 text-[15px] font-semibold text-ink">No other-material orders yet</p>
-                  <p className="mt-1 text-[13px] text-muted">Open a production order and add a sticker, shopper or zip — each addition becomes its own order here.</p>
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-card bg-surface shadow-card">
-                  <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"><table className="w-full text-left text-[13.5px]">
-                    <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
-                      <th className="px-5 py-3 font-semibold">Number</th><th className="px-5 py-3 font-semibold">For order</th>
-                      <th className="px-5 py-3 font-semibold">Material</th><th className="px-5 py-3 text-right font-semibold">Qty</th>
-                      <th className="px-5 py-3 text-right font-semibold">Price</th><th className="px-5 py-3 text-right font-semibold">Value</th>
-                      <th className="px-5 py-3 font-semibold">Date</th>
-                    </tr></thead>
-                    <tbody>
-                      {otherOrders.filter(fOther).map((m, i) => (
-                        <tr key={`${m.id}-${i}`} className="border-b border-line/60 last:border-0">
-                          <td className="px-5 py-3 font-mono text-[12px] text-ink">{m.movement_number}</td>
-                          <td className="px-5 py-3 text-ink/80">{m.order_number ?? "—"}</td>
-                          <td className="px-5 py-3 font-semibold text-ink">{m.material}</td>
-                          <td className="px-5 py-3 text-right tnum text-ink/80">{n(m.quantity)} {m.unit}</td>
-                          <td className="px-5 py-3 text-right tnum text-muted">{m.unit_price == null ? "batch rate" : `Rs ${n(m.unit_price)}`}</td>
-                          <td className="px-5 py-3 text-right tnum font-semibold text-ink">Rs {n(m.line_value)}</td>
-                          <td className="px-5 py-3 text-[12.5px] text-muted">{when(m.moved_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table></div>
-                </div>
-              )
-            ) : orders.length === 0 ? (
+            {orders.length === 0 ? (
               <div className="rounded-card bg-surface p-10 text-center shadow-card">
                 <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-panel text-ink"><ClipboardList size={26} /></span>
                 <p className="mt-3 text-[15px] font-semibold text-ink">No orders yet</p>
@@ -619,7 +174,7 @@ function OrdersInner() {
                     <th className="px-5 py-3 font-semibold">Placed</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3"></th>
                   </tr></thead>
                   <tbody>
-                    {orders.filter((o) => String(o.order_number || "").startsWith("PO")).filter(fRaw).map((o) => {
+                    {orders.map((o) => {
                       const st = STATUS[o.status] || STATUS.open;
                       return (
                         <tr key={o.id} className="border-b border-line/60 last:border-0">
@@ -651,77 +206,6 @@ function OrdersInner() {
               <option value="">Choose article…</option>
               {articles.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-            <div className="mt-3 flex rounded-xl2 bg-panel p-1">
-              <button onClick={() => { setMode("pieces"); setEstimate(null); }}
-                className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mode === "pieces" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
-                I want N pieces
-              </button>
-              <button onClick={() => { setMode("material"); setQty(""); }}
-                className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mode === "material" ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
-                I&apos;m giving material
-              </button>
-            </div>
-
-            {mode === "material" && (
-              <div className="mt-3 rounded-xl2 border border-line p-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[12px] font-medium text-muted">Material you are giving</label>
-                    <select value={srcItem} onChange={(e) => setSrcItem(e.target.value)} className={inp}>
-                      <option value="">Choose…</option>
-                      {/* A raw order is fabric and thread. Stickers, shoppers
-                          and zips are added later, on the Other tab, when the
-                          pieces are back — offering them here mixes the two
-                          moments. */}
-                      {rawItems.map((u) => (
-                        <option key={u.item_id} value={u.item_id}>
-                          {u.material} · {u.item_code} — {n(u.usable)} {u.unit} ready
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-medium text-muted">How much</label>
-                    <input type="number" value={srcQty} onChange={(e) => setSrcQty(e.target.value)} placeholder="e.g. 100" className={inp} />
-                  </div>
-                </div>
-
-                {rawItems.length === 0 && (
-                  <p className="mt-2 text-[12px] text-muted">
-                    No fabric or thread in stock yet. Receive some and it appears here.
-                  </p>
-                )}
-
-                {estLoading && <p className="mt-2 flex items-center gap-2 text-[12.5px] text-muted"><Loader2 size={14} className="animate-spin" /> Working it out…</p>}
-
-                {estimate && !estimate.ok && (
-                  <p className="mt-2 text-[12.5px] text-danger">{estimate.meaning}</p>
-                )}
-
-                {estimate && estimate.ok && (
-                  <div className="mt-3 rounded-xl2 bg-panel px-3.5 py-3">
-                    <p className="text-[13px] font-bold text-ink">
-                      {n(estimate.material_given)} makes {n(estimate.pieces)} pieces
-                    </p>
-                    {/* The fabric alone is never the answer. If thread runs out
-                        at 250 the honest number is 250, and it says which
-                        material held it back. */}
-                    {estimate.limited_by && (
-                      <p className="mt-1 text-[12px] text-ink/75">
-                        The fabric alone is worth {n(estimate.from_this_material)}, but {estimate.limited_by} only supports {n(estimate.pieces)}.
-                      </p>
-                    )}
-                    <button
-                      onClick={() => { setQty(String(estimate.pieces)); setMode("pieces"); }}
-                      disabled={estimate.pieces <= 0}
-                      className="mt-2.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
-                      Use {n(estimate.pieces)} pieces
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div><label className="block text-[12px] font-medium text-muted">Pieces to make *</label><input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="e.g. 100" className={inp} /></div>
               <div><label className="block text-[12px] font-medium text-muted">Target date</label><input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inp} /></div>
@@ -734,63 +218,9 @@ function OrdersInner() {
             )}
 
             {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
-
-            {/* REFUSED — nothing was written. Every short line is listed, not
-                just the first, so one trip to the store fixes all of them. */}
-            {result && !result.ok && (
-              <div className="mt-4 rounded-xl2 border border-danger/30 bg-danger-soft p-3.5">
-                <p className="flex items-center gap-1.5 text-[13px] font-bold text-danger">
-                  <AlertTriangle size={15} /> Order not placed — {result.guard}
-                </p>
-                <ul className="mt-2 space-y-1">
-                  {result.short?.map((s, i) => (
-                    <li key={i} className="flex justify-between gap-3 text-[12.5px] text-ink/80">
-                      <span className="font-medium">{s.material || s.item}</span>
-                      <span className="tnum">
-                        short {n(s.short)} {s.unit || ""} · need {n(s.need)}, have {n(s.have)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2.5 text-[12px] leading-relaxed text-ink/70">{result.meaning}</p>
-              </div>
-            )}
-
-            {/* PLACED — say exactly what moved, so it can be checked against
-                the shelf rather than taken on trust. */}
-            {result && result.ok && (
-              <div className="mt-4 rounded-xl2 border border-[#166534]/25 bg-success-soft p-3.5">
-                <p className="flex items-center gap-1.5 text-[13px] font-bold text-[#166534]">
-                  <Check size={15} /> {result.order} placed
-                </p>
-                <p className="mt-1 text-[12.5px] text-ink/80">
-                  {n(result.pending)} pieces pending with <b>{result.floor}</b>. Material below has left stock.
-                </p>
-                <ul className="mt-2 space-y-1">
-                  {result.issued?.map((l, i) => (
-                    <li key={i} className="flex justify-between gap-3 text-[12.5px] text-ink/80">
-                      <span className="font-medium">{l.material || l.item}</span>
-                      <span className="tnum">−{n(l.quantity)}</span>
-                    </li>
-                  ))}
-                </ul>
-                {result.material_cost > 0 && (
-                  <p className="mt-2 text-[12px] text-ink/70">
-                    Material cost at batch rates: <b className="tnum">Rs {n(result.material_cost)}</b>
-                  </p>
-                )}
-              </div>
-            )}
-
             <div className="mt-5 flex justify-end gap-2">
-              {result?.ok ? (
-                <button onClick={() => setModal(false)} className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
-              ) : (
-                <>
-                  <button onClick={() => setModal(false)} disabled={saving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
-                  <button onClick={create} disabled={saving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={15} className="animate-spin" />}Place order &amp; issue material</button>
-                </>
-              )}
+              <button onClick={() => setModal(false)} disabled={saving} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={create} disabled={saving} className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={15} className="animate-spin" />}Create order</button>
             </div>
           </div>
         </div>
@@ -808,126 +238,6 @@ function OrdersInner() {
             <p className="mb-2 mt-4 text-[12px] font-semibold text-ink">Material needed</p>
             <Requirements reqs={detailReqs} loading={detailReqs === null} />
 
-            {/* ---- K125: what actually moved on this order ---- */}
-            <p className="mb-2 mt-5 text-[12px] font-semibold text-ink">Material movements</p>
-            {moves.length === 0 ? (
-              <p className="rounded-xl2 bg-panel px-3.5 py-3 text-[12.5px] text-muted">
-                Nothing recorded yet beyond what the order issued.
-              </p>
-            ) : (
-              <div className="overflow-hidden rounded-xl2 border border-line">
-                <table className="w-full text-left text-[12.5px]">
-                  <tbody>
-                    {moves.map((m) => (
-                      <tr key={m.id} className="border-b border-line/60 last:border-0">
-                        <td className="px-3 py-2">
-                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                            m.type === "issue" ? "bg-panel text-ink"
-                            : m.type === "return" ? "bg-success-soft text-[#166534]"
-                            : "bg-danger-soft text-danger"}`}>{m.type}</span>
-                        </td>
-                        <td className="px-3 py-2 text-ink">{m.material}</td>
-                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">
-                          {m.type === "return" ? "+" : "−"}{n(m.quantity)} {m.unit}
-                        </td>
-                        <td className="px-3 py-2 text-[11px] text-hint">{m.reason ?? ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {canManage && (
-              <div className="mt-3 rounded-xl2 border border-line p-3">
-                <p className="text-[12.5px] font-bold text-ink">Add other material — sticker · shopper · zip</p>
-                <p className="mt-0.5 text-[11.5px] text-hint">Goes onto this order at the price below. No floor needed — this happens at packing.</p>
-                <div className="mt-2.5 grid grid-cols-3 gap-2">
-                  <select value={otherItem}
-                    onChange={(e) => { setOtherItem(e.target.value); setOtherPriceTouched(false); setOtherErr(""); }}
-                    className={inp}>
-                    <option value="">Which one…</option>
-                    {otherItems.map((u) => (
-                      <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code} — {n(u.usable)} {u.unit}</option>
-                    ))}
-                  </select>
-                  <input type="number" value={otherQty} onChange={(e) => setOtherQty(e.target.value)} placeholder="Quantity" className={inp} />
-                  <input type="number" value={otherPrice}
-                    onChange={(e) => { setOtherPrice(e.target.value); setOtherPriceTouched(true); }}
-                    placeholder="Price / unit" className={inp} />
-                </div>
-                {otherItem && otherQty && otherPrice && parseFloat(otherQty) > 0 && (
-                  <p className="mt-2 text-[12px] text-ink/75">
-                    Adds <b className="tnum">Rs {n(parseFloat(otherQty) * parseFloat(otherPrice))}</b> to this order.
-                  </p>
-                )}
-                {otherErr && <p className="mt-2 text-[12px] font-medium text-danger">{otherErr}</p>}
-                <button onClick={addOther} disabled={otherBusy}
-                  className="mt-2.5 flex items-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
-                  {otherBusy && <Loader2 size={14} className="animate-spin" />} Add to order
-                </button>
-              </div>
-            )}
-
-            {orderCosts.length > 0 && (
-              <div className="mt-3 overflow-hidden rounded-xl2 border border-line">
-                <table className="w-full text-left text-[12.5px]">
-                  <thead><tr className="bg-panel/60 text-[10.5px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 font-semibold">Material on this order</th>
-                    <th className="px-3 py-2 text-right font-semibold">Used</th>
-                    <th className="px-3 py-2 text-right font-semibold">Cost</th>
-                  </tr></thead>
-                  <tbody>
-                    {orderCosts.map((c, i) => (
-                      <tr key={i} className="border-t border-line/60">
-                        <td className="px-3 py-2 text-ink">{c.material}</td>
-                        <td className="px-3 py-2 text-right tnum text-muted">{c.issued == null ? "—" : n(c.issued)} {c.unit}</td>
-                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">Rs {n(c.material_cost)}</td>
-                      </tr>
-                    ))}
-                    <tr className="border-t border-line bg-panel/40">
-                      <td className="px-3 py-2 font-bold text-ink" colSpan={2}>Material cost so far</td>
-                      <td className="px-3 py-2 text-right tnum font-extrabold text-ink">
-                        Rs {n(orderCosts.reduce((a, c) => a + Number(c.material_cost || 0), 0))}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {canManage && (
-              <div className="mt-3 rounded-xl2 border border-line p-3">
-                <div className="flex gap-2">
-                  <button onClick={() => { setMvType("return"); setMvErr(""); }}
-                    className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mvType === "return" ? "bg-ink text-white" : "bg-panel text-muted"}`}>
-                    Material came back
-                  </button>
-                  <button onClick={() => { setMvType("wastage"); setMvErr(""); }}
-                    className={`flex-1 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition ${mvType === "wastage" ? "bg-ink text-white" : "bg-panel text-muted"}`}>
-                    Spoiled on the floor
-                  </button>
-                </div>
-                <div className="mt-2.5 grid grid-cols-2 gap-2">
-                  <select value={mvItem} onChange={(e) => setMvItem(e.target.value)} className={inp}>
-                    <option value="">Which material…</option>
-                    {usableItems.map((u) => (
-                      <option key={u.item_id} value={u.item_id}>{u.material} · {u.item_code}</option>
-                    ))}
-                  </select>
-                  <input type="number" value={mvQty} onChange={(e) => setMvQty(e.target.value)} placeholder="Quantity" className={inp} />
-                </div>
-                <input value={mvReason} onChange={(e) => setMvReason(e.target.value)} className={inp}
-                  placeholder={mvType === "wastage" ? "what happened to it — required" : "note (optional)"} />
-                {mvErr && <p className="mt-2 text-[12px] font-medium text-danger">{mvErr}</p>}
-                <button onClick={recordMove} disabled={mvBusy}
-                  className="mt-2.5 flex items-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
-                  {mvBusy && <Loader2 size={14} className="animate-spin" />}
-                  Record {mvType === "return" ? "return" : "wastage"}
-                </button>
-              </div>
-            )}
-
             {canManage && (
               <div className="mt-5 border-t border-line pt-4">
                 <label className="block text-[12px] font-medium text-muted">Status</label>
@@ -938,48 +248,20 @@ function OrdersInner() {
                   <button onClick={saveStatus} disabled={savingStatus || detailStatus === detail.status} className="flex shrink-0 items-center gap-1.5 rounded-xl2 bg-ink px-5 text-[13px] font-semibold text-white disabled:opacity-40">{savingStatus && <Loader2 size={15} className="animate-spin" />}Save</button>
                 </div>
                 {!confirmDel ? (
-                  <button onClick={() => setConfirmDel(true)} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
+                  <button onClick={() => setConfirmDel(true); setDelReason(""); setDelErr("");} className="mt-4 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger hover:underline"><Trash2 size={14} /> Delete this order</button>
                 ) : (
                   <div className="mt-4 rounded-xl2 bg-danger-soft p-3">
-                    <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? Material returns to stock.</p>
-                    {receipts.length > 0 && (
-                      <div className="mt-2 rounded-xl2 bg-surface/70 p-2.5">
-                        <p className="text-[12px] font-semibold text-ink">
-                          {receipts.length} receipt{receipts.length > 1 ? "s" : ""} must be voided first — pieces came back and wages were recorded.
-                        </p>
-                        {receipts.map((r) => (
-                          <div key={r.id} className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-1.5 first:border-0 first:pt-0">
-                            <span className="text-[12px] text-ink/80">
-                              <b>{r.receipt_no}</b> · {n(r.quantity)} pieces
-                              {r.rejected > 0 && ` · ${n(r.rejected)} rejected`}
-                              {r.wage_amount ? ` · Rs ${n(r.wage_amount)}` : ""}
-                              {r.paid_at && <span className="ml-1 font-semibold text-danger">paid</span>}
-                            </span>
-                            {rVoid === r.id ? (
-                              <span className="flex items-center gap-1.5">
-                                <input value={rWhy} autoFocus onChange={(e) => setRWhy(e.target.value)}
-                                  onKeyDown={(e) => { if (e.key === "Enter") voidReceipt(r.id); if (e.key === "Escape") setRVoid(null); }}
-                                  placeholder="reason" className="w-32 rounded-lg border border-ink/30 px-2 py-1 text-[12px] outline-none" />
-                                <button onClick={() => voidReceipt(r.id)} disabled={!rWhy.trim()}
-                                  className="text-[11px] font-bold text-danger disabled:opacity-40">void</button>
-                                <button onClick={() => setRVoid(null)} className="text-[11px] text-ink/50">cancel</button>
-                              </span>
-                            ) : (
-                              <button onClick={() => { setRVoid(r.id); setRWhy(""); }}
-                                className="rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold text-ink/70 hover:bg-panel">Void</button>
-                            )}
-                          </div>
-                        ))}
-                        <p className="mt-2 text-[11.5px] text-ink/60">A wage already paid cannot be voided — record a correction in Payments instead.</p>
-                      </div>
-                    )}
-                    <input value={delWhy} onChange={(e) => setDelWhy(e.target.value)}
-                      placeholder="reason for deleting — goes into the ledger"
-                      className="mt-2 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30" />
+                    <p className="text-[12.5px] font-medium text-danger">Delete {detail.order_number}? This can&apos;t be undone.</p>
+                    <p className="mt-1 text-[12px] text-ink/70">
+                      Material returns to stock. Any pieces received back are unstitched and their wages removed.
+                    </p>
+                    <input value={delReason} onChange={(e) => setDelReason(e.target.value)}
+                      placeholder="Reason — required" autoFocus
+                      className="mt-2 w-full rounded-xl2 border border-danger/40 bg-surface px-3 py-2 text-[12.5px] outline-none" />
                     {delErr && <p className="mt-1 text-[12px] text-danger">{delErr}</p>}
                     <div className="mt-2 flex gap-2">
                       <button onClick={() => setConfirmDel(false)} disabled={deleting} className="rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink/70">Cancel</button>
-                      <button onClick={doDelete} disabled={deleting} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={14} className="animate-spin" />}Yes, delete</button>
+                      <button onClick={doDelete} disabled={deleting || !delReason.trim()} className="flex items-center gap-1.5 rounded-xl2 bg-danger px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={14} className="animate-spin" />}Yes, delete</button>
                     </div>
                   </div>
                 )}
@@ -993,7 +275,3 @@ function OrdersInner() {
 }
 
 const inp = "mt-1.5 w-full rounded-xl2 border border-line bg-canvas px-3.5 py-2.5 text-[14px] outline-none placeholder:text-hint focus:border-salmon-strong/50";
-
-export default function OrdersPage() {
-  return <Suspense fallback={null}><OrdersInner /></Suspense>;
-}
