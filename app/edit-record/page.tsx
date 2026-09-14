@@ -24,7 +24,7 @@ type Opt = { id: string; name: string };
 type Bom = { group_id: string; category_id: string | null; size_id: string | null;
              unit_id: string; quantity: string };
 
-const SECTIONS = [["40","Baby blanket"],["41","Kids"],["42","Child"],["43","Ladies"],
+const SECTIONS = [["40","Baby/Newborn"],["41","Kids"],["42","Child"],["43","Ladies"],
                   ["44","Men"],["60","Shoes"],["61","Accessories"]];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 
@@ -413,25 +413,16 @@ export default function EditRecordPage() {
 
             {/* The important control. Blocking hides it from every dropdown
                 while leaving every GRN that mentions it untouched. */}
-            <div className="mt-4 rounded-xl2 border border-line p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[13px] font-semibold text-ink">{active ? "Active" : "Blocked"}</p>
-                  <p className="mt-0.5 text-[12px] text-muted">
-                    {active ? "Appears in dropdowns and can be used."
-                            : "Hidden from dropdowns. History is untouched."}
-                  </p>
-                </div>
-                <button onClick={() => setActive((v) => !v)}
-                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] font-semibold transition ${active ? "border border-line text-ink/75 hover:bg-panel" : "bg-ink text-white"}`}>
-                  {active ? <><Ban size={13} /> Block it</> : <><Check size={13} /> Make active</>}
-                </button>
-              </div>
-            </div>
 
             {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
 
             <div className="mt-5 flex items-center gap-2">
+              {/* Block sits with Delete, bottom left: both are "stop using this",
+                  and one of them is the safe version of the other. */}
+              <button onClick={() => setActive((v) => !v)}
+                className={`flex items-center gap-1.5 rounded-xl2 px-3.5 py-2 text-[12.5px] font-semibold transition ${active ? "border border-line text-ink/75 hover:bg-panel" : "bg-ink text-white"}`}>
+                {active ? <><Ban size={13} /> Block</> : <><Check size={13} /> Unblock</>}
+              </button>
               {confirmDel ? (
                 <span className="flex items-center gap-2">
                   <button onClick={remove} disabled={busy}
@@ -447,6 +438,11 @@ export default function EditRecordPage() {
                 </button>
               )}
               <button onClick={() => setOpen(null)} className="ml-auto rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+              {active !== open.active && (
+                <span className="text-[11.5px] font-semibold text-ink/60">
+                  {active ? "will be unblocked" : "will be blocked"} on save
+                </span>
+              )}
               <button onClick={save} disabled={busy}
                 className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
                 {busy && <Loader2 size={15} className="animate-spin" />} Save

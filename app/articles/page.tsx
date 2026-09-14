@@ -292,7 +292,7 @@ export default function Articles() {
               <div><label className="block text-[12px] font-medium text-muted">Section {artModal.id ? "" : "*"}</label>
                 <select value={section} onChange={(e) => setSection(e.target.value)} className={inp}>
                   <option value="">—</option>
-                  <option value="40">40 · Baby blanket</option>
+                  <option value="40">40 · Baby/Newborn</option>
                   <option value="41">41 · Kids</option>
                   <option value="42">42 · Child</option>
                   <option value="43">43 · Ladies</option>
@@ -317,7 +317,7 @@ export default function Articles() {
                 {gst ? ` · GST Rs ${(parseFloat(retail) * parseFloat(gst) / 100).toFixed(0)}` : ""}
               </p>
             )}
-            {!artModal.id && <p className="mt-2 text-[12px] text-hint">Barcode is generated on save — {section || "??"}_000001 upward, counting inside its own section.</p>}
+            {!artModal.id && <p className="mt-2 text-[12px] text-hint">Barcode is generated on save — {section || "??"}-000001 upward, counting inside its own section.</p>}
             <label className="mt-3 block text-[12px] font-medium text-muted">Notes</label>
             <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optional" className={inp} />
             {artErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{artErr}</p>}

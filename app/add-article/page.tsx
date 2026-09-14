@@ -18,7 +18,7 @@ import { usePermissions } from "@/lib/usePermissions";
 
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2.5 text-[13.5px] text-ink outline-none focus:border-ink/30";
 const SECTIONS = [
-    { v: "40", l: "40 · Baby blanket" }, { v: "41", l: "41 · Kids" },
+    { v: "40", l: "40 · Baby/Newborn" }, { v: "41", l: "41 · Kids" },
   { v: "42", l: "42 · Child" }, { v: "43", l: "43 · Ladies" },
   { v: "44", l: "44 · Men" }, { v: "60", l: "60 · Shoes" },
   { v: "61", l: "61 · Accessories" },
@@ -112,7 +112,7 @@ export default function AddArticlePage() {
           ) : (
             <div className="rounded-card border border-line bg-surface p-6 shadow-card">
               <p className="text-[13px] text-muted">
-                The barcode is generated when you save — {section || "??"}_000001 upward, counting inside its own section. It cannot be typed.
+                The barcode is generated when you save — {section || "??"}-000001 upward, counting inside its own section. It cannot be typed.
               </p>
 
               <div className="mt-4">
