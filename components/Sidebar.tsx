@@ -86,7 +86,7 @@ const NAV: NavItem[] = [
       { label: "Blocked items", href: "/reports/warehouse/blocked" },
     ] },
     { label: "Graph", href: "/reports/warehouse/graph" },
-    { label: "Products", href: "/warehouse/products" },
+    { label: "Inventory", href: "/warehouse/products" },
 
 
   ] },

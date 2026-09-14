@@ -292,7 +292,14 @@ export default function EditRecordPage() {
                   </tr></thead>
                   <tbody>
                     {view.map((r) => (
-                      <tr key={r.kind + r.id} onClick={() => canEdit && openRec(r)}
+                      <tr key={r.kind + r.id}
+                        onClick={() => {
+                          /* Selecting text is a click too. Opening a modal
+                             mid-copy loses the selection and the place. */
+                          if (!canEdit) return;
+                          if ((window.getSelection()?.toString() ?? "").length > 0) return;
+                          openRec(r);
+                        }}
                         className={`border-b border-line/60 last:border-0 ${r.active ? "" : "opacity-55"} ${canEdit ? "cursor-pointer hover:bg-panel/40" : ""}`}>
                         <td className="px-4 py-3">
                           <span className="font-semibold text-ink">{r.name}</span>
@@ -366,16 +373,25 @@ export default function EditRecordPage() {
                   </div>
                   {bom.length === 0 && <p className="mt-2 text-[12px] text-hint">No recipe — an order cannot calculate its material.</p>}
                   {bom.map((l, i) => (
-                    <div key={i} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <select value={l.group_id} className={inp}
-                        onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, group_id: e.target.value, category_id: null } : y))}>
+                    <div key={i} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      <select value={l.group_id ? `${l.group_id}|${l.category_id ?? ""}` : ""} className={inp}
+                        onChange={(e) => {
+                          const [g, c] = e.target.value.split("|");
+                          setBom((b) => b.map((y, j) => j === i ? { ...y, group_id: g, category_id: c || null } : y));
+                        }}>
                         <option value="">Material…</option>
-                        {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                      </select>
-                      <select value={l.category_id ?? ""} className={inp}
-                        onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, category_id: e.target.value || null } : y))}>
-                        <option value="">Any category</option>
-                        {cats.filter((c) => c.group_id === l.group_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        {/* Group AND category together: "Fabric · Fleece" is what
+                            people actually mean, and picking a group then a
+                            category in two boxes is two chances to mismatch. */}
+                        {groups.flatMap((g) => {
+                          const kids = cats.filter((c) => c.group_id === g.id);
+                          return [
+                            <option key={g.id} value={`${g.id}|`}>{g.name} · any</option>,
+                            ...kids.map((c) => (
+                              <option key={g.id + c.id} value={`${g.id}|${c.id}`}>{g.name} · {c.name}</option>
+                            )),
+                          ];
+                        })}
                       </select>
                       <input type="number" value={l.quantity} placeholder="Qty" className={inp}
                         onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, quantity: e.target.value } : y))} />

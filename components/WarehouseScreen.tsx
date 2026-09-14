@@ -374,10 +374,10 @@ function WarehouseInner({ section }: { section: Tab }) {
       <Topbar
         title={section === "in" ? "Warehouse — New GRN"
              : section === "out" ? "Warehouse — Out GRN"
-             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Products"}
+             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Inventory"}
         subtitle={section === "in" ? "Goods arriving, by barcode"
                 : section === "out" ? "Goods leaving to parties and branches"
-                : section === "stock" ? "What is held right now" : "The products this warehouse carries"} />
+                : section === "stock" ? "What is held right now" : "Everything this warehouse carries"} />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
