@@ -57,17 +57,31 @@ type RateRow = { month_label: string; courier: string; returned: number;
                  return_pct: number | null; change_pts: number | null;
                  cod_returned: number | null; is_part_month: boolean };
 
+type StoreRow = {
+  store_code: string; orders: number; total_sales: number;
+  delivered_orders: number; delivered_value: number;
+  cancelled_orders: number; cancelled_value: number; delivered_pct: number;
+};
+
 export default function HubDashboard() {
   const [orders, setOrders] = useState<Row[]>([]);
   const [logi, setLogi] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [rates, setRates] = useState<RateRow[]>([]);
+  /* Store totals from the database, not from the loaded rows. PostgREST caps a
+     response at 1,000, so anything counted in the browser is only ever counting
+     the first thousand orders — and silently understates every store once the
+     month gets busy. */
+  const [stores, setStores] = useState<StoreRow[]>([]);
   // The two cards answer "is it getting worse". The months answer "what is
   // normal" — worth having, not worth pushing the rest of the page down.
   const [showMonths, setShowMonths] = useState(false);
   const [store, setStore] = useState("ALL");
-  const [preset, setPreset] = useState("30d");
+  /* This month by default. A dashboard is opened to answer "how are we doing",
+     and the month is the period that question is actually about — 30 days
+     straddles two months and answers neither. */
+  const [preset, setPreset] = useState("month");
   const [cf, setCf] = useState(""); const [ct, setCt] = useState("");
   const [summary, setSummary] = useState<DashSummary | null>(null);
 
@@ -94,12 +108,13 @@ export default function HubDashboard() {
     let lq = supabase.from("online_logistics").select("order_number,store_code,courier,delivery_status,cod_amount,cpr_net_amount,payment_status").limit(1000);
     if (store !== "ALL") lq = lq.eq("store_code", store);
 
-    const [o, l, sum, rt] = await Promise.all([
+    const [o, l, sum, rt, st] = await Promise.all([
       oq, lq,
       supabase.rpc("hub_dashboard_summary", {
         p_from: from, p_to: to, p_store: store === "ALL" ? null : store,
       }),
       supabase.rpc("hub_return_rates", { p_months: 3 }),
+      supabase.rpc("hub_store_sales", { p_from: from, p_to: to }),
     ]);
     if (my !== reqId.current) return;          // superseded by a newer request
     if (o.error) setErr(o.error.message);
@@ -107,6 +122,7 @@ export default function HubDashboard() {
     setLogi((l.data as Row[]) ?? []);
     setSummary((sum.data as DashSummary[])?.[0] ?? null);
     setRates((rt.data as RateRow[]) ?? []);
+    setStores((st.data as StoreRow[]) ?? []);
     setLoading(false);
   }, [preset, cf, ct, store]);
 
@@ -334,23 +350,55 @@ export default function HubDashboard() {
         <div className="rounded-card border border-line bg-surface p-5 dark:border-white/[0.06] dark:bg-[#201c17]">
           <h3 className="mb-4 text-[14px] font-bold text-ink dark:text-[#f4f1ea]">By store</h3>
           {loading ? <div className="py-10 text-center text-[13px] text-muted dark:text-[#a89f93]">Loading…</div>
-          : storeKeys.length === 0 ? <div className="py-10 text-center text-[13px] text-muted dark:text-[#a89f93]">No orders in this period.</div>
+          : stores.length === 0 ? <div className="py-10 text-center text-[13px] text-muted dark:text-[#a89f93]">No orders in this period.</div>
           : (
             <div className="space-y-3">
-              {storeKeys.sort((a, b) => M.byStore[b].amt - M.byStore[a].amt).map((k) => {
-                const s = M.byStore[k]; const meta = STORES.find((x) => x.code === k);
+              {/* ORDERED AGAINST DELIVERED.
+                  On COD an order is not revenue until the parcel arrives and
+                  the customer pays. The bar showed only what was placed, which
+                  is the number least connected to money: Trenzee placed 45
+                  orders this month and 10 of them landed. */}
+              {(stores.length ? stores : []).map((s) => {
+                const meta = STORES.find((x) => x.code === s.store_code);
+                const ordered   = Number(s.total_sales);
+                const delivered = Number(s.delivered_value);
+                const maxV = Math.max(...stores.map((x) => Number(x.total_sales)), 1);
                 return (
-                  <div key={k}>
-                    <div className="flex items-center justify-between text-[13px]">
-                      <span className="font-semibold text-ink dark:text-[#f4f1ea]">{meta?.label ?? k}</span>
-                      <span className="tabular-nums text-muted dark:text-[#a89f93]">{s.orders.toLocaleString()} orders · <b className="text-ink dark:text-[#f4f1ea]">{rs(s.amt)}</b></span>
+                  <div key={s.store_code}>
+                    <div className="flex items-baseline justify-between text-[13px]">
+                      <span className="font-semibold text-ink dark:text-[#f4f1ea]">
+                        {meta?.label ?? s.store_code}
+                      </span>
+                      <span className="tabular-nums text-muted dark:text-[#a89f93]">
+                        {Number(s.orders).toLocaleString()} ordered · {rs(ordered)}
+                      </span>
                     </div>
+
+                    {/* The filled part is what was delivered; the rest is what
+                        was ordered and has not arrived or never will. */}
                     <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-panel dark:bg-white/[0.06]">
-                      <div className="h-full rounded-full" style={{ width: `${Math.max((s.amt / maxStoreAmt) * 100, 2)}%`, background: meta?.color ?? "#EBA98F" }} />
+                      <div className="h-full rounded-full"
+                           style={{ width: `${Math.max((ordered / maxV) * 100, 2)}%`,
+                                    background: meta?.color ?? "#EBA98F", opacity: 0.28 }}>
+                        <div className="h-full rounded-full"
+                             style={{ width: `${ordered > 0 ? (delivered / ordered) * 100 : 0}%`,
+                                      background: meta?.color ?? "#EBA98F" }} />
+                      </div>
+                    </div>
+
+                    <div className="mt-1 flex items-baseline justify-between text-[11.5px]">
+                      <span className="font-semibold text-emerald-700">
+                        {Number(s.delivered_orders).toLocaleString()} delivered · {rs(delivered)}
+                      </span>
+                      <span className="text-muted dark:text-[#a89f93]">
+                        {Number(s.delivered_pct ?? 0).toFixed(0)}% landed
+                        {Number(s.cancelled_orders) > 0 && <> · {Number(s.cancelled_orders)} cancelled</>}
+                      </span>
                     </div>
                   </div>
                 );
               })}
+
               {Object.keys(M.byCourier).length > 0 && (
                 <div className="mt-4 border-t border-line pt-3 dark:border-white/[0.06]">
                   <div className="mb-2 text-[12px] font-semibold text-muted dark:text-[#a89f93]">Shipments by courier</div>
