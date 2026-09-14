@@ -122,8 +122,12 @@ export default function FinancePage() {
             .select("id,tracking_id,order_number,store_code,courier,cod_amount,cpr_net_amount,courier_fee,courier_tax,payment_status,payment_date,delivery_date,finance_date,is_paid,age_days,cpr_number,dispatch_date")
             // Oldest first. A receivable list is worked from the top, and the
             // oldest debt is the one closest to being uncollectable.
+            /* Unpaid first — that is the money still to chase — then the
+               settled ones NEWEST first. Ascending put the oldest settlement at
+               the top of the paid block, so a two-month view opened on July and
+               the recent payments were a thousand rows down. */
             .order("is_paid", { ascending: true })
-            .order("finance_date", { ascending: true, nullsFirst: false })
+            .order("finance_date", { ascending: false, nullsFirst: false })
             .limit(1000)
         : supabase.from("online_cpr")
             .select("id,cpr_number,courier,store_code,cpr_date,amount,orders_count,status,gross_total,shipping_charges,gst,wh_income_tax,wh_sales_tax,net_total,delivered_count,returned_count,returns_cost,matched_count,matched_total,unmatched,settlement_status")
