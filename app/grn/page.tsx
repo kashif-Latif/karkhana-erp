@@ -20,7 +20,11 @@ import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/expor
 
 type Grn = { id: string; grn_number: string; kind: string; received_at: string;
              total: number | null; note: string | null; status: string | null;
-             supplier: string | null; lines: number; quantity: number };
+             supplier: string | null; lines: number; quantity: number;
+             categories: string | null };
+type Line = { id: string; item_code: string; material: string; category: string | null;
+              colour: string | null; size: string | null; unit: string;
+              quantity: number; rate: number | null; line_total: number };
 type Kind = "fabric" | "other" | "finished";
 
 const DIVISIONS: { k: Kind; label: string; sub: string; Icon: typeof Boxes; tone: string }[] = [
@@ -43,6 +47,13 @@ function GrnInner() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
+  const [cat, setCat] = useState("all");
+  /* Opening a GRN shows what is in it — the question the list cannot answer. */
+  const [openGrn, setOpenGrn] = useState<Grn | null>(null);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [linesBusy, setLinesBusy] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
+  const [voidWhy, setVoidWhy] = useState("");
   const [days, setDays] = useState<number | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -58,14 +69,40 @@ function GrnInner() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  async function openDetail(g: Grn) {
+    if ((window.getSelection()?.toString() ?? "").length > 0) return;
+    setOpenGrn(g); setLines([]); setLinesBusy(true); setDelOpen(false); setVoidWhy(""); setErr("");
+    const { data } = await supabase!.from("v_grn_lines").select("*").eq("grn_id", g.id);
+    setLines((data as unknown as Line[]) ?? []);
+    setLinesBusy(false);
+  }
+
+  async function voidGrn() {
+    if (!supabase || !openGrn) return;
+    if (!voidWhy.trim()) { setErr("Give a reason for voiding."); return; }
+    const { error } = await supabase.rpc("void_grn", {
+      p_grn_id: openGrn.id, p_reason: voidWhy.trim(),
+    });
+    if (error) { setErr(error.message); return; }
+    setOpenGrn(null); load();
+  }
+
   const counts = useMemo(() => ({
     fabric: rows.filter((r) => r.kind === "fabric").length,
     other: rows.filter((r) => r.kind === "other").length,
     finished: rows.filter((r) => r.kind === "finished").length,
   }), [rows]);
 
+  const cats = useMemo(() => {
+    const set = new Set<string>();
+    rows.filter((r) => r.kind === kind).forEach((r) =>
+      String(r.categories ?? "").split(" · ").filter(Boolean).forEach((c) => set.add(c)));
+    return [...set].sort();
+  }, [rows, kind]);
+
   const view = useMemo(() => rows.filter((r) => {
     if (r.kind !== kind) return false;
+    if (cat !== "all" && !String(r.categories ?? "").split(" · ").includes(cat)) return false;
     const day = String(r.received_at).slice(0, 10);
     if (days !== null) {
       const edge = new Date(); edge.setHours(0, 0, 0, 0);
@@ -79,7 +116,7 @@ function GrnInner() {
       return [r.grn_number, r.supplier, r.note].some((x) => String(x ?? "").toLowerCase().includes(t));
     }
     return true;
-  }), [rows, kind, q, days, from, to]);
+  }), [rows, kind, q, days, from, to, cat]);
 
   const value = view.reduce((a, r) => a + Number(r.total || 0), 0);
   const qty = view.reduce((a, r) => a + Number(r.quantity || 0), 0);
@@ -130,6 +167,13 @@ function GrnInner() {
           <span className="text-[12px] text-hint">to</span>
           <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setDays(null); }}
             className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
+          {cats.length > 0 && (
+            <select value={cat} onChange={(e) => setCat(e.target.value)}
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none">
+              <option value="all">All categories</option>
+              {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -165,6 +209,7 @@ function GrnInner() {
             <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
               <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
                 <th className="px-4 py-3 font-bold">GRN</th>
+                <th className="px-4 py-3 font-bold">Category</th>
                 <th className="px-4 py-3 font-bold">Supplier</th>
                 <th className="px-4 py-3 text-right font-bold">Lines</th>
                 <th className="px-4 py-3 text-right font-bold">Quantity</th>
@@ -173,11 +218,13 @@ function GrnInner() {
               </tr></thead>
               <tbody>
                 {view.map((r, ix) => (
-                  <tr key={r.id} className={`border-b border-line/60 last:border-0 ${ix % 2 ? "bg-panel/25" : ""}`}>
+                  <tr key={r.id} onClick={() => openDetail(r)}
+                    className={`cursor-pointer border-b border-line/60 last:border-0 hover:bg-panel/40 ${ix % 2 ? "bg-panel/25" : ""}`}>
                     <td className="px-4 py-3">
                       <span className="font-mono text-[12.5px] font-bold text-ink">{r.grn_number}</span>
                       <span className="block text-[11px] text-hint">{when(r.received_at)}</span>
                     </td>
+                    <td className="px-4 py-3 text-[12.5px] text-ink/85">{r.categories ?? "—"}</td>
                     <td className="px-4 py-3 text-ink">{r.supplier ?? "—"}</td>
                     <td className="px-4 py-3 text-right tnum text-muted">{r.lines}</td>
                     <td className="px-4 py-3 text-right tnum font-semibold text-ink">{n(r.quantity)}</td>
@@ -190,6 +237,86 @@ function GrnInner() {
           </div>
         )}
       </div>
+
+      {openGrn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => setOpenGrn(null)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-card bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-[17px] font-extrabold text-ink">{openGrn.grn_number}</p>
+                <p className="mt-0.5 text-[12.5px] text-muted">
+                  {openGrn.supplier ?? "no supplier"} · {when(openGrn.received_at)}
+                </p>
+              </div>
+              <span className="rounded-full bg-panel px-2.5 py-1 text-[11.5px] font-semibold text-ink">{openGrn.kind}</span>
+            </div>
+
+            {linesBusy && <p className="mt-4 text-[13px] text-hint">Loading lines…</p>}
+
+            {!linesBusy && lines.length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-xl2 border border-line">
+                <table className="w-full text-left text-[12.5px]">
+                  <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
+                    <th className="px-3 py-2 font-bold">Material</th>
+                    <th className="px-3 py-2 text-right font-bold">Quantity</th>
+                    <th className="px-3 py-2 text-right font-bold">Rate</th>
+                    <th className="px-3 py-2 text-right font-bold">Total</th>
+                  </tr></thead>
+                  <tbody>
+                    {lines.map((l) => (
+                      <tr key={l.id} className="border-b border-line/60 last:border-0">
+                        <td className="px-3 py-2">
+                          <span className="font-semibold text-ink">
+                            {[l.material, l.category].filter(Boolean).join(" · ")}
+                          </span>
+                          <span className="block text-[11px] text-hint">
+                            {[l.colour, l.size, l.item_code].filter(Boolean).join(" · ")}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right tnum font-semibold text-ink">{n(l.quantity)} <span className="text-[11px] font-normal text-muted">{l.unit}</span></td>
+                        <td className="px-3 py-2 text-right tnum text-muted">{l.rate == null ? "—" : rs(l.rate)}</td>
+                        <td className="px-3 py-2 text-right tnum font-bold text-ink">{rs(l.line_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="mt-3 flex items-center justify-between text-[13px]">
+              <span className="text-muted">{openGrn.lines} line(s) · {n(openGrn.quantity)} units</span>
+              <span className="text-[16px] font-extrabold text-ink">{rs(openGrn.total ?? 0)}</span>
+            </div>
+            {openGrn.note && <p className="mt-2 text-[12.5px] text-muted">{openGrn.note}</p>}
+            {err && <p className="mt-2 text-[12.5px] font-medium text-danger">{err}</p>}
+
+            <div className="mt-5 flex items-center gap-2">
+              {/* Voiding reverses the stock this GRN added. Editing a posted
+                  receipt is not offered: the honest record is "this was wrong,
+                  here is the reversal", not a number quietly changed. */}
+              {delOpen ? (
+                <span className="flex flex-1 items-center gap-2">
+                  <input value={voidWhy} autoFocus onChange={(e) => setVoidWhy(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") voidGrn(); if (e.key === "Escape") setDelOpen(false); }}
+                    placeholder="Reason — required"
+                    className="w-48 rounded-lg border border-ink/30 px-2.5 py-1.5 text-[12.5px] outline-none" />
+                  <button onClick={voidGrn} disabled={!voidWhy.trim()}
+                    className="rounded-xl2 bg-danger px-3.5 py-2 text-[12.5px] font-semibold text-white disabled:opacity-40">
+                    Void it — stock goes back
+                  </button>
+                  <button onClick={() => setDelOpen(false)} className="text-[12px] text-ink/60">cancel</button>
+                </span>
+              ) : (
+                <button onClick={() => setDelOpen(true)}
+                  className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
+                  Void this GRN
+                </button>
+              )}
+              <button onClick={() => setOpenGrn(null)} className="ml-auto rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
