@@ -17,13 +17,13 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
 
 type Side = "factory" | "warehouse";
-type Rep = "grn" | "grout" | "str" | "low" | "blocked";
+type Rep = "grn" | "grout" | "str" | "low" | "blocked" | "stock";
 type Row = Record<string, unknown>;
 
 const REPORTS: { r: Rep; label: string }[] = [
   { r: "grn", label: "New GRN" }, { r: "grout", label: "GR out" },
   { r: "str", label: "STR" }, { r: "low", label: "Low quantity" },
-  { r: "blocked", label: "Blocked items" },
+  { r: "stock", label: "Stock report" }, { r: "blocked", label: "Blocked items" },
 ];
 const n = (v: unknown) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const rs = (v: unknown) => (v == null ? "—" : "Rs " + Math.round(Number(v)).toLocaleString());
@@ -64,6 +64,9 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
       : (await pick("v_khana_movements", "created_at")).filter((x) => x.movement_type === "OUT");
     else if (rep === "str") d = (await pick("v_stock_transfers", "moved_at")).filter((x) => x.from_side === side);
     else if (rep === "low") d = await pick("v_low_stock", "headroom");
+    else if (rep === "stock") d = side === "factory"
+      ? await pick("v_stock_split", "material")
+      : await pick("v_khana_stock", "name");
     else d = await pick("v_blocked_items", "updated_at");
     setRows(d); setLoading(false);
   }, [rep, side]);
@@ -71,7 +74,8 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
 
   const dateKey = rep === "grn" ? (side === "factory" ? "received_at" : "created_at")
     : rep === "grout" ? (side === "factory" ? "moved_at" : "created_at")
-    : rep === "str" ? "moved_at" : "updated_at";
+    : rep === "str" ? "moved_at"
+    : rep === "stock" ? "" : "updated_at";
 
   /* Categories CASCADE from the division: choosing Fabric must not offer
      Sticker or Zip. Derived from the rows that survive the division filter,
@@ -128,6 +132,14 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     low: [{ k: "material", h: "Material" }, { k: "category", h: "Category" }, { k: "division", h: "Division" },
           { k: "in_stock", h: "In stock", align: "r", fmt: n }, { k: "min_quantity", h: "Minimum", align: "r", fmt: n },
           { k: "unit", h: "Unit" }],
+    stock: side === "factory"
+      ? [{ k: "material", h: "Material" }, { k: "category", h: "Category" },
+         { k: "division", h: "Division" }, { k: "in_stock", h: "In stock", align: "r", fmt: n },
+         { k: "unit", h: "Unit" }, { k: "last_rate", h: "Rate", align: "r", fmt: rs },
+         { k: "stock_value", h: "Value", align: "r", fmt: rs },
+         { k: "last_supplier", h: "Supplier" }]
+      : [{ k: "barcode", h: "Barcode" }, { k: "name", h: "Product" },
+         { k: "category", h: "Category" }, { k: "quantity", h: "In stock", align: "r", fmt: n }],
     blocked: [{ k: "kind", h: "Type" }, { k: "code", h: "Code" }, { k: "name", h: "Name" },
               { k: "barcode", h: "Barcode" }, { k: "division", h: "Belongs to" },
               { k: "updated_at", h: "Blocked", fmt: when }],

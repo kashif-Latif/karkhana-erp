@@ -44,6 +44,7 @@ const NAV: NavItem[] = [
       { label: "GR out report", href: "/reports/factory/grout" },
       { label: "STR report", href: "/reports/factory/str" },
       { label: "Low quantity", href: "/reports/factory/low" },
+      { label: "Stock report", href: "/reports/factory/stock" },
       { label: "Blocked items", href: "/reports/factory/blocked" },
     ] },
     { label: "Graph", href: "/reports/factory/graph" },
@@ -59,6 +60,8 @@ const NAV: NavItem[] = [
 
     { label: "Finishing", heading: true },
     { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
+
+    { label: "Stock", href: "/stock" },
 
     /* Stock and Raw materials are gone: everything they showed is now read
        back through a report, filtered however you need it. One place to look
@@ -83,6 +86,7 @@ const NAV: NavItem[] = [
       { label: "GR out report", href: "/reports/warehouse/grout" },
       { label: "STR report", href: "/reports/warehouse/str" },
       { label: "Low quantity", href: "/reports/warehouse/low" },
+      { label: "Stock report", href: "/reports/warehouse/stock" },
       { label: "Blocked items", href: "/reports/warehouse/blocked" },
     ] },
     { label: "Graph", href: "/reports/warehouse/graph" },
