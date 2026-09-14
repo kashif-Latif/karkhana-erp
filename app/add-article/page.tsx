@@ -11,7 +11,7 @@
  */
 import { useState } from "react";
 import Link from "next/link";
-import { Shirt, Loader2, ArrowRight } from "lucide-react";
+import { Shirt, Loader2, ArrowRight, Pencil } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
@@ -175,8 +175,14 @@ export default function AddArticlePage() {
 
               {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
 
-              <div className="mt-5 flex justify-end gap-2">
-                <button onClick={reset} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Clear</button>
+              <div className="mt-5 flex items-center gap-2">
+                {/* Bottom left, as asked — everything already saved is one
+                    click away rather than somewhere else entirely. */}
+                <Link href="/edit-record"
+                  className="flex items-center gap-1.5 rounded-xl2 border border-line px-3.5 py-2.5 text-[12.5px] font-semibold text-ink/70 hover:bg-panel">
+                  <Pencil size={14} /> Edit record
+                </Link>
+                <button onClick={reset} className="ml-auto rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Clear</button>
                 <button onClick={save} disabled={busy || !allowed}
                   className="flex items-center gap-1.5 rounded-xl2 bg-ink px-6 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
                   {busy && <Loader2 size={15} className="animate-spin" />} Create article

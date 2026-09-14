@@ -6,6 +6,7 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
   "/grn": ["inventory.view"],
+  "/edit-record": ["production.entry", "grn.create"],
   "/reports/factory/grn": ["inventory.view", "production.view"],
   "/reports/factory/grout": ["inventory.view", "production.view"],
   "/reports/factory/str": ["inventory.view", "production.view"],

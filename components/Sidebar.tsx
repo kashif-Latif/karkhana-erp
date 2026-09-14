@@ -16,8 +16,12 @@ import { supabase } from "@/lib/supabase";
 /* A child is either a link, or a heading that groups the links under it.
    Karkhana has nine screens; nine in a row reads as a wall. Headings turn
    it into four short stacks you can scan. */
-type Child = { label: string; href: string; heading?: false }
-            | { label: string; heading: true; href?: undefined };
+/* A child is a link, a plain heading, or a sub-group that opens and closes
+   on its own. Reports is the third kind: five screens that belong together
+   but should not take five lines of the sidebar when you are not using them. */
+type Child = { label: string; href: string; heading?: false; sub?: undefined }
+            | { label: string; heading: true; href?: undefined; sub?: undefined }
+            | { label: string; sub: { label: string; href: string }[]; href?: undefined; heading?: false };
 type NavItem = { label: string; Icon: LucideIcon; href?: string; badge?: number; children?: Child[] };
 
 const NAV: NavItem[] = [
@@ -34,13 +38,14 @@ const NAV: NavItem[] = [
     { label: "Receiving store", heading: true },
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
-
-    { label: "Reports", heading: true },
-    { label: "New GRN report", href: "/reports/factory/grn" },
-    { label: "GR out report", href: "/reports/factory/grout" },
-    { label: "STR report", href: "/reports/factory/str" },
-    { label: "Low quantity", href: "/reports/factory/low" },
-    { label: "Blocked items", href: "/reports/factory/blocked" },
+    { label: "STR", href: "/str/factory" },
+    { label: "Reports", sub: [
+      { label: "New GRN report", href: "/reports/factory/grn" },
+      { label: "GR out report", href: "/reports/factory/grout" },
+      { label: "STR report", href: "/reports/factory/str" },
+      { label: "Low quantity", href: "/reports/factory/low" },
+      { label: "Blocked items", href: "/reports/factory/blocked" },
+    ] },
 
 
     { label: "Order", heading: true },
@@ -58,7 +63,6 @@ const NAV: NavItem[] = [
        back through a report, filtered however you need it. One place to look
        instead of two that could disagree. */
 
-    { label: "STR", href: "/str/factory" },
 
   ] },
 
@@ -72,16 +76,16 @@ const NAV: NavItem[] = [
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
     { label: "GR out", href: "/warehouse/grn-out" },
+    { label: "STR", href: "/str/warehouse" },
+    { label: "Reports", sub: [
+      { label: "New GRN report", href: "/reports/warehouse/grn" },
+      { label: "GR out report", href: "/reports/warehouse/grout" },
+      { label: "STR report", href: "/reports/warehouse/str" },
+      { label: "Low quantity", href: "/reports/warehouse/low" },
+      { label: "Blocked items", href: "/reports/warehouse/blocked" },
+    ] },
     { label: "Products", href: "/warehouse/products" },
 
-    { label: "Reports", heading: true },
-    { label: "New GRN report", href: "/reports/warehouse/grn" },
-    { label: "GR out report", href: "/reports/warehouse/grout" },
-    { label: "STR report", href: "/reports/warehouse/str" },
-    { label: "Low quantity", href: "/reports/warehouse/low" },
-    { label: "Blocked items", href: "/reports/warehouse/blocked" },
-
-    { label: "STR", href: "/str/warehouse" },
 
   ] },
 
@@ -122,7 +126,11 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
 
   const items: NavItem[] = NAV.map((n) => {
     if (n.children) {
-      const visible = n.children.filter((c) => c.heading || can(ROUTE_PERMS[c.href!] ?? null));
+      const visible = n.children
+        .map((c) => c.sub
+          ? { ...c, sub: c.sub.filter((x) => can(ROUTE_PERMS[x.href] ?? null)) }
+          : c)
+        .filter((c) => c.heading || (c.sub ? c.sub.length > 0 : can(ROUTE_PERMS[c.href!] ?? null)));
       /* A heading with nothing left under it is noise — drop it. */
       const kids = visible.filter((c, i) =>
         !c.heading || visible.slice(i + 1).some((x) => !x.heading));
@@ -178,6 +186,30 @@ export default function Sidebar({ open, onClose }: { open?: boolean; onClose?: (
                   {open && (
                     <div className="mt-1 space-y-1 pl-3.5">
                       {item.children.map((c, ci) => {
+                        if (c.sub) {
+                          const anySubActive = c.sub.some((x) => childActive(x.href));
+                          const subOpen = expanded[item.label + "/" + c.label] ?? anySubActive;
+                          return (
+                            <div key={`s-${ci}`}>
+                              <button
+                                onClick={() => setExpanded((e) => ({ ...e, [item.label + "/" + c.label]: !subOpen }))}
+                                className={`flex w-full items-center justify-between rounded-xl2 px-3.5 py-2 text-[13px] font-semibold transition ${anySubActive ? "text-ink" : "text-ink/65 hover:bg-panel"}`}>
+                                {c.label}
+                                <ChevronDown size={14} className={`transition ${subOpen ? "rotate-180" : ""}`} />
+                              </button>
+                              {subOpen && (
+                                <div className="ml-3 border-l border-line pl-2">
+                                  {c.sub.map((x) => (
+                                    <Link key={x.href} href={x.href}
+                                      className={`block rounded-xl2 px-3 py-1.5 text-[12.5px] transition ${childActive(x.href) ? "bg-panel font-semibold text-ink" : "text-ink/60 hover:bg-panel"}`}>
+                                      {x.label}
+                                    </Link>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
                         if (c.heading) return (
                           <p key={`h-${ci}`}
                             className={`px-3.5 pb-0.5 text-[10.5px] font-bold uppercase tracking-wide text-hint ${ci ? "pt-2.5" : "pt-1"}`}>
