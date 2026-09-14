@@ -25,7 +25,7 @@ type Kind = "fabric" | "other" | "finished";
 const DIV: { k: Kind; label: string; sub: string; Icon: typeof Boxes; tone: string }[] = [
   { k: "fabric",   label: "Fabric",          sub: "cloth out of stock",             Icon: Layers,       tone: "bg-periwinkle-soft" },
   { k: "other",    label: "Other materials", sub: "sticker · shopper · zip · thread", Icon: Boxes,      tone: "bg-amber-soft" },
-  { k: "finished", label: "Finished goods",  sub: "out to the warehouse",           Icon: PackageCheck, tone: "bg-success-soft" },
+  { k: "finished", label: "Market goods",  sub: "out to the warehouse",           Icon: PackageCheck, tone: "bg-success-soft" },
 ];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });

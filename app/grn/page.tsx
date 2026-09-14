@@ -26,7 +26,7 @@ type Kind = "fabric" | "other" | "finished";
 const DIVISIONS: { k: Kind; label: string; sub: string; Icon: typeof Boxes; tone: string }[] = [
   { k: "fabric",   label: "Fabric",          sub: "cloth, by category",            Icon: Layers,       tone: "bg-periwinkle-soft" },
   { k: "other",    label: "Other materials", sub: "sticker · shopper · zip · thread", Icon: Boxes,     tone: "bg-amber-soft" },
-  { k: "finished", label: "Finished goods",  sub: "made and fully ready",          Icon: PackageCheck, tone: "bg-success-soft" },
+  { k: "finished", label: "Market goods",  sub: "made and fully ready",          Icon: PackageCheck, tone: "bg-success-soft" },
 ];
 
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });

@@ -30,7 +30,7 @@ type Kind = "fabric" | "other" | "finished";
 const DIV: { k: Kind; label: string; sub: string; Icon: typeof Boxes; tone: string }[] = [
   { k: "fabric",   label: "Fabric",          sub: "cloth, by category",               Icon: Layers,       tone: "bg-periwinkle-soft" },
   { k: "other",    label: "Other materials", sub: "sticker · shopper · zip · thread",  Icon: Boxes,        tone: "bg-amber-soft" },
-  { k: "finished", label: "Finished goods",  sub: "packed here, not bought",           Icon: PackageCheck, tone: "bg-success-soft" },
+  { k: "finished", label: "Market goods",  sub: "packed here, not bought",           Icon: PackageCheck, tone: "bg-success-soft" },
 ];
 
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
@@ -194,7 +194,7 @@ export default function StockPage() {
               {/* Said plainly, because the absence of a supplier here is the
                   point: these arrive from packing, not from anyone we buy from. */}
               <p className="mx-auto mt-1 max-w-md text-[13px] text-muted">
-                Finished goods are not bought — they arrive from your own floor when a packing GRN is recorded.
+                Market goods are not bought — they arrive from your own floor when a packing GRN is recorded.
               </p>
             </div>
           ) : (

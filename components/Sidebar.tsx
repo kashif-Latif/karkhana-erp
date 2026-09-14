@@ -32,7 +32,7 @@ const NAV: NavItem[] = [
      Grouped in the order the work actually happens. */
   { label: "Karkhana", Icon: Factory, children: [
     { label: "Receiving store", heading: true },
-    { label: "GRN", href: "/grn" },
+    { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
     { label: "Stock", href: "/stock" },
     { label: "Raw materials", href: "/raw-materials" },
@@ -52,7 +52,13 @@ const NAV: NavItem[] = [
        not four screens to fix every future bug in. */
     { label: "Finishing", heading: true },
     { label: "Fixing · Clipping · Pressing · Packing", href: "/packing" },
-    { label: "STR — to warehouse", href: "/str/factory" },
+    { label: "STR", href: "/str/factory" },
+    { label: "Reports", heading: true },
+    { label: "New GRN report", href: "/reports/factory?r=grn" },
+    { label: "GR out report", href: "/reports/factory?r=grout" },
+    { label: "STR report", href: "/reports/factory?r=str" },
+    { label: "Low quantity", href: "/reports/factory?r=low" },
+    { label: "Blocked items", href: "/reports/factory?r=blocked" },
   ] },
 
   /* ═══ WAREHOUSE ═══ receives from Karkhana, ships to shops and online. */
@@ -64,9 +70,14 @@ const NAV: NavItem[] = [
      nothing else on the page. */
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
-    { label: "Out GRN", href: "/warehouse/grn-out" },
+    { label: "GR out", href: "/warehouse/grn-out" },
     { label: "Stock", href: "/warehouse/stock" },
-    { label: "STR — out", href: "/str/warehouse" },
+    { label: "STR", href: "/str/warehouse" },
+    { label: "New GRN report", href: "/reports/warehouse?r=grn" },
+    { label: "GR out report", href: "/reports/warehouse?r=grout" },
+    { label: "STR report", href: "/reports/warehouse?r=str" },
+    { label: "Low quantity", href: "/reports/warehouse?r=low" },
+    { label: "Blocked items", href: "/reports/warehouse?r=blocked" },
     { label: "Products", href: "/warehouse/products" },
   ] },
 
