@@ -15,7 +15,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
 
 type Side = "karkhana" | "warehouse";
-type Kind = "article" | "material";
+type Kind = "article" | "material" | "product";
 type Rec = { kind: Kind; id: string; code: string; name: string; sub: string;
              barcode: string | null; active: boolean; owner: string | null;
              min_quantity: number | null; bom: number };
@@ -88,16 +88,30 @@ export default function EditRecordPage() {
       }));
       setRows([...arts, ...mats]);
     } else {
-      const { data, error } = await supabase.from("articles")
-        .select("id,code,name,system_barcode,is_active,owner,audience,size")
-        .eq("owner", "warehouse").order("code");
-      if (error) setErr(error.message);
-      setRows(((data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
+      /* The warehouse holds TWO kinds of record, and only reading one was the
+         bug: products it stocks (khana_final_items, with their own barcodes)
+         and articles marked as warehouse-owned. Both belong here. */
+      const [prod, arts] = await Promise.all([
+        supabase.from("khana_final_items")
+          .select("id,barcode,name,category,raw_material_reference,is_active").order("name"),
+        supabase.from("articles")
+          .select("id,code,name,system_barcode,is_active,owner,audience,size")
+          .eq("owner", "warehouse").order("code"),
+      ]);
+      if (prod.error) setErr(prod.error.message);
+      const ps: Rec[] = ((prod.data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
+        kind: "product", id: String(r.id), code: String(r.barcode), name: String(r.name),
+        sub: String(r.category ?? ""), barcode: (r.barcode as string) ?? null,
+        active: r.is_active == null ? true : !!r.is_active,
+        owner: "warehouse", min_quantity: null, bom: 0,
+      }));
+      const as: Rec[] = ((arts.data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
         kind: "article", id: String(r.id), code: String(r.code), name: String(r.name),
         sub: [r.audience, r.size].filter(Boolean).join(" · "),
         barcode: (r.system_barcode as string) ?? null, active: !!r.is_active,
         owner: "warehouse", min_quantity: null, bom: 0,
-      })));
+      }));
+      setRows([...ps, ...as]);
     }
     setLoading(false);
   }, [side]);
@@ -130,7 +144,8 @@ export default function EditRecordPage() {
     setOpen(r); setName(r.name); setActive(r.active);
     setMinQ(r.min_quantity == null ? "" : String(r.min_quantity));
     setConfirmDel(false); setErr(""); setBom([]);
-    setManual(""); setSection(""); setCost(""); setRetail(""); setGst("");
+    setManual(r.kind === "product" ? (r.barcode ?? "") : "");
+    setSection(""); setCost(""); setRetail(""); setGst("");
     if (r.kind === "article" && supabase) {
       const [a, b] = await Promise.all([
         supabase.from("articles")
@@ -157,9 +172,17 @@ export default function EditRecordPage() {
   async function save() {
     if (!supabase || !open) return;
     setBusy(true); setErr("");
-    const { error } = await supabase.rpc("set_item_active", {
-      p_kind: open.kind, p_id: open.id, p_active: active,
-    });
+    let error = null as { message: string } | null;
+    if (open.kind === "product") {
+      const r = await supabase.from("khana_final_items")
+        .update({ is_active: active }).eq("id", open.id);
+      error = r.error;
+    } else {
+      const r = await supabase.rpc("set_item_active", {
+        p_kind: open.kind, p_id: open.id, p_active: active,
+      });
+      error = r.error;
+    }
     if (!error && open.kind === "article") {
       await supabase.from("articles").update({
         name: name.trim() || open.name,
@@ -177,6 +200,12 @@ export default function EditRecordPage() {
       const r = await supabase.rpc("set_article_bom", { p_article_id: open.id, p_lines: lines });
       if (r.error) { setBusy(false); setErr(r.error.message); return; }
     }
+    if (!error && open.kind === "product") {
+      await supabase.from("khana_final_items").update({
+        name: name.trim() || open.name,
+        barcode: manual.trim() || open.barcode,
+      }).eq("id", open.id);
+    }
     if (!error && open.kind === "material") {
       await supabase.rpc("set_min_quantity", {
         p_item_id: open.id, p_min: minQ === "" ? null : parseFloat(minQ),
@@ -190,7 +219,8 @@ export default function EditRecordPage() {
   async function remove() {
     if (!supabase || !open) return;
     setBusy(true); setErr("");
-    const table = open.kind === "article" ? "articles" : "material_items";
+    const table = open.kind === "article" ? "articles"
+                : open.kind === "product" ? "khana_final_items" : "material_items";
     const { error } = await supabase.from(table).delete().eq("id", open.id);
     setBusy(false);
     if (error) {
@@ -269,7 +299,7 @@ export default function EditRecordPage() {
                           <span className="block text-[11px] text-hint">{r.code}{r.sub ? ` · ${r.sub}` : ""}</span>
                         </td>
                         <td className="px-4 py-3 text-[12.5px] text-muted">
-                          {r.kind === "article" ? "Article" : "Material"}
+                          {r.kind === "article" ? "Article" : r.kind === "product" ? "Product" : "Material"}
                           {r.bom > 0 && <span className="block text-[11px] text-hint">{r.bom} in recipe</span>}
                         </td>
                         <td className="px-4 py-3 font-mono text-[12px] text-muted">{r.barcode ?? "—"}</td>
@@ -360,6 +390,17 @@ export default function EditRecordPage() {
                     </div>
                   ))}
                 </div>
+              </>
+            )}
+
+            {open.kind === "product" && (
+              <>
+                <div className="mt-3"><Field label="Name">
+                  <input value={name} onChange={(e) => setName(e.target.value)} className={inp} />
+                </Field></div>
+                <div className="mt-3"><Field label="Barcode">
+                  <input value={manual} onChange={(e) => setManual(e.target.value)} className={inp} />
+                </Field></div>
               </>
             )}
 
