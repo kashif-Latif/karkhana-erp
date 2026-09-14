@@ -20,6 +20,12 @@ type Rec = { kind: Kind; id: string; code: string; name: string; sub: string;
              barcode: string | null; active: boolean; owner: string | null;
              min_quantity: number | null; bom: number };
 
+type Opt = { id: string; name: string };
+type Bom = { group_id: string; category_id: string | null; size_id: string | null;
+             unit_id: string; quantity: string };
+
+const SECTIONS = [["40","Baby blanket"],["41","Kids"],["42","Child"],["43","Ladies"],
+                  ["44","Men"],["60","Shoes"],["61","Accessories"]];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 
 export default function EditRecordPage() {
@@ -39,6 +45,18 @@ export default function EditRecordPage() {
   const [active, setActive] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  /* Everything an article has, edited here. Sending someone to another screen
+     for the recipe was the bug: you lose your place and the record you opened. */
+  const [manual, setManual] = useState("");
+  const [section, setSection] = useState("");
+  const [cost, setCost] = useState("");
+  const [retail, setRetail] = useState("");
+  const [gst, setGst] = useState("");
+  const [bom, setBom] = useState<Bom[]>([]);
+  const [groups, setGroups] = useState<Opt[]>([]);
+  const [cats, setCats] = useState<(Opt & { group_id: string })[]>([]);
+  const [units, setUnits] = useState<Opt[]>([]);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase || !side) return;
@@ -85,6 +103,21 @@ export default function EditRecordPage() {
   }, [side]);
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const [g, c, u] = await Promise.all([
+        supabase!.from("material_groups").select("id,name").eq("is_active", true).order("name"),
+        supabase!.from("material_categories").select("id,name,group_id").order("name"),
+        supabase!.from("units").select("id,symbol").order("symbol"),
+      ]);
+      setGroups((g.data as Opt[]) ?? []);
+      setCats((c.data as unknown as (Opt & { group_id: string })[]) ?? []);
+      setUnits(((u.data as unknown as { id: string; symbol: string }[]) ?? [])
+        .map((x) => ({ id: x.id, name: x.symbol })));
+    })();
+  }, []);
+
   const view = useMemo(() => rows.filter((r) => {
     if (show === "active" && !r.active) return false;
     if (show === "blocked" && r.active) return false;
@@ -93,10 +126,32 @@ export default function EditRecordPage() {
     return [r.code, r.name, r.sub, r.barcode].some((x) => String(x ?? "").toLowerCase().includes(t));
   }), [rows, q, show]);
 
-  function openRec(r: Rec) {
+  async function openRec(r: Rec) {
     setOpen(r); setName(r.name); setActive(r.active);
     setMinQ(r.min_quantity == null ? "" : String(r.min_quantity));
-    setConfirmDel(false); setErr("");
+    setConfirmDel(false); setErr(""); setBom([]);
+    setManual(""); setSection(""); setCost(""); setRetail(""); setGst("");
+    if (r.kind === "article" && supabase) {
+      const [a, b] = await Promise.all([
+        supabase.from("articles")
+          .select("manual_barcode,section,cost_price,retail_price,gst_rate").eq("id", r.id).single(),
+        supabase.from("article_bom")
+          .select("group_id,category_id,size_id,quantity,unit_id").eq("article_id", r.id),
+      ]);
+      const d = a.data as Record<string, unknown> | null;
+      if (d) {
+        setManual((d.manual_barcode as string) ?? "");
+        setSection((d.section as string) ?? "");
+        setCost(d.cost_price == null ? "" : String(d.cost_price));
+        setRetail(d.retail_price == null ? "" : String(d.retail_price));
+        setGst(d.gst_rate == null ? "" : String(d.gst_rate));
+      }
+      setBom(((b.data as unknown as Record<string, unknown>[]) ?? []).map((x) => ({
+        group_id: String(x.group_id), category_id: (x.category_id as string) ?? null,
+        size_id: (x.size_id as string) ?? null, unit_id: String(x.unit_id),
+        quantity: String(x.quantity),
+      })));
+    }
   }
 
   async function save() {
@@ -105,8 +160,22 @@ export default function EditRecordPage() {
     const { error } = await supabase.rpc("set_item_active", {
       p_kind: open.kind, p_id: open.id, p_active: active,
     });
-    if (!error && open.kind === "article" && name.trim() && name.trim() !== open.name) {
-      await supabase.from("articles").update({ name: name.trim() }).eq("id", open.id);
+    if (!error && open.kind === "article") {
+      await supabase.from("articles").update({
+        name: name.trim() || open.name,
+        manual_barcode: manual.trim() || null,
+        section: section || null,
+        cost_price: cost === "" ? null : parseFloat(cost),
+        retail_price: retail === "" ? null : parseFloat(retail),
+        gst_rate: gst === "" ? null : parseFloat(gst),
+      }).eq("id", open.id);
+      /* The recipe is replaced whole — one call, so a half-saved recipe
+         cannot exist. */
+      const lines = bom.filter((l) => l.group_id && l.unit_id && parseFloat(l.quantity) > 0)
+        .map((l) => ({ group_id: l.group_id, category_id: l.category_id,
+                       size_id: l.size_id, unit_id: l.unit_id, quantity: parseFloat(l.quantity) }));
+      const r = await supabase.rpc("set_article_bom", { p_article_id: open.id, p_lines: lines });
+      if (r.error) { setBusy(false); setErr(r.error.message); return; }
     }
     if (!error && open.kind === "material") {
       await supabase.rpc("set_min_quantity", {
@@ -193,7 +262,8 @@ export default function EditRecordPage() {
                   </tr></thead>
                   <tbody>
                     {view.map((r) => (
-                      <tr key={r.kind + r.id} className={`border-b border-line/60 last:border-0 ${r.active ? "" : "opacity-55"}`}>
+                      <tr key={r.kind + r.id} onClick={() => canEdit && openRec(r)}
+                        className={`border-b border-line/60 last:border-0 ${r.active ? "" : "opacity-55"} ${canEdit ? "cursor-pointer hover:bg-panel/40" : ""}`}>
                         <td className="px-4 py-3">
                           <span className="font-semibold text-ink">{r.name}</span>
                           <span className="block text-[11px] text-hint">{r.code}{r.sub ? ` · ${r.sub}` : ""}</span>
@@ -234,9 +304,63 @@ export default function EditRecordPage() {
             </p>
 
             {open.kind === "article" && (
-              <div className="mt-3"><Field label="Name">
-                <input value={name} onChange={(e) => setName(e.target.value)} className={inp} />
-              </Field></div>
+              <>
+                <div className="mt-3"><Field label="Name">
+                  <input value={name} onChange={(e) => setName(e.target.value)} className={inp} />
+                </Field></div>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <Field label="Section">
+                    <select value={section} onChange={(e) => setSection(e.target.value)} className={inp}>
+                      <option value="">—</option>
+                      {SECTIONS.map(([v, l]) => <option key={v} value={v}>{v} · {l}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Manual barcode">
+                    <input value={manual} onChange={(e) => setManual(e.target.value)} className={inp} />
+                  </Field>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <Field label="Cost"><input type="number" value={cost} onChange={(e) => setCost(e.target.value)} className={inp} /></Field>
+                  <Field label="Retail"><input type="number" value={retail} onChange={(e) => setRetail(e.target.value)} className={inp} /></Field>
+                  <Field label="GST %"><input type="number" value={gst} onChange={(e) => setGst(e.target.value)} className={inp} /></Field>
+                </div>
+
+                {/* The recipe, right here. */}
+                <div className="mt-4 rounded-xl2 border border-line p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+                      <BookOpen size={14} /> Recipe <span className="font-normal text-hint">per piece</span>
+                    </p>
+                    <button onClick={() => setBom((b) => [...b, { group_id: "", category_id: null, size_id: null, unit_id: units[0]?.id ?? "", quantity: "" }])}
+                      className="rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold text-ink/70">+ Material</button>
+                  </div>
+                  {bom.length === 0 && <p className="mt-2 text-[12px] text-hint">No recipe — an order cannot calculate its material.</p>}
+                  {bom.map((l, i) => (
+                    <div key={i} className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <select value={l.group_id} className={inp}
+                        onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, group_id: e.target.value, category_id: null } : y))}>
+                        <option value="">Material…</option>
+                        {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                      </select>
+                      <select value={l.category_id ?? ""} className={inp}
+                        onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, category_id: e.target.value || null } : y))}>
+                        <option value="">Any category</option>
+                        {cats.filter((c) => c.group_id === l.group_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                      <input type="number" value={l.quantity} placeholder="Qty" className={inp}
+                        onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, quantity: e.target.value } : y))} />
+                      <div className="flex items-center gap-2">
+                        <select value={l.unit_id} className={inp}
+                          onChange={(e) => setBom((b) => b.map((y, j) => j === i ? { ...y, unit_id: e.target.value } : y))}>
+                          {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                        <button onClick={() => setBom((b) => b.filter((_, j) => j !== i))}
+                          className="text-[11px] font-semibold text-danger/70">remove</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
 
             {open.kind === "material" && (
@@ -263,14 +387,6 @@ export default function EditRecordPage() {
                 </button>
               </div>
             </div>
-
-            {open.kind === "article" && (
-              <Link href="/articles"
-                className="mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold text-ink/75 hover:text-ink">
-                <BookOpen size={14} /> Edit its recipe on the Articles screen
-                {open.bom > 0 ? ` (${open.bom} materials)` : " (none set)"}
-              </Link>
-            )}
 
             {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
 
