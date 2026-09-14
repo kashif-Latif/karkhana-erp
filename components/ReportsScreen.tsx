@@ -10,7 +10,7 @@
  * division, export.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+
 import { FileBarChart, Download, AlertTriangle, Ban } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -29,10 +29,10 @@ const n = (v: unknown) => Number(v || 0).toLocaleString(undefined, { maximumFrac
 const rs = (v: unknown) => (v == null ? "—" : "Rs " + Math.round(Number(v)).toLocaleString());
 const when = (v: unknown) => (v ? new Date(String(v)).toLocaleString() : "—");
 
-export default function ReportsScreen({ side }: { side: Side }) {
-  const urlR = useSearchParams().get("r") as Rep | null;
-  const [rep, setRep] = useState<Rep>(
-    REPORTS.some((x) => x.r === urlR) ? (urlR as Rep) : "grn");
+export default function ReportsScreen({ side, report }: { side: Side; report: Rep }) {
+  /* Fixed by the route. Opening GR out shows GR out — no row of buttons
+     offering four reports you did not ask for. */
+  const rep = report;
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -42,7 +42,7 @@ export default function ReportsScreen({ side }: { side: Side }) {
   const [to, setTo] = useState("");
   const [div, setDiv] = useState("all");
 
-  useEffect(() => { if (urlR && REPORTS.some((x) => x.r === urlR)) setRep(urlR as Rep); }, [urlR]);
+
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -133,14 +133,6 @@ export default function ReportsScreen({ side }: { side: Side }) {
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
 
-        <div className="flex flex-wrap gap-2">
-          {REPORTS.map((x) => (
-            <button key={x.r} onClick={() => { setRep(x.r); setQ(""); setDiv("all"); }}
-              className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${rep === x.r ? "bg-ink text-white" : "border border-line text-ink/70 hover:bg-panel"}`}>
-              {x.label}
-            </button>
-          ))}
-        </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
           {[{ l: "All time", w: null }, { l: "This week", w: 1 }, { l: "2 weeks", w: 2 },

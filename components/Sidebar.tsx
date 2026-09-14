@@ -35,6 +35,14 @@ const NAV: NavItem[] = [
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
 
+    { label: "Reports", heading: true },
+    { label: "New GRN report", href: "/reports/factory/grn" },
+    { label: "GR out report", href: "/reports/factory/grout" },
+    { label: "STR report", href: "/reports/factory/str" },
+    { label: "Low quantity", href: "/reports/factory/low" },
+    { label: "Blocked items", href: "/reports/factory/blocked" },
+
+
     { label: "Order", heading: true },
     { label: "Articles", href: "/articles" },
     { label: "Order by cloth", href: "/orders" },
@@ -49,12 +57,6 @@ const NAV: NavItem[] = [
     /* Stock and Raw materials are gone: everything they showed is now read
        back through a report, filtered however you need it. One place to look
        instead of two that could disagree. */
-    { label: "Reports", heading: true },
-    { label: "New GRN report", href: "/reports/factory?r=grn" },
-    { label: "GR out report", href: "/reports/factory?r=grout" },
-    { label: "STR report", href: "/reports/factory?r=str" },
-    { label: "Low quantity", href: "/reports/factory?r=low" },
-    { label: "Blocked items", href: "/reports/factory?r=blocked" },
 
     { label: "STR", href: "/str/factory" },
 
@@ -73,11 +75,11 @@ const NAV: NavItem[] = [
     { label: "Products", href: "/warehouse/products" },
 
     { label: "Reports", heading: true },
-    { label: "New GRN report", href: "/reports/warehouse?r=grn" },
-    { label: "GR out report", href: "/reports/warehouse?r=grout" },
-    { label: "STR report", href: "/reports/warehouse?r=str" },
-    { label: "Low quantity", href: "/reports/warehouse?r=low" },
-    { label: "Blocked items", href: "/reports/warehouse?r=blocked" },
+    { label: "New GRN report", href: "/reports/warehouse/grn" },
+    { label: "GR out report", href: "/reports/warehouse/grout" },
+    { label: "STR report", href: "/reports/warehouse/str" },
+    { label: "Low quantity", href: "/reports/warehouse/low" },
+    { label: "Blocked items", href: "/reports/warehouse/blocked" },
 
     { label: "STR", href: "/str/warehouse" },
 
