@@ -128,18 +128,21 @@ function WarehouseInner({ section }: { section: Tab }) {
      article are the same thing when they share a barcode — the same join the
      whole factory→warehouse handover already runs on. */
   const [money, setMoney] = useState<Record<string, {
-    cost: number | null; retail: number | null; gst: number | null }>>({});
+    cost: number | null; retail: number | null; gst: number | null;
+    manual: string | null }>>({});
   useEffect(() => {
     if (!supabase) return;
     (async () => {
       const { data } = await supabase!.from("v_warehouse_report")
-        .select("system_code,cost_price,retail_price,gst_rate");
-      const m: Record<string, { cost: number | null; retail: number | null; gst: number | null }> = {};
+        .select("system_code,manual_code,cost_price,retail_price,gst_rate");
+      const m: Record<string, { cost: number | null; retail: number | null;
+        gst: number | null; manual: string | null }> = {};
       ((data as unknown as Record<string, unknown>[]) ?? []).forEach((r) => {
         m[String(r.system_code)] = {
           cost: r.cost_price == null ? null : Number(r.cost_price),
           retail: r.retail_price == null ? null : Number(r.retail_price),
           gst: r.gst_rate == null ? null : Number(r.gst_rate),
+          manual: (r.manual_code as string) ?? null,
         };
       });
       setMoney(m);
@@ -540,7 +543,9 @@ function WarehouseInner({ section }: { section: Tab }) {
             <div className="overflow-hidden rounded-card border border-line bg-surface">
               <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
-                  <th className="px-4 py-2.5 font-bold">Barcode</th><th className="px-4 py-2.5 font-bold">Item</th>
+                  <th className="px-4 py-2.5 font-bold">Barcode</th>
+                  <th className="px-4 py-2.5 font-bold">Manual</th>
+                  <th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 font-bold">Category</th>
                   <th className="px-4 py-2.5 text-right font-bold">In stock</th>
                   <th className="px-4 py-2.5 text-right font-bold">Cost</th>
@@ -559,6 +564,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                               onKeyDown={(e) => { if (e.key === "Enter") saveItem(i); if (e.key === "Escape") setEditItem(null); }}
                               className="w-36 rounded-lg border border-ink/30 px-2 py-1 font-mono text-[12px] outline-none" />
                           : i.barcode}
+                      </td>
+                      {/* Theirs, beside ours. Both are printed on real
+                          labels, so both have to be readable here. */}
+                      <td className="px-4 py-2.5 font-mono text-[12px] text-muted">
+                        {money[i.barcode]?.manual ?? "—"}
                       </td>
                       <td className="px-4 py-2.5 font-semibold text-ink">
                         {editItem === i.item_id ? (
@@ -644,7 +654,7 @@ function WarehouseInner({ section }: { section: Tab }) {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-line bg-panel/40 text-[13px] font-extrabold text-ink">
-                    <td className="px-4 py-3" colSpan={3}>Total &mdash; {fItems.length} item(s)</td>
+                    <td className="px-4 py-3" colSpan={4}>Total &mdash; {fItems.length} item(s)</td>
                     <td className="px-4 py-3 text-right tnum">{n(fItems.reduce((a, i) => a + Number(i.quantity || 0), 0))}</td>
                     <td className="px-4 py-3" colSpan={3}></td>
                     <td className="px-4 py-3 text-right tnum">
