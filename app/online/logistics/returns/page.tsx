@@ -131,8 +131,28 @@ export default function ReturnsPage() {
       const { data: found, error: fe } = await supabase.rpc("hub_find_return", { p_q: term });
       setLoading(false);
       if (fe) { setErr(fe.message); return; }
-      setRows((found as unknown as (ReturnRow | UnpaidRow)[]) ?? []);
-      setJumped("");
+      const hits = (found as unknown as ReturnRow[]) ?? [];
+      setRows(hits as unknown as (ReturnRow | UnpaidRow)[]);
+
+      /* A RESULT BELONGS IN THE TAB THAT DESCRIBES IT.
+         This returned before the tab logic below ever ran, so a cancelled
+         parcel appeared under a heading that says "still needs chasing" and a
+         parcel genuinely being chased could turn up under "closed". The tab a
+         row is shown in is a claim about that row, and it has to be true.
+
+         Where every hit belongs elsewhere, move there and say so. Where they
+         are split across tabs, stay put — no single tab would be honest, and
+         each row carries its own stage. */
+      if (hits.length) {
+        const chasing = hits.filter((h) => h.needs_chasing === true).length;
+        const closed  = hits.length - chasing;
+        /* setTab re-runs this search, because tab is a dependency of load. The
+           second pass finds the same rows, the tab already matches, and it
+           settles — so the message must survive that pass rather than being
+           cleared by it. */
+        if (tab === "pending_returns" && chasing === 0) { setJumped("Closed returns");  setTab("closed_returns"); }
+        else if (tab === "closed_returns" && closed === 0) { setJumped("Pending returns"); setTab("pending_returns"); }
+      } else setJumped("");
       return;
     }
     // the same flag hub_returns_sections() counts, so the card and the list can
