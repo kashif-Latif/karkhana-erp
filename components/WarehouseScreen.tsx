@@ -36,6 +36,7 @@ type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
 
 function WarehouseInner({ section }: { section: Tab }) {
