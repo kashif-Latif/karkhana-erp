@@ -150,7 +150,13 @@ export default function HubDashboard() {
     orders.forEach((o) => {
       const k = String(o.store_code || "—");
       (byStore[k] ||= { orders: 0, amt: 0, delivered: 0 });
-      byStore[k].orders += 1; byStore[k].amt += num(o.amount);
+      byStore[k].orders += 1;
+      /* A cancelled or voided order is still an order, but it is not money.
+         Two orders voided in Shopify — one of them Rs 32,950,200 — were 89%
+         of the Order value card until H257, and this panel was adding them
+         too. The count and the value now answer different questions on
+         purpose, which is why only the value is filtered. */
+      if (!isCanc(o.status)) byStore[k].amt += num(o.amount);
       if (String(logByOrder[key(o)]?.delivery_status) === "Delivered") byStore[k].delivered += 1;
     });
 
