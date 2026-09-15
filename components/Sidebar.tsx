@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
   { label: "Factory", Icon: Factory, children: [
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
+    { label: "Articles", href: "/articles" },
     { label: "STR", href: "/str/factory" },
     { label: "Reports", sub: [
       { label: "New GRN report", href: "/reports/factory/grn" },
@@ -60,6 +61,7 @@ const NAV: NavItem[] = [
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
     { label: "GR out", href: "/warehouse/grn-out" },
+    { label: "Products", href: "/warehouse/products" },
     { label: "STR", href: "/str/warehouse" },
     { label: "Reports", sub: [
       { label: "New GRN report", href: "/reports/warehouse/grn" },

@@ -85,13 +85,6 @@ export default function GraphReport({ side }: { side: "factory" | "warehouse" })
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
 
         <div className="flex flex-wrap items-center gap-2">
-          {[{ l: "All time", w: null }, { l: "This week", w: 1 }, { l: "5 weeks", w: 5 },
-            { l: "3 months", w: 13 }, { l: "This year", w: 52 }].map((x) => (
-            <button key={x.l} onClick={() => setWeeks(x.w)}
-              className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${weeks === x.w ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-              {x.l}
-            </button>
-          ))}
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>

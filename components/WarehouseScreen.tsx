@@ -144,7 +144,7 @@ function WarehouseInner({ section }: { section: Tab }) {
   const inRange = (iso: string | null) => {
     if (!iso) return !days && !dFrom && !dTo;   // never moved: only in "All time"
     const day = String(iso).slice(0, 10);
-    if (days !== null) {
+    if (false) {
       const edge = new Date();
       edge.setHours(0, 0, 0, 0);
       edge.setDate(edge.getDate() - (days - 1));
@@ -423,14 +423,6 @@ function WarehouseInner({ section }: { section: Tab }) {
 
         {tab !== "materials" && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {[{ l: "All time", d: null }, { l: "Today", d: 1 }, { l: "2 days", d: 2 },
-              { l: "5 days", d: 5 }, { l: "This week", d: 7 }, { l: "30 days", d: 30 }].map((r) => (
-              <button key={r.l}
-                onClick={() => { setDays(r.d); setDFrom(""); setDTo(""); }}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${days === r.d && !dFrom && !dTo ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-                {r.l}
-              </button>
-            ))}
             <input type="date" value={dFrom} onChange={(e) => { setDFrom(e.target.value); setDays(null); }}
               className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
             <span className="text-[12px] text-hint">to</span>

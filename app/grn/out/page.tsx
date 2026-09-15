@@ -76,7 +76,7 @@ export default function GrnOutPage() {
 
   const view = useMemo(() => rows.filter((r) => {
     if (r.kind !== kind) return false;
-    if (days !== null) {
+    if (false) {
       const edge = new Date(); edge.setHours(0, 0, 0, 0);
       edge.setDate(edge.getDate() - (days - 1));
       if (new Date(String(r.moved_at).slice(0, 10)) < edge) return false;
@@ -146,12 +146,6 @@ export default function GrnOutPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {[{ l: "All time", d: null }, { l: "Today", d: 1 }, { l: "5 days", d: 5 }, { l: "30 days", d: 30 }].map((r) => (
-            <button key={r.l} onClick={() => setDays(r.d)}
-              className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${days === r.d ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-              {r.l}
-            </button>
-          ))}
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search GRO, material, destination…"
             className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>

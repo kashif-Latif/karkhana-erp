@@ -94,7 +94,7 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     const raw = r[dateKey];
     if (raw) {
       const day = String(raw).slice(0, 10);
-      if (weeks !== null) {
+      if (false) {
         const edge = new Date(); edge.setHours(0, 0, 0, 0);
         edge.setDate(edge.getDate() - weeks * 7);
         if (new Date(day) < edge) return false;
@@ -163,13 +163,6 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
 
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {[{ l: "All time", w: null }, { l: "This week", w: 1 }, { l: "2 weeks", w: 2 },
-            { l: "5 weeks", w: 5 }, { l: "3 months", w: 13 }].map((x) => (
-            <button key={x.l} onClick={() => { setWeeks(x.w); setFrom(""); setTo(""); }}
-              className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${weeks === x.w && !from && !to ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-              {x.l}
-            </button>
-          ))}
           <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setWeeks(null); }}
             className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
           <span className="text-[12px] text-hint">to</span>
