@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { usePermissions } from "@/lib/usePermissions";
 
 /* THE NOTIFICATION BAR — the same one on both sides.
  *
@@ -45,6 +46,18 @@ export default function HubBell({ dark = false }: { dark?: boolean }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const box = useRef<HTMLDivElement | null>(null);
+
+  /* A NOTIFICATION IS NOT A DOOR.
+     This used to send anyone who tapped a notification to the article page.
+     For an employee that opened the Hub department — a place he has no
+     business in — and the article page carries the cost, the retail price,
+     the ads budget and every other man's progress. The route gate would have
+     refused him eventually, but being walked to a locked door tells him the
+     room exists and roughly what is in it.
+     Only somebody who can actually open articles is taken anywhere. For
+     everyone else the notification is what it says it is: a message. */
+  const { can } = usePermissions();
+  const canOpenArticles = can(["hub.articles.view", "hub.articles.manage"]);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -104,9 +117,15 @@ export default function HubBell({ dark = false }: { dark?: boolean }) {
             <p className="px-4 py-8 text-center text-[13px] text-muted dark:text-[#a89f93]">Nothing yet.</p>
           ) : (
             items.map((n) => (
-              <button key={n.id}
-                onClick={() => { setOpen(false); if (n.article_id) router.push(`/online/articles/${n.article_id}`); }}
-                className="block w-full border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/60 dark:border-white/[0.06] dark:hover:bg-white/[0.04]">
+              <button key={n.id} type="button"
+                onClick={() => {
+                  setOpen(false);
+                  if (canOpenArticles && n.article_id) router.push(`/online/articles/${n.article_id}`);
+                }}
+                className={`block w-full border-b border-line px-4 py-3 text-left transition last:border-0 dark:border-white/[0.06] ${
+                  canOpenArticles && n.article_id
+                    ? "hover:bg-panel/60 dark:hover:bg-white/[0.04]"
+                    : "cursor-default"}`}>
                 <div className="flex items-start gap-2">
                   <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${TONE[n.kind] ?? TONE.submitted}`}>
                     {n.kind.replace(/_/g, " ")}
