@@ -35,14 +35,32 @@ export function exportPDF({ title, headers, rows }: ExportTable) {
   */
   const W = 842, H = 595, M = 28;            // A4 landscape, points
   const cols = headers.length;
-  const colW = (W - M * 2) / cols;
+  /* Equal-width columns are why names ran into the next column: a 35-character
+     product name and a 4-character quantity were given the same space. Width
+     is allocated by the widest actual value in each column, with a floor so a
+     narrow column still fits its header. */
+  const GAP = 6;                                   // points kept clear between columns
+  const widest = headers.map((h, ci) =>
+    Math.max(String(h).length,
+      ...rows.map((r) => String(cell(r[ci])).length), 3));
+  const totalChars = widest.reduce((a, b) => a + b, 0);
+  const usable = W - M * 2 - GAP * (cols - 1);
+  const colWs = widest.map((c) => Math.max(28, (c / totalChars) * usable));
+  const scale = usable / colWs.reduce((a, b) => a + b, 0);
+  const finalW = colWs.map((w) => w * scale);
+  const colX = finalW.reduce<number[]>((acc, w, i) => {
+    acc.push(i === 0 ? M : acc[i - 1] + finalW[i - 1] + GAP);
+    return acc;
+  }, []);
   const esc = (t: string) => String(t ?? "")
     .replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")
     .replace(/[^\x20-\x7E]/g, "");          // PDF base fonts are Latin-1 only
+  /* Helvetica averages ~0.5em per character; 0.52 leaves a little slack so a
+     run of wide letters still cannot spill past the column. */
   const clip = (t: string, w: number, size: number) => {
-    const max = Math.floor(w / (size * 0.5));
+    const max = Math.max(1, Math.floor(w / (size * 0.52)));
     const v = String(t ?? "");
-    return v.length > max ? v.slice(0, Math.max(1, max - 1)) + "-" : v;
+    return v.length > max ? v.slice(0, max - 1) + "\u2026".replace("\u2026", ".") : v;
   };
 
   const perPage = Math.floor((H - M * 2 - 34) / 13);
@@ -57,14 +75,14 @@ export function exportPDF({ title, headers, rows }: ExportTable) {
     t += `BT /F1 8 Tf ${M} ${y} Td (${esc(new Date().toLocaleString())} - page ${pi + 1} of ${pages.length} - ${rows.length} row(s)) Tj ET\n`;
     y -= 16;
     headers.forEach((h, ci) => {
-      t += `BT /F2 8 Tf ${M + ci * colW} ${y} Td (${esc(clip(h.toUpperCase(), colW, 8))}) Tj ET\n`;
+      t += `BT /F2 8 Tf ${colX[ci]} ${y} Td (${esc(clip(h.toUpperCase(), finalW[ci], 8))}) Tj ET\n`;
     });
     y -= 4;
     t += `${M} ${y} m ${W - M} ${y} l 0.6 w S\n`;
     y -= 11;
     pageRows.forEach((r) => {
       r.forEach((v, ci) => {
-        t += `BT /F1 8 Tf ${M + ci * colW} ${y} Td (${esc(clip(cell(v), colW, 8))}) Tj ET\n`;
+        t += `BT /F1 8 Tf ${colX[ci]} ${y} Td (${esc(clip(cell(v), finalW[ci], 8))}) Tj ET\n`;
       });
       y -= 13;
     });

@@ -180,12 +180,12 @@ function WarehouseInner({ section }: { section: Tab }) {
     const list = items.filter((i) => (!cat || i.category === cat)
       && hit(i.barcode, i.name, i.category, i.raw_material_reference)
       && (tab === "materials" || inRange(i.last_updated)));
-    /* Stock is read to answer "what do we have" — so what we have most of
-       goes first. The product list stays alphabetical, because that is
-       read to find one specific thing. */
-    return tab === "stock"
-      ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
-      : list;
+    /* Highest quantity first, everywhere. The question this screen answers is
+       "what do we have" — so what there is most of belongs at the top, and
+       the long tail of zeros belongs at the bottom. Ties fall back to name so
+       the order is stable between loads. */
+    return [...list].sort((a, b) =>
+      Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name));
   }, [items, q, cat, tab, days, dFrom, dTo]);
   /* The last invoice this branch was given, and what should follow it.
      Purely numeric numbers get a suggestion; anything else is left alone
@@ -393,8 +393,19 @@ function WarehouseInner({ section }: { section: Tab }) {
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
     ? { title: `final-inventory-${tab}`,
-        headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
-        rows: fItems.map((i) => [i.barcode, i.name, i.category ?? "", i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
+        headers: ["Barcode", "Manual", "Item", "Category", "Qty", "Cost", "Retail",
+                  "GST", "Cost total", "Retail total", "Last moved"],
+        /* The export must carry what the screen carries — a PDF missing the
+           money columns is a different report wearing the same name. */
+        rows: fItems.map((i) => {
+          const m = money[i.barcode];
+          return [i.barcode, m?.manual ?? "", i.name, i.category ?? "", i.quantity,
+            m?.cost ?? "", m?.retail ?? "",
+            m?.gst == null ? "" : `${m.gst}%`,
+            m?.cost == null ? "" : i.quantity * m.cost,
+            m?.retail == null ? "" : i.quantity * m.retail,
+            i.last_updated ? when(i.last_updated) : ""];
+        }) }
     : { title: `final-inventory-${tab}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
