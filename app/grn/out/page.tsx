@@ -42,7 +42,8 @@ export default function GrnOutPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
-  const [days, setDays] = useState<number | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   const [open, setOpen] = useState(false);
   const [pick, setPick] = useState("");
@@ -76,17 +77,15 @@ export default function GrnOutPage() {
 
   const view = useMemo(() => rows.filter((r) => {
     if (r.kind !== kind) return false;
-    if (false) {
-      const edge = new Date(); edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(String(r.moved_at).slice(0, 10)) < edge) return false;
-    }
+    const day = String(r.moved_at).slice(0, 10);
+    if (from && day < from) return false;
+    if (to && day > to) return false;
     if (q.trim()) {
       const t = q.trim().toLowerCase();
       return [r.out_number, r.what, r.code, r.went_to].some((x) => String(x ?? "").toLowerCase().includes(t));
     }
     return true;
-  }), [rows, kind, q, days]);
+  }), [rows, kind, q, from, to]);
 
   /* Only what this division actually holds — offering cloth on the sticker
      tab would be refused by the database anyway, and look broken here. */
@@ -146,6 +145,11 @@ export default function GrnOutPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
+          <span className="text-[12px] text-hint">to</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search GRO, material, destination…"
             className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>

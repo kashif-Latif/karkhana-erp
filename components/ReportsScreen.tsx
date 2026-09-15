@@ -94,11 +94,6 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     const raw = r[dateKey];
     if (raw) {
       const day = String(raw).slice(0, 10);
-      if (false) {
-        const edge = new Date(); edge.setHours(0, 0, 0, 0);
-        edge.setDate(edge.getDate() - weeks * 7);
-        if (new Date(day) < edge) return false;
-      }
       if (from && day < from) return false;
       if (to && day > to) return false;
     }

@@ -81,11 +81,6 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
   const view = useMemo(() => rows.filter((r) => {
     if (r.from_side !== fixed) return false;
     const day = String(r.moved_at).slice(0, 10);
-    if (false) {
-      const edge = new Date(); edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(day) < edge) return false;
-    }
     if (from && day < from) return false;
     if (to && day > to) return false;
     if (q.trim()) {

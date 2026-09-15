@@ -181,11 +181,6 @@ function GrnInner() {
     if (r.kind !== kind) return false;
     if (cat !== "all" && !String(r.categories ?? "").split(" · ").includes(cat)) return false;
     const day = String(r.received_at).slice(0, 10);
-    if (false) {
-      const edge = new Date(); edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(day) < edge) return false;
-    }
     if (from && day < from) return false;
     if (to && day > to) return false;
     if (q.trim()) {

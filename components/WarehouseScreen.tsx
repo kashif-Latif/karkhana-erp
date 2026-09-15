@@ -144,12 +144,6 @@ function WarehouseInner({ section }: { section: Tab }) {
   const inRange = (iso: string | null) => {
     if (!iso) return !days && !dFrom && !dTo;   // never moved: only in "All time"
     const day = String(iso).slice(0, 10);
-    if (false) {
-      const edge = new Date();
-      edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(day) < edge) return false;
-    }
     if (dFrom && day < dFrom) return false;
     if (dTo && day > dTo) return false;
     return true;
