@@ -392,21 +392,24 @@ function WarehouseInner({ section }: { section: Tab }) {
   }
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
-    ? { title: `final-inventory-${tab}`,
-        headers: ["Barcode", "Manual", "Item", "Category", "Qty", "Cost", "Retail",
-                  "GST", "Cost total", "Retail total", "Last moved"],
+    ? { title: "Warehouse Inventory",
+        headers: ["Item code", "Barcode", "Item description", "Catgry", "Qty",
+                  "Cost", "Retail", "GST%", "Cost total", "Retail total", "Last moved"],
         /* The export must carry what the screen carries — a PDF missing the
            money columns is a different report wearing the same name. */
         rows: fItems.map((i) => {
           const m = money[i.barcode];
-          return [i.barcode, m?.manual ?? "", i.name, i.category ?? "", i.quantity,
-            m?.cost ?? "", m?.retail ?? "",
-            m?.gst == null ? "" : `${m.gst}%`,
-            m?.cost == null ? "" : i.quantity * m.cost,
-            m?.retail == null ? "" : i.quantity * m.retail,
+          /* Blank, not zero, where there is nothing. A printed 0 reads as a
+             figure somebody measured; an empty cell reads as "none". */
+          const blank = (v: number | null | undefined) => (v ? v : "");
+          return [i.barcode, m?.manual ?? "", i.name, i.category ?? "",
+            blank(i.quantity), blank(m?.cost), blank(m?.retail),
+            m?.gst ? `${m.gst}%` : "",
+            blank(m?.cost == null ? null : i.quantity * m.cost),
+            blank(m?.retail == null ? null : i.quantity * m.retail),
             i.last_updated ? when(i.last_updated) : ""];
         }) }
-    : { title: `final-inventory-${tab}`,
+    : { title: `Warehouse ${tab === "in" ? "New GRN" : tab === "out" ? "GR out" : "Movements"}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
           m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
@@ -421,7 +424,7 @@ function WarehouseInner({ section }: { section: Tab }) {
       <Topbar
         title={section === "in" ? "Warehouse — New GRN"
              : section === "out" ? "Warehouse — Out GRN"
-             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Inventory"}
+             : section === "stock" ? "Warehouse — Stock" : "Warehouse Inventory"}
         subtitle={section === "in" ? "Goods arriving, by barcode"
                 : section === "out" ? "Goods leaving to parties and branches"
                 : section === "stock" ? "What is held right now" : "Everything this warehouse carries"} />
@@ -629,10 +632,10 @@ function WarehouseInner({ section }: { section: Tab }) {
                         {money[i.barcode]?.gst == null ? "—" : `${money[i.barcode]!.gst}%`}
                       </td>
                       <td className="px-4 py-2.5 text-right tnum text-muted">
-                        {money[i.barcode]?.cost == null ? "—" : rs(i.quantity * money[i.barcode]!.cost!)}
+                        {!money[i.barcode]?.cost || !i.quantity ? "—" : rs(i.quantity * money[i.barcode]!.cost!)}
                       </td>
                       <td className="px-4 py-2.5 text-right tnum font-bold text-ink">
-                        {money[i.barcode]?.retail == null ? "—" : rs(i.quantity * money[i.barcode]!.retail!)}
+                        {!money[i.barcode]?.retail || !i.quantity ? "—" : rs(i.quantity * money[i.barcode]!.retail!)}
                       </td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">
                         {i.last_updated ? when(i.last_updated) : "—"}
