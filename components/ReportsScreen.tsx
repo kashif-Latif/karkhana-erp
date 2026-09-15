@@ -106,43 +106,61 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
 
   /* Columns per report — named, so an export means the same thing as the
      screen rather than dumping whatever the view happened to return. */
+  /* ONE column set, everywhere. Code · manual code · item · category ·
+     quantity · cost · retail · cost total · retail total · GST.
+     Reports that genuinely lack a field show a dash rather than a different
+     shape — so a person reading two reports side by side is comparing the
+     same columns, not learning a new layout each time. */
+  const MONEY = [
+    { k: "cost_price", h: "Cost", align: "r" as const, fmt: rs },
+    { k: "retail_price", h: "Retail", align: "r" as const, fmt: rs },
+    { k: "cost_total", h: "Cost total", align: "r" as const, fmt: rs },
+    { k: "retail_total", h: "Retail total", align: "r" as const, fmt: rs },
+    { k: "gst_amount", h: "GST", align: "r" as const, fmt: rs },
+  ];
+  const IDENT = [
+    { k: "system_code", h: "Code" },
+    { k: "manual_code", h: "Manual" },
+    { k: "item_name", h: "Item" },
+    { k: "section", h: "Cat" },
+  ];
+
   const COLS: Record<Rep, { k: string; h: string; align?: "r"; fmt?: (v: unknown) => string }[]> = {
     grn: side === "factory"
-      ? [{ k: "grn_number", h: "GRN" }, { k: "kind", h: "Division" },
-         { k: "categories", h: "Category" }, { k: "supplier", h: "Supplier" },
-         { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "total", h: "Value", align: "r", fmt: rs },
+      ? [{ k: "grn_number", h: "GRN" }, { k: "categories", h: "Category" },
+         { k: "supplier", h: "Supplier" },
+         { k: "quantity", h: "Qty", align: "r", fmt: n },
+         { k: "total", h: "Value", align: "r", fmt: rs },
          { k: "received_at", h: "Received", fmt: when }]
-      : [{ k: "movement_no", h: "Movement" }, { k: "barcode", h: "Barcode" }, { k: "name", h: "Product" },
-         { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "created_at", h: "Received", fmt: when }],
+      : [{ k: "movement_no", h: "GRN" }, { k: "barcode", h: "Code" },
+         { k: "name", h: "Item" }, { k: "quantity", h: "Qty", align: "r", fmt: n },
+         { k: "created_at", h: "Received", fmt: when }],
     grout: side === "factory"
-      ? [{ k: "out_number", h: "GRO" }, { k: "kind", h: "Division" }, { k: "what", h: "What" },
-         { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "went_to", h: "Went to" },
-         { k: "moved_at", h: "Date", fmt: when }]
-      : [{ k: "movement_no", h: "Movement" }, { k: "barcode", h: "Barcode" }, { k: "name", h: "Product" },
-         { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "party", h: "Party" },
-         { k: "created_at", h: "Date", fmt: when }],
-    str: [{ k: "str_number", h: "STR" }, { k: "barcode", h: "Barcode" }, { k: "product", h: "Product" },
-          { k: "quantity", h: "Quantity", align: "r", fmt: n }, { k: "destination", h: "Destination" },
-          { k: "moved_at", h: "Date", fmt: when }],
-    low: [{ k: "material", h: "Material" }, { k: "category", h: "Category" }, { k: "division", h: "Division" },
-          { k: "in_stock", h: "In stock", align: "r", fmt: n }, { k: "min_quantity", h: "Minimum", align: "r", fmt: n },
+      ? [{ k: "out_number", h: "GRO" }, { k: "kind", h: "Division" },
+         { k: "what", h: "Item" }, { k: "quantity", h: "Qty", align: "r", fmt: n },
+         { k: "went_to", h: "Went to" }, { k: "moved_at", h: "Date", fmt: when }]
+      : [{ k: "movement_no", h: "GRO" }, { k: "barcode", h: "Code" },
+         { k: "name", h: "Item" }, { k: "quantity", h: "Qty", align: "r", fmt: n },
+         { k: "party", h: "Party" }, { k: "created_at", h: "Date", fmt: when }],
+    str: [{ k: "str_number", h: "STR" }, { k: "barcode", h: "Code" },
+          { k: "product", h: "Item" }, { k: "section", h: "Cat" },
+          { k: "quantity", h: "Qty", align: "r", fmt: n },
+          { k: "destination", h: "Destination" }, { k: "moved_at", h: "Date", fmt: when }],
+    low: [{ k: "code", h: "Code" }, { k: "material", h: "Item" },
+          { k: "category", h: "Cat" }, { k: "division", h: "Division" },
+          { k: "in_stock", h: "In stock", align: "r", fmt: n },
+          { k: "min_quantity", h: "Minimum", align: "r", fmt: n },
           { k: "unit", h: "Unit" }],
     stock: side === "factory"
-      ? [{ k: "system_code", h: "Code" }, { k: "material", h: "Item" },
-         { k: "category", h: "Category" }, { k: "in_stock", h: "Qty", align: "r", fmt: n },
+      ? [{ k: "code", h: "Code" }, { k: "material", h: "Item" },
+         { k: "category", h: "Cat" }, { k: "in_stock", h: "Qty", align: "r", fmt: n },
          { k: "unit", h: "Unit" }, { k: "last_rate", h: "Cost", align: "r", fmt: rs },
          { k: "stock_value", h: "Cost total", align: "r", fmt: rs },
          { k: "last_supplier", h: "Supplier" }]
-      : [{ k: "system_code", h: "Code" }, { k: "manual_code", h: "Manual" },
-         { k: "item_name", h: "Item" }, { k: "section", h: "Cat" },
-         { k: "quantity", h: "Qty", align: "r", fmt: n },
-         { k: "cost_price", h: "Cost", align: "r", fmt: rs },
-         { k: "retail_price", h: "Retail", align: "r", fmt: rs },
-         { k: "cost_total", h: "Cost total", align: "r", fmt: rs },
-         { k: "retail_total", h: "Retail total", align: "r", fmt: rs },
-         { k: "gst_amount", h: "GST", align: "r", fmt: rs }],
-    blocked: [{ k: "kind", h: "Type" }, { k: "code", h: "Code" }, { k: "name", h: "Name" },
-              { k: "barcode", h: "Barcode" }, { k: "division", h: "Belongs to" },
+      : [...IDENT, { k: "quantity", h: "Qty", align: "r" as const, fmt: n }, ...MONEY],
+    blocked: [{ k: "kind", h: "Type" }, { k: "code", h: "Code" },
+              { k: "name", h: "Item" }, { k: "barcode", h: "Barcode" },
+              { k: "division", h: "Belongs to" },
               { k: "updated_at", h: "Blocked", fmt: when }],
   };
   const cols = COLS[rep];
@@ -225,6 +243,8 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
                 ))}
               </tr></thead>
               <tbody>
+                {/* Totals only for the columns that are money — a total under
+                    a date or a code would be noise. */}
                 {view.map((r, ix) => (
                   <tr key={ix}
                     onClick={() => {
@@ -242,6 +262,21 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
                   </tr>
                 ))}
               </tbody>
+              {cols.some((c) => c.fmt === rs || c.fmt === n) && (
+                <tfoot>
+                  <tr className="border-t-2 border-line bg-panel/40 text-[13px] font-extrabold text-ink">
+                    {cols.map((c, ci) => (
+                      <td key={c.k} className={`px-4 py-3 ${c.align === "r" ? "text-right tnum" : ""}`}>
+                        {ci === 0
+                          ? `Total — ${view.length} row(s)`
+                          : (c.fmt === rs || c.fmt === n)
+                            ? c.fmt(view.reduce((a, r) => a + Number(r[c.k] ?? 0), 0))
+                            : ""}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
+              )}
             </table></div>
           </div>
         )}
