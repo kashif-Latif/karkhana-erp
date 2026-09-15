@@ -19,18 +19,17 @@ import { useLiveTables } from "@/lib/useLiveTables";
    Pending returns is deliberately oldest-first: couriers stop honouring claims
    after a while, so the row most likely to cost money is the one at the top. */
 
-type Section = "pending_returns" | "closed_returns" | "delivered_unpaid";
+type Section = "pending_returns" | "closed_returns" | "all_returns";
 
 const TABS: { key: Section; label: string; hint: string }[] = [
-  { key: "pending_returns",  label: "Pending returns",   hint: "Still needs chasing — not confirmed received, and not yet cancelled in Shopify. Newest first; the AGE column flags the ones going stale." },
-  /* A CLOSED RETURN HAD NOWHERE TO LIVE.
-     Pending filters needs_chasing, and a return closed by the nightly job or by
-     a settlement no longer needs chasing. The other tab is delivered parcels.
-     So a real parcel — #4715, returned in May 2025, closed correctly — could not
-     be seen anywhere in this screen, and searching for it said "Nothing here."
-     which reads as "this does not exist". */
-  { key: "closed_returns",   label: "Closed returns",   hint: "Came back and no longer being chased — received, settled by a CPR, or closed automatically after nine days. The reason is on each row." },
-  { key: "delivered_unpaid", label: "Returns Delivered", hint: "Delivered to the customer, but the COD has not reached you. This is the receivable." },
+  /* THREE STATES OF A RETURN, AND NOTHING ELSE.
+     "Returns Delivered" used to sit here — parcels delivered to the customer
+     with the COD still owing. That is a receivable, not a return, and it lives
+     on Finance where the rest of the money is. Keeping it here meant one screen
+     answered two unrelated questions and neither cleanly. */
+  { key: "pending_returns", label: "Pending",   hint: "Came back and is still ours to chase — nobody has confirmed the box, and the order is not cancelled in Shopify." },
+  { key: "closed_returns",  label: "Cancelled", hint: "Settled one way or another — received on the shelf, cancelled in Shopify, covered by a CPR, or aged out. The reason is on each row." },
+  { key: "all_returns",     label: "All",       hint: "Every return, pending and cancelled together." },
 ];
 
 type ReturnRow = {
@@ -59,7 +58,6 @@ const PAGE = 500;
 export default function ReturnsPage() {
   const [tab, setTab] = useState<Section>("pending_returns");
   // Which tab a search moved us to, so the jump is explained rather than silent.
-  const [jumped, setJumped] = useState("");
   /* HOW OFTEN EACH COURIER BRINGS PARCELS BACK.
      The list said which parcels came back; nothing said whether that was
      normal. OwnEx ran at 14.5% in June, 25.2% in July and 14.9% in August —
@@ -98,8 +96,10 @@ export default function ReturnsPage() {
     setErr("");
     const [from, to] = rangeDates(preset, cf, ct);
 
-    const view = tab === "delivered_unpaid" ? "v_delivered_unpaid" : "v_returns_all";  // closed returns come from the same view, filtered below
-    const dateCol = tab === "delivered_unpaid" ? "delivery_date" : "return_date";
+    /* All three tabs are the same view now — they differ only by the
+       needs_chasing filter applied below, and All applies none. */
+    const view = "v_returns_all";
+    const dateCol = "return_date";
     /* OLDEST FIRST, on both tabs.
        A chase list is worked from the top, and the oldest parcel is the one
        closest to being written off — so it should be the first thing seen, not
@@ -119,42 +119,12 @@ export default function ReturnsPage() {
     let rq = supabase.from(view).select("*")
       .order(dateCol, { ascending, nullsFirst: false })
       .limit(PAGE);
-    /* A SEARCH ASKS POSTGRES, NOT THE PAGE.
-       Even with .or() the query is still capped at 1,000 rows and still bound
-       to one tab. hub_find_return searches the whole table — tracking number,
-       order number, customer, phone — across every store, any date, any state,
-       and says which state each result is in.
+    /* A SEARCH NARROWS THE TAB YOU ARE IN.
+       An earlier version searched every tab at once and moved you to whichever
+       one held the match. It found parcels, but it also meant clicking Pending
+       could throw you straight back to Cancelled — the page overriding the
+       person. The tab is the question; the search is a filter on the answer. */
 
-       The tracking number is matched exactly first, because it is the only
-       identifier a courier issues rather than a person types. */
-    if (term) {
-      const { data: found, error: fe } = await supabase.rpc("hub_find_return", { p_q: term });
-      setLoading(false);
-      if (fe) { setErr(fe.message); return; }
-      const hits = (found as unknown as ReturnRow[]) ?? [];
-      setRows(hits as unknown as (ReturnRow | UnpaidRow)[]);
-
-      /* A RESULT BELONGS IN THE TAB THAT DESCRIBES IT.
-         This returned before the tab logic below ever ran, so a cancelled
-         parcel appeared under a heading that says "still needs chasing" and a
-         parcel genuinely being chased could turn up under "closed". The tab a
-         row is shown in is a claim about that row, and it has to be true.
-
-         Where every hit belongs elsewhere, move there and say so. Where they
-         are split across tabs, stay put — no single tab would be honest, and
-         each row carries its own stage. */
-      if (hits.length) {
-        const chasing = hits.filter((h) => h.needs_chasing === true).length;
-        const closed  = hits.length - chasing;
-        /* setTab re-runs this search, because tab is a dependency of load. The
-           second pass finds the same rows, the tab already matches, and it
-           settles — so the message must survive that pass rather than being
-           cleared by it. */
-        if (tab === "pending_returns" && chasing === 0) { setJumped("Closed returns");  setTab("closed_returns"); }
-        else if (tab === "closed_returns" && closed === 0) { setJumped("Pending returns"); setTab("pending_returns"); }
-      } else setJumped("");
-      return;
-    }
     // the same flag hub_returns_sections() counts, so the card and the list can
     // never disagree — a return acknowledged by cancelling in Shopify drops out
     /* A SEARCH LOOKS EVERYWHERE, NOT JUST IN THIS TAB.
@@ -162,14 +132,24 @@ export default function ReturnsPage() {
        whichever tab happened to be open is how #4715 — a real, correctly closed
        return — produced "Nothing here." on both tabs in turn. With a term, the
        chase filter comes off and the row is shown with its own status. */
-    if (!term) {
-      if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
-      if (tab === "closed_returns")  rq = rq.eq("needs_chasing", false);
-    }
-    // A search ignores the date window, for the same reason as Orders.
+    /* THE TAB ALWAYS WINS, SEARCH OR NO SEARCH.
+       Searching used to drop this filter so a parcel could be found from any
+       tab. It meant typing an order number in Pending returned a cancelled
+       parcel, and clicking Pending afterwards threw you back — the page argued
+       with the person using it.
+
+       A tab is a claim about the rows beneath it. Search narrows within that
+       claim; it does not break it. Nothing found here means nothing in THIS
+       state matches, which is a real answer — the All tab is one click away. */
+    if (tab === "pending_returns") rq = rq.eq("needs_chasing", true);
+    if (tab === "closed_returns")  rq = rq.eq("needs_chasing", false);
+    // A search ignores the date window: you are asking for a parcel, not a period.
     if (!term) {
       if (from) rq = rq.gte(dateCol, from);
       if (to) rq = rq.lte(dateCol, to);
+    } else {
+      const bare = term.replace(/#/g, "");
+      rq = rq.or(`order_number.ilike.%${bare}%,tracking_id.ilike.%${bare}%,customer_name.ilike.%${term}%`);
     }
     if (store !== "ALL") rq = rq.eq("store_code", store);
     if (courier !== "All couriers") rq = rq.eq("courier", courier);
@@ -190,21 +170,7 @@ export default function ReturnsPage() {
     // figuresOnly refreshes the counts and leaves the list alone
     if (!opts?.figuresOnly) setRows((r.data as (ReturnRow | UnpaidRow)[]) ?? []);
 
-    /* A SEARCH GOES TO THE TAB THE PARCEL IS ACTUALLY IN.
-       Searching across tabs stopped "Nothing here." for a parcel that exists,
-       but it then displayed a received return underneath a heading that says
-       "still needs chasing" — which is its own kind of wrong answer. If every
-       match belongs somewhere else, move there rather than describing it. */
-    if (!term) setJumped("");
-    if (term && !opts?.figuresOnly && tab !== "delivered_unpaid") {
-      const found = (r.data as ReturnRow[]) ?? [];
-      if (found.length) {
-        const allClosed  = found.every((x) => x.needs_chasing === false);
-        const allChasing = found.every((x) => x.needs_chasing === true);
-        if (tab === "pending_returns" && allClosed)  { setJumped("Closed returns");  setTab("closed_returns"); }
-        if (tab === "closed_returns"  && allChasing) { setJumped("Pending returns"); setTab("pending_returns"); }
-      }
-    }
+
     setCounts((c.data as SectionCount[]) ?? []);
     setLoading(false);
   }, [tab, preset, cf, ct, store, courier, q]);
@@ -222,7 +188,7 @@ export default function ReturnsPage() {
   const closedValue = Math.max(0, (find("all_returns")?.value ?? 0) - (find("pending_returns")?.value ?? 0));
 
   const cards = [
-    { key: "pending_returns" as Section, label: "Pending returns", Icon: Undo2, bg: "bg-amber-soft",
+    { key: "pending_returns" as Section, label: "Pending", Icon: Undo2, bg: "bg-amber-soft",
       n: find("pending_returns")?.n ?? 0, v: find("pending_returns")?.value ?? 0,
       sub: find("pending_returns")?.oldest_days ? `oldest ${find("pending_returns")?.oldest_days}d` : undefined },
     /* THE CLOSED TAB HAD NO CARD.
@@ -234,11 +200,13 @@ export default function ReturnsPage() {
 
        The count comes from the same figures the RPC already returns: everything
        that came back, less what is still chased. */
-    { key: "closed_returns" as Section, label: "Closed returns", Icon: PackageCheck, bg: "bg-periwinkle-soft",
+    { key: "closed_returns" as Section, label: "Cancelled", Icon: PackageCheck, bg: "bg-periwinkle-soft",
       n: closedCount, v: closedValue, sub: "no longer chased" },
-    { key: "delivered_unpaid" as Section, label: "Returns Delivered", Icon: Wallet, bg: "bg-success-soft",
-      n: find("delivered_unpaid")?.n ?? 0, v: find("delivered_unpaid")?.value ?? 0,
-      sub: find("delivered_unpaid")?.oldest_days ? `oldest ${find("delivered_unpaid")?.oldest_days}d` : undefined },
+    /* All = pending + cancelled. Counted from the same RPC as the other two, so
+       the three cards can never disagree about how many returns exist. */
+    { key: "all_returns" as Section, label: "All returns", Icon: Wallet, bg: "bg-success-soft",
+      n: find("all_returns")?.n ?? 0, v: find("all_returns")?.value ?? 0,
+      sub: "pending and cancelled" },
   ];
 
   const filtered = useMemo(() => {
@@ -250,7 +218,8 @@ export default function ReturnsPage() {
       String(r.customer_name ?? "").toLowerCase().includes(n));
   }, [rows, q]);
 
-  const isReturns = tab !== "delivered_unpaid";
+  // Every tab is a returns tab now; the receivable moved to Finance.
+  const isReturns = true;
 
   /* A courier saying "returned" is not the same as the parcel being on your
      shelf, so nothing marks itself received — a person has to confirm they are
