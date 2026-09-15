@@ -66,7 +66,7 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
     else if (rep === "low") d = await pick("v_low_stock", "headroom");
     else if (rep === "stock") d = side === "factory"
       ? await pick("v_stock_split", "material")
-      : await pick("v_khana_stock", "name");
+      : await pick("v_warehouse_report", "item_name");
     else d = await pick("v_blocked_items", "updated_at");
     setRows(d); setLoading(false);
   }, [rep, side]);
@@ -128,13 +128,19 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
           { k: "in_stock", h: "In stock", align: "r", fmt: n }, { k: "min_quantity", h: "Minimum", align: "r", fmt: n },
           { k: "unit", h: "Unit" }],
     stock: side === "factory"
-      ? [{ k: "material", h: "Material" }, { k: "category", h: "Category" },
-         { k: "division", h: "Division" }, { k: "in_stock", h: "In stock", align: "r", fmt: n },
-         { k: "unit", h: "Unit" }, { k: "last_rate", h: "Rate", align: "r", fmt: rs },
-         { k: "stock_value", h: "Value", align: "r", fmt: rs },
+      ? [{ k: "system_code", h: "Code" }, { k: "material", h: "Item" },
+         { k: "category", h: "Category" }, { k: "in_stock", h: "Qty", align: "r", fmt: n },
+         { k: "unit", h: "Unit" }, { k: "last_rate", h: "Cost", align: "r", fmt: rs },
+         { k: "stock_value", h: "Cost total", align: "r", fmt: rs },
          { k: "last_supplier", h: "Supplier" }]
-      : [{ k: "barcode", h: "Barcode" }, { k: "name", h: "Product" },
-         { k: "category", h: "Category" }, { k: "quantity", h: "In stock", align: "r", fmt: n }],
+      : [{ k: "system_code", h: "Code" }, { k: "manual_code", h: "Manual" },
+         { k: "item_name", h: "Item" }, { k: "section", h: "Cat" },
+         { k: "quantity", h: "Qty", align: "r", fmt: n },
+         { k: "cost_price", h: "Cost", align: "r", fmt: rs },
+         { k: "retail_price", h: "Retail", align: "r", fmt: rs },
+         { k: "cost_total", h: "Cost total", align: "r", fmt: rs },
+         { k: "retail_total", h: "Retail total", align: "r", fmt: rs },
+         { k: "gst_amount", h: "GST", align: "r", fmt: rs }],
     blocked: [{ k: "kind", h: "Type" }, { k: "code", h: "Code" }, { k: "name", h: "Name" },
               { k: "barcode", h: "Barcode" }, { k: "division", h: "Belongs to" },
               { k: "updated_at", h: "Blocked", fmt: when }],
