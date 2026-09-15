@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 
-import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Item = { item_id: string; barcode: string; name: string; description: string | null;
               raw_material_reference: string | null; category: string | null; is_active: boolean;
@@ -475,6 +475,7 @@ function WarehouseInner({ section }: { section: Tab }) {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           {(tab === "in" || tab === "out") && voidedCount > 0 && (
             <button onClick={() => setShowVoided((v) => !v)}
               className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>

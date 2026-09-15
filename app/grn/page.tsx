@@ -13,10 +13,10 @@
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Boxes, Layers, PackageCheck, Download, Plus } from "lucide-react";
+import { Boxes, Layers, PackageCheck, Download, Plus , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Grn = { id: string; grn_number: string; kind: string; received_at: string;
              total: number | null; note: string | null; status: string | null;
@@ -247,6 +247,7 @@ function GrnInner() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           <Link href={`/inventory/receive?kind=${kind}`}
             className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white">
             <Plus size={15} /> New {current.label} GRN

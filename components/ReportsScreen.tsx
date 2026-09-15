@@ -11,10 +11,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { FileBarChart, Download, AlertTriangle, Ban } from "lucide-react";
+import { FileBarChart, Download, AlertTriangle, Ban , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Side = "factory" | "warehouse";
 type Rep = "grn" | "grout" | "str" | "low" | "blocked" | "stock";
@@ -194,6 +194,7 @@ export default function ReportsScreen({ side, report }: { side: Side; report: Re
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           <span className="ml-auto text-[12.5px] text-muted">{view.length} rows</span>
         </div>
 

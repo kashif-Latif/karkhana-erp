@@ -11,10 +11,10 @@
  * imply they are the same kind of thing.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Boxes, PackageCheck, Download } from "lucide-react";
+import { Layers, Boxes, PackageCheck, Download , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Mat = { item_id: string; code: string; division: string; material: string;
              category: string | null; colour: string | null; size: string | null;
@@ -128,6 +128,7 @@ export default function StockPage() {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           <span className="ml-auto text-[12.5px] text-muted">
             {kind === "finished"
               ? `${n(totalUnits)} pieces`

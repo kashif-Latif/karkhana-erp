@@ -10,12 +10,12 @@
  * cannot drift apart and nobody retypes anything.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight, Download, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Download, Loader2, Plus, Trash2 , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Row = { id: string; str_number: string; from_side: string; to_side: string;
              destination: string | null; note: string | null; moved_at: string;
@@ -173,6 +173,7 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           {((fixed === "factory" && canFactory) || (fixed === "warehouse" && canWarehouse)) && (
             <button onClick={() => openForm(fixed)}
               className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white">

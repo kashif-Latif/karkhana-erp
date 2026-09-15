@@ -8,10 +8,10 @@
  * Drawn as plain SVG: no charting library, nothing to load, and it prints.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PieChart, Download } from "lucide-react";
+import { PieChart, Download , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Row = { str_number: string; product: string | null; barcode: string | null;
              quantity: number; moved_at: string; from_side: string; destination: string | null };
@@ -88,6 +88,7 @@ export default function GraphReport({ side }: { side: "factory" | "warehouse" })
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
         </div>
 
         {loading && <p className="text-[13px] text-hint">Loading…</p>}
