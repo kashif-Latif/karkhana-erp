@@ -230,18 +230,34 @@ function WarehouseInner({ section }: { section: Tab }) {
     setFound(it); setMErr("");
   }
 
+  const [newSection, setNewSection] = useState("");
+  const [newCost, setNewCost] = useState("");
+  const [newRetail, setNewRetail] = useState("");
+  const [newGst, setNewGst] = useState("");
+  const [newQty, setNewQty] = useState("");
+  const [madeCode, setMadeCode] = useState<string | null>(null);
+
   async function addItem() {
     if (!supabase) return;
     setErr("");
-    if (!bc.trim() || !nm.trim()) { setErr("Barcode and name are both needed."); return; }
+    if (!nm.trim()) { setErr("Give the product a name."); return; }
+    if (!newSection) { setErr("Which section does it belong to?"); return; }
     setBusy(true);
-    const { error } = await supabase.from("khana_final_items").insert({
-      barcode: bc.trim(), name: nm.trim(),
-      description: desc.trim() || null, raw_material_reference: rawRef.trim() || null,
+    /* One call makes BOTH halves — the article that generates the barcode and
+       holds the money, and the warehouse product keyed to it. Creating them
+       separately is how products ended up with no code and no price. */
+    const { data, error } = await supabase.rpc("add_warehouse_product", {
+      p_name: nm.trim(), p_section: newSection,
+      p_manual_barcode: bc.trim() || null,
+      p_cost: newCost === "" ? null : parseFloat(newCost),
+      p_retail: newRetail === "" ? null : parseFloat(newRetail),
+      p_gst: newGst === "" ? null : parseFloat(newGst),
+      p_opening_qty: newQty === "" ? 0 : parseFloat(newQty),
     });
     setBusy(false);
-    if (error) { setErr(error.message.includes("duplicate") ? "That barcode already exists." : error.message); return; }
-    setItemOpen(false); setBc(""); setNm(""); setDesc(""); setRawRef(""); load();
+    if (error) { setErr(error.message); return; }
+    setMadeCode(String((data as Record<string, unknown>)?.system_barcode ?? ""));
+    load();
   }
 
   async function record(type: "IN" | "OUT") {
@@ -506,7 +522,7 @@ function WarehouseInner({ section }: { section: Tab }) {
             </button>
           )}
           {tab === "materials" && canManage && (
-            <button onClick={() => setItemOpen(true)} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add material</button>
+            <button onClick={() => setItemOpen(true)} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add product</button>
           )}
         </div>
 
@@ -908,29 +924,69 @@ function WarehouseInner({ section }: { section: Tab }) {
         </div>
       </Modal>
 
-      <Modal open={itemOpen} onClose={() => setItemOpen(false)} title="Add material">
-        <Field label="Barcode *">
-          <input value={bc} onChange={(e) => setBc(e.target.value)} autoFocus
-            placeholder="scan it, or type the item number" className={inp} />
-        </Field>
-        <div className="mt-3"><Field label="Name *">
-          <input value={nm} onChange={(e) => setNm(e.target.value)} placeholder="e.g. FS MEN HOOD ZIP W026" className={inp} />
-        </Field></div>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Field label="Reference (opt)">
-            <input value={rawRef} onChange={(e) => setRawRef(e.target.value)} placeholder="item # / section" className={inp} />
-          </Field>
-          <Field label="Description (opt)">
-            <input value={desc} onChange={(e) => setDesc(e.target.value)} className={inp} />
-          </Field>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setItemOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
-          <button onClick={addItem} disabled={busy}
-            className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
-            {busy && <Loader2 size={15} className="animate-spin" />} Add
-          </button>
-        </div>
+      <Modal open={itemOpen} onClose={() => { setItemOpen(false); setMadeCode(null); }} title="Add product" wide>
+        {madeCode ? (
+          <div className="text-center">
+            <div className="mx-auto max-w-xs rounded-xl2 border border-[#166534]/25 bg-success-soft p-4">
+              <p className="text-[11.5px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
+              <p className="mt-1 font-mono text-[30px] font-extrabold tracking-tight text-ink">{madeCode}</p>
+              {bc.trim() && <p className="mt-1.5 font-mono text-[12.5px] text-ink/70">also {bc.trim()}</p>}
+            </div>
+            <div className="mt-4 flex justify-center gap-2">
+              <button onClick={() => { setBc(""); setNm(""); setNewSection(""); setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(""); setMadeCode(null); }}
+                className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Add another</button>
+              <button onClick={() => { setItemOpen(false); setMadeCode(null); }}
+                className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Field label="Product name *">
+              <input value={nm} autoFocus onChange={(e) => setNm(e.target.value)}
+                placeholder="e.g. FS MEN HOOD ZIP W026" className={inp} />
+            </Field>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Section *">
+                <select value={newSection} onChange={(e) => setNewSection(e.target.value)} className={inp}>
+                  <option value="">Choose…</option>
+                  {[["40","Baby/Newborn"],["41","Kids"],["42","Child"],["43","Ladies"],
+                    ["44","Men"],["60","Shoes"],["61","Accessories"]].map(([v,l]) => (
+                    <option key={v} value={v}>{v} · {l}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Manual barcode">
+                {/* Theirs, if a label already exists. Ours is generated on save
+                    and cannot be typed. */}
+                <input value={bc} onChange={(e) => setBc(e.target.value)}
+                  placeholder="scan it, or leave blank" className={inp} />
+              </Field>
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              <Field label="Cost price"><input type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} className={inp} /></Field>
+              <Field label="Retail price"><input type="number" value={newRetail} onChange={(e) => setNewRetail(e.target.value)} className={inp} /></Field>
+              <Field label="GST %"><input type="number" value={newGst} onChange={(e) => setNewGst(e.target.value)} placeholder="18" className={inp} /></Field>
+              <Field label="Opening qty"><input type="number" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={inp} /></Field>
+            </div>
+            {newCost && newRetail && (
+              <p className="mt-2.5 text-[12.5px] text-ink/70">
+                Margin <b className="text-ink">Rs {(parseFloat(newRetail) - parseFloat(newCost)).toLocaleString()}</b>
+                {newGst ? ` · GST Rs ${(parseFloat(newRetail) * parseFloat(newGst) / 100).toFixed(0)}` : ""}
+              </p>
+            )}
+            <p className="mt-2 text-[12px] text-hint">
+              Barcode is generated on save — {newSection || "??"}-000001 upward, counting inside its own section.
+            </p>
+            {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setItemOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={addItem} disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+                {busy && <Loader2 size={15} className="animate-spin" />} Add product
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
     </>
   );
