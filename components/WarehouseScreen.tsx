@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 
-import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Item = { item_id: string; barcode: string; name: string; description: string | null;
               raw_material_reference: string | null; category: string | null; is_active: boolean;
@@ -36,12 +36,8 @@ type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
-/* Money, written the way every other screen in this system writes it. Used by
-   the cost and retail columns below and never defined, so every deploy failed
-   type-checking — and because the build stops there, nothing else shipped
-   either, however unrelated. */
-const rs = (v: unknown) => "Rs " + Math.round(Number(v) || 0).toLocaleString("en-PK");
 
 function WarehouseInner({ section }: { section: Tab }) {
   const { can } = usePermissions();
@@ -128,6 +124,28 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [sQty, setSQty] = useState("");
   const [sWhy, setSWhy] = useState("");
 
+  /* Cost, retail and GST live on the ARTICLE. A warehouse product and an
+     article are the same thing when they share a barcode — the same join the
+     whole factory→warehouse handover already runs on. */
+  const [money, setMoney] = useState<Record<string, {
+    cost: number | null; retail: number | null; gst: number | null }>>({});
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data } = await supabase!.from("v_warehouse_report")
+        .select("system_code,cost_price,retail_price,gst_rate");
+      const m: Record<string, { cost: number | null; retail: number | null; gst: number | null }> = {};
+      ((data as unknown as Record<string, unknown>[]) ?? []).forEach((r) => {
+        m[String(r.system_code)] = {
+          cost: r.cost_price == null ? null : Number(r.cost_price),
+          retail: r.retail_price == null ? null : Number(r.retail_price),
+          gst: r.gst_rate == null ? null : Number(r.gst_rate),
+        };
+      });
+      setMoney(m);
+    })();
+  }, []);
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -149,12 +167,6 @@ function WarehouseInner({ section }: { section: Tab }) {
   const inRange = (iso: string | null) => {
     if (!iso) return !days && !dFrom && !dTo;   // never moved: only in "All time"
     const day = String(iso).slice(0, 10);
-    if (days !== null) {
-      const edge = new Date();
-      edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(day) < edge) return false;
-    }
     if (dFrom && day < dFrom) return false;
     if (dTo && day > dTo) return false;
     return true;
@@ -379,10 +391,10 @@ function WarehouseInner({ section }: { section: Tab }) {
       <Topbar
         title={section === "in" ? "Warehouse — New GRN"
              : section === "out" ? "Warehouse — Out GRN"
-             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Products"}
+             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Inventory"}
         subtitle={section === "in" ? "Goods arriving, by barcode"
                 : section === "out" ? "Goods leaving to parties and branches"
-                : section === "stock" ? "What is held right now" : "The products this warehouse carries"} />
+                : section === "stock" ? "What is held right now" : "Everything this warehouse carries"} />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
@@ -428,14 +440,6 @@ function WarehouseInner({ section }: { section: Tab }) {
 
         {tab !== "materials" && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {[{ l: "All time", d: null }, { l: "Today", d: 1 }, { l: "2 days", d: 2 },
-              { l: "5 days", d: 5 }, { l: "This week", d: 7 }, { l: "30 days", d: 30 }].map((r) => (
-              <button key={r.l}
-                onClick={() => { setDays(r.d); setDFrom(""); setDTo(""); }}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${days === r.d && !dFrom && !dTo ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-                {r.l}
-              </button>
-            ))}
             <input type="date" value={dFrom} onChange={(e) => { setDFrom(e.target.value); setDays(null); }}
               className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
             <span className="text-[12px] text-hint">to</span>
@@ -494,6 +498,7 @@ function WarehouseInner({ section }: { section: Tab }) {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           {(tab === "in" || tab === "out") && voidedCount > 0 && (
             <button onClick={() => setShowVoided((v) => !v)}
               className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
@@ -522,6 +527,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                   <th className="px-4 py-2.5 font-bold">Barcode</th><th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 font-bold">Category</th>
                   <th className="px-4 py-2.5 text-right font-bold">In stock</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail</th>
+                  <th className="px-4 py-2.5 text-right font-bold">GST</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost total</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail total</th>
                   <th className="px-4 py-2.5 font-bold">Last moved</th>
                 </tr></thead>
                 <tbody>
@@ -570,6 +580,23 @@ function WarehouseInner({ section }: { section: Tab }) {
                           </span>
                         ) : n(i.quantity)}
                       </td>
+                      {/* Blank rather than zero where no price is set — a price
+                          of 0 and no price yet are different facts. */}
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.cost == null ? "—" : rs(money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-semibold text-ink">
+                        {money[i.barcode]?.retail == null ? "—" : rs(money[i.barcode]!.retail!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.gst == null ? "—" : `${money[i.barcode]!.gst}%`}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.cost == null ? "—" : rs(i.quantity * money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-bold text-ink">
+                        {money[i.barcode]?.retail == null ? "—" : rs(i.quantity * money[i.barcode]!.retail!)}
+                      </td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">
                         {i.last_updated ? when(i.last_updated) : "—"}
                         {canManage && (
@@ -599,6 +626,20 @@ function WarehouseInner({ section }: { section: Tab }) {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-line bg-panel/40 text-[13px] font-extrabold text-ink">
+                    <td className="px-4 py-3" colSpan={3}>Total &mdash; {fItems.length} item(s)</td>
+                    <td className="px-4 py-3 text-right tnum">{n(fItems.reduce((a, i) => a + Number(i.quantity || 0), 0))}</td>
+                    <td className="px-4 py-3" colSpan={3}></td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.cost ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.retail ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3"></td>
+                  </tr>
+                </tfoot>
               </table></div>
             </div>
           )
