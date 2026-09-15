@@ -123,6 +123,28 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [sQty, setSQty] = useState("");
   const [sWhy, setSWhy] = useState("");
 
+  /* Cost, retail and GST live on the ARTICLE. A warehouse product and an
+     article are the same thing when they share a barcode — the same join the
+     whole factory→warehouse handover already runs on. */
+  const [money, setMoney] = useState<Record<string, {
+    cost: number | null; retail: number | null; gst: number | null }>>({});
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data } = await supabase!.from("v_warehouse_report")
+        .select("system_code,cost_price,retail_price,gst_rate");
+      const m: Record<string, { cost: number | null; retail: number | null; gst: number | null }> = {};
+      ((data as unknown as Record<string, unknown>[]) ?? []).forEach((r) => {
+        m[String(r.system_code)] = {
+          cost: r.cost_price == null ? null : Number(r.cost_price),
+          retail: r.retail_price == null ? null : Number(r.retail_price),
+          gst: r.gst_rate == null ? null : Number(r.gst_rate),
+        };
+      });
+      setMoney(m);
+    })();
+  }, []);
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -504,6 +526,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                   <th className="px-4 py-2.5 font-bold">Barcode</th><th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 font-bold">Category</th>
                   <th className="px-4 py-2.5 text-right font-bold">In stock</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail</th>
+                  <th className="px-4 py-2.5 text-right font-bold">GST</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost total</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail total</th>
                   <th className="px-4 py-2.5 font-bold">Last moved</th>
                 </tr></thead>
                 <tbody>
@@ -552,6 +579,23 @@ function WarehouseInner({ section }: { section: Tab }) {
                           </span>
                         ) : n(i.quantity)}
                       </td>
+                      {/* Blank rather than zero where no price is set — a price
+                          of 0 and no price yet are different facts. */}
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.cost == null ? "—" : rs(money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-semibold text-ink">
+                        {money[i.barcode]?.retail == null ? "—" : rs(money[i.barcode]!.retail!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.gst == null ? "—" : `${money[i.barcode]!.gst}%`}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.cost == null ? "—" : rs(i.quantity * money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-bold text-ink">
+                        {money[i.barcode]?.retail == null ? "—" : rs(i.quantity * money[i.barcode]!.retail!)}
+                      </td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">
                         {i.last_updated ? when(i.last_updated) : "—"}
                         {canManage && (
@@ -581,6 +625,20 @@ function WarehouseInner({ section }: { section: Tab }) {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-line bg-panel/40 text-[13px] font-extrabold text-ink">
+                    <td className="px-4 py-3" colSpan={3}>Total &mdash; {fItems.length} item(s)</td>
+                    <td className="px-4 py-3 text-right tnum">{n(fItems.reduce((a, i) => a + Number(i.quantity || 0), 0))}</td>
+                    <td className="px-4 py-3" colSpan={3}></td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.cost ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.retail ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3"></td>
+                  </tr>
+                </tfoot>
               </table></div>
             </div>
           )
