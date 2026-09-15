@@ -67,12 +67,10 @@ const NAV: NavItem[] = [
       { label: "New GRN report", href: "/reports/warehouse/grn" },
       { label: "GR out report", href: "/reports/warehouse/grout" },
       { label: "STR report", href: "/reports/warehouse/str" },
-      { label: "Stock report", href: "/reports/warehouse/stock" },
       { label: "Low quantity", href: "/reports/warehouse/low" },
       { label: "Blocked items", href: "/reports/warehouse/blocked" },
     ] },
     { label: "Graph", href: "/reports/warehouse/graph" },
-    { label: "Stock", href: "/warehouse/stock" },
   ] },
 
   /* ═══ PAYMENTS ═══ its own section, serving both departments. */
