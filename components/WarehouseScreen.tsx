@@ -118,6 +118,12 @@ function WarehouseInner({ section }: { section: Tab }) {
      movement (K146), so the total never stops matching its own history. */
   const [editItem, setEditItem] = useState<string | null>(null);
   const [eName, setEName] = useState("");
+  /* Prices live on the ARTICLE, joined by barcode — so editing them here has
+     to write to both records or the screen and the report disagree. */
+  const [eManual, setEManual] = useState("");
+  const [eCost, setECost] = useState("");
+  const [eRetail, setERetail] = useState("");
+  const [eGst, setEGst] = useState("");
   const [eBar, setEBar] = useState("");
   const [eItemCat, setEItemCat] = useState("");
   const [stockRow, setStockRow] = useState<string | null>(null);
@@ -377,7 +383,19 @@ function WarehouseInner({ section }: { section: Tab }) {
     const { error } = await supabase.from("khana_final_items")
       .update({ name: eName.trim(), barcode: eBar.trim(), category: eItemCat || null })
       .eq("id", i.item_id);
-    if (error) { setErr(error.message.includes("duplicate") ? "That barcode belongs to another item." : error.message); return; }
+    if (error) { setErr(error.message); return; }
+
+    /* The article half: manual barcode and the money. Matched on the barcode
+       as it was BEFORE this edit, since that is what the article still holds. */
+    const num = (v: string) => (v === "" ? null : parseFloat(v));
+    const { error: aErr } = await supabase.from("articles").update({
+      name: eName.trim(),
+      manual_barcode: eManual.trim() || null,
+      cost_price: num(eCost), retail_price: num(eRetail), gst_rate: num(eGst),
+      system_barcode: eBar.trim(),
+    }).eq("system_barcode", i.barcode);
+    if (aErr) { setErr(aErr.message); return; }
+
     setEditItem(null); load();
   }
 
@@ -595,6 +613,18 @@ function WarehouseInner({ section }: { section: Tab }) {
                               <option value="">no category</option>
                               {["Kids", "Child", "Ladies", "Men"].map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
+                            <input value={eManual} onChange={(e) => setEManual(e.target.value)}
+                              placeholder="manual barcode"
+                              className="w-36 rounded-lg border border-ink/30 px-2 py-1 font-mono text-[11.5px] font-normal outline-none" />
+                            <input type="number" value={eCost} onChange={(e) => setECost(e.target.value)}
+                              placeholder="cost"
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
+                            <input type="number" value={eRetail} onChange={(e) => setERetail(e.target.value)}
+                              placeholder="retail"
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
+                            <input type="number" value={eGst} onChange={(e) => setEGst(e.target.value)}
+                              placeholder="GST%"
+                              className="w-16 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
                             <button onClick={() => saveItem(i)} className="text-[11px] font-bold text-ink">save</button>
                             <button onClick={() => setEditItem(null)} className="text-[11px] font-normal text-ink/50">cancel</button>
                           </span>
@@ -646,7 +676,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                                 className="text-[11px] font-semibold text-ink/50 hover:text-ink">set stock</button>
                             ) : (
                               <>
-                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? ""); }}
+                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? "");
+                                  setEManual(money[i.barcode]?.manual ?? "");
+                                  setECost(money[i.barcode]?.cost == null ? "" : String(money[i.barcode]!.cost));
+                                  setERetail(money[i.barcode]?.retail == null ? "" : String(money[i.barcode]!.retail));
+                                  setEGst(money[i.barcode]?.gst == null ? "" : String(money[i.barcode]!.gst)); }}
                                   className="text-[11px] font-semibold text-ink/50 hover:text-ink">edit</button>
                                 {killRow === i.item_id ? (
                                   <>
