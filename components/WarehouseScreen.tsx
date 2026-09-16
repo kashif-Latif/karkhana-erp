@@ -158,14 +158,14 @@ function WarehouseInner({ section }: { section: Tab }) {
   /* Matches on our code, their barcode, or any part of the name. Ten is
      enough to choose from without becoming a second list to scroll. */
   const suggestions = useMemo(() => {
-    const t = bc.trim().toLowerCase();
+    const t = scan.trim().toLowerCase();
     if (!t) return [];
     return items.filter((x) =>
       x.barcode.toLowerCase().includes(t) ||
       x.name.toLowerCase().includes(t) ||
       String(money[x.barcode]?.manual ?? "").toLowerCase().includes(t)
     ).slice(0, 10);
-  }, [bc, items, money]);
+  }, [scan, items, money]);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -247,11 +247,18 @@ function WarehouseInner({ section }: { section: Tab }) {
   }, [expectedInvoice]);
 
   function resolve() {
-    const code = scan.trim();
+    const code = scan.trim().toLowerCase();
     if (!code) return;
-    const it = items.find((i) => i.barcode.toLowerCase() === code.toLowerCase());
-    if (!it) { setFound(null); setMErr(`No item with barcode ${code}. Add it under Materials first.`); return; }
-    setFound(it); setMErr("");
+    /* Exact code first — a scanner is always exact and must not be slowed by
+       a list. Then the printed barcode. Then, if exactly one thing matches
+       what was typed, take it; more than one and the list does the choosing. */
+    const exact = items.find((i) => i.barcode.toLowerCase() === code);
+    const byManual = exact ? null
+      : items.find((i) => String(money[i.barcode]?.manual ?? "").toLowerCase() === code);
+    const hitOne = exact || byManual
+      || (suggestions.length === 1 ? suggestions[0] : null);
+    if (!hitOne) { setFound(null); setMErr(""); return; }
+    setFound(hitOne); setMErr("");
   }
 
   const [newSection, setNewSection] = useState("");
@@ -800,14 +807,14 @@ function WarehouseInner({ section }: { section: Tab }) {
                 {/* Typing a name should find the product — nobody remembers
                     13-digit barcodes. Exact scans still match instantly and
                     skip the list. */}
-                {!found && bc.trim().length >= 1 && suggestions.length > 0 && (
+                {!found && scan.trim().length >= 1 && suggestions.length > 0 && (
                   <div className="mt-2 overflow-hidden rounded-xl2 border border-line">
                     <p className="border-b border-line bg-panel/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-hint">
                       {suggestions.length} match{suggestions.length === 1 ? "" : "es"} — click one
                     </p>
                     <div className="max-h-48 overflow-y-auto">
                     {suggestions.map((x) => (
-                      <button key={x.item_id} onClick={() => setBc(x.barcode)}
+                      <button key={x.item_id} onClick={() => { setScan(x.barcode); setFound(x); setMErr(""); }}
                         className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left last:border-0 hover:bg-panel">
                         <span>
                           <span className="text-[13px] font-semibold text-ink">{x.name}</span>
@@ -826,17 +833,17 @@ function WarehouseInner({ section }: { section: Tab }) {
 
                 {/* A disabled button with no explanation is the worst state a
                     form can be in. Say which of the two things is missing. */}
-                {!found && !bc.trim() && (
+                {!found && !scan.trim() && (
                   <p className="mt-2 text-[12.5px] text-muted">
                     Scan a barcode, or type it and press Enter. Either code works — ours ({tab === "in" ? "44-000012" : "44-000012"}) or the printed one.
                   </p>
                 )}
                 {/* Only when NOTHING matched. Saying "no product" while a list
                     of matches sits above it is the screen arguing with itself. */}
-                {!found && bc.trim() && suggestions.length === 0 && (
+                {!found && scan.trim() && suggestions.length === 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <p className="text-[12.5px] font-medium text-danger">
-                      Nothing matches <b>{bc.trim()}</b>.
+                      Nothing matches <b>{scan.trim()}</b>.
                     </p>
                     {/* Add it here rather than sending someone to another screen
                         and back. An unknown barcode at the receiving bench is
@@ -845,7 +852,7 @@ function WarehouseInner({ section }: { section: Tab }) {
                       <button
                         onClick={() => {
                           setItemOpen(true); setMadeCode(null);
-                          setBcNew(bc.trim()); setNm(""); setNewSection("");
+                          setBcNew(scan.trim()); setNm(""); setNewSection("");
                           setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(qty || "");
                         }}
                         className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white">
