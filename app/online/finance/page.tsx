@@ -66,7 +66,13 @@ export default function FinancePage() {
   /* Which card is driving the list. Clicking a figure should show you the rows
      behind it — a number you cannot open is a number you have to take on
      trust, and this page exists precisely because those were wrong. */
-  const [pick, setPick] = useState<"" | "pending" | "received" | "charges">("");
+  /* PENDING BY DEFAULT.
+     The list opened showing everything, so 61 unpaid rows sat on top of 2,571
+     settled ones and the money still owed was indistinguishable from money
+     already in the bank. Payments is opened to answer "what has not arrived" —
+     so that is what it opens on. Clicking Received or Charges switches, and
+     clicking the same card again clears back to everything. */
+  const [pick, setPick] = useState<"" | "pending" | "received" | "charges">("pending");
   const [byCourier, setByCourier] = useState<CourierRow[]>([]);
   /* Search on both tabs. Debounced, because re-filtering a thousand rows on
      every keystroke is what made the disputes page feel sticky. */
