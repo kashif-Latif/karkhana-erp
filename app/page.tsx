@@ -20,8 +20,14 @@ const DEPARTMENTS = [
     needs: ["inventory.view", "production.view", "reports.view", "employees.manage", "payments.manage"] },
   { href: "/online", title: "Hub Department", subtitle: "Online orders · Little Minors, TopShop, Trenzee", icon: ShoppingBag, light: "bg-periwinkle-soft", chip: "dark:bg-periwinkle",
     needs: ["hub.dashboard.view", "hub.orders.view", "hub.logistics.view", "hub.finance.view", "hub.attendance.view"] },
+  /* These two permissions never existed. The table has retail.access and, since
+     0119, the retail.<area>.<verb> set — "retail.view" and "retail.manage" are
+     neither, so can() returned false for every normal user and this box only
+     ever appeared for super admins, who skip the check. It looked fine to the
+     only people who ever looked. */
   { href: "/retail", title: "FS Traders", subtitle: "Retail shops · sales, cash book & commissions", icon: Store, light: "bg-salmon-soft", chip: "dark:bg-salmon",
-    needs: ["retail.view", "retail.manage"] },
+    needs: ["retail.access", "retail.dashboard.view", "retail.sales.view", "retail.cashbook.view",
+            "retail.expenses.view", "retail.employees.view", "retail.payroll.view"] },
   /* Administration is not a business — it is the room where people and access
      are managed. It carries a `needs` list, so it only appears for someone who
      can actually manage users or roles. Staff never see it at all, which is
