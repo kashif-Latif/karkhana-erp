@@ -196,7 +196,10 @@ function WarehouseInner({ section }: { section: Tab }) {
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   const fItems = useMemo(() => {
     const list = items.filter((i) => (!cat || i.category === cat)
-      && hit(i.barcode, i.name, i.category, i.raw_material_reference)
+      /* The manual barcode lives on the article, not on this record — which is
+         why searching the last digits of a printed label found nothing. */
+      && hit(i.barcode, i.name, i.category, i.raw_material_reference,
+             money[i.barcode]?.manual ?? null)
       && (tab === "materials" || inRange(i.last_updated)));
     /* Highest quantity first, everywhere. The question this screen answers is
        "what do we have" — so what there is most of belongs at the top, and
@@ -204,7 +207,7 @@ function WarehouseInner({ section }: { section: Tab }) {
        the order is stable between loads. */
     return [...list].sort((a, b) =>
       Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name));
-  }, [items, q, cat, tab, days, dFrom, dTo]);
+  }, [items, q, cat, tab, days, dFrom, dTo, money]);
   /* The last invoice this branch was given, and what should follow it.
      Purely numeric numbers get a suggestion; anything else is left alone
      rather than guessed at. */
