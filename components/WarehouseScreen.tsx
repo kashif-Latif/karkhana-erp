@@ -800,8 +800,12 @@ function WarehouseInner({ section }: { section: Tab }) {
                 {/* Typing a name should find the product — nobody remembers
                     13-digit barcodes. Exact scans still match instantly and
                     skip the list. */}
-                {!found && bc.trim().length >= 2 && suggestions.length > 0 && (
-                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl2 border border-line">
+                {!found && bc.trim().length >= 1 && suggestions.length > 0 && (
+                  <div className="mt-2 overflow-hidden rounded-xl2 border border-line">
+                    <p className="border-b border-line bg-panel/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-hint">
+                      {suggestions.length} match{suggestions.length === 1 ? "" : "es"} — click one
+                    </p>
+                    <div className="max-h-48 overflow-y-auto">
                     {suggestions.map((x) => (
                       <button key={x.item_id} onClick={() => setBc(x.barcode)}
                         className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left last:border-0 hover:bg-panel">
@@ -811,9 +815,12 @@ function WarehouseInner({ section }: { section: Tab }) {
                             {x.barcode}{money[x.barcode]?.manual ? ` · ${money[x.barcode]!.manual}` : ""}
                           </span>
                         </span>
-                        <span className="shrink-0 text-[12px] tnum text-muted">{n(x.quantity)}</span>
+                        <span className="shrink-0 text-[12px] tnum text-muted">
+                          {x.quantity ? `${n(x.quantity)} in stock` : "no stock yet"}
+                        </span>
                       </button>
                     ))}
+                    </div>
                   </div>
                 )}
 
@@ -824,10 +831,12 @@ function WarehouseInner({ section }: { section: Tab }) {
                     Scan a barcode, or type it and press Enter. Either code works — ours ({tab === "in" ? "44-000012" : "44-000012"}) or the printed one.
                   </p>
                 )}
-                {!found && bc.trim() && (
+                {/* Only when NOTHING matched. Saying "no product" while a list
+                    of matches sits above it is the screen arguing with itself. */}
+                {!found && bc.trim() && suggestions.length === 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <p className="text-[12.5px] font-medium text-danger">
-                      No product with barcode <b>{bc.trim()}</b>.
+                      Nothing matches <b>{bc.trim()}</b>.
                     </p>
                     {/* Add it here rather than sending someone to another screen
                         and back. An unknown barcode at the receiving bench is
