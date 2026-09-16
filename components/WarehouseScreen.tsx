@@ -155,6 +155,18 @@ function WarehouseInner({ section }: { section: Tab }) {
     })();
   }, []);
 
+  /* Matches on our code, their barcode, or any part of the name. Ten is
+     enough to choose from without becoming a second list to scroll. */
+  const suggestions = useMemo(() => {
+    const t = bc.trim().toLowerCase();
+    if (!t) return [];
+    return items.filter((x) =>
+      x.barcode.toLowerCase().includes(t) ||
+      x.name.toLowerCase().includes(t) ||
+      String(money[x.barcode]?.manual ?? "").toLowerCase().includes(t)
+    ).slice(0, 10);
+  }, [bc, items, money]);
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -540,8 +552,12 @@ function WarehouseInner({ section }: { section: Tab }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full max-w-xs">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
-              className="w-full rounded-xl2 border border-line bg-surface px-3 py-2 pr-16 text-[13px] outline-none focus:border-ink/30" />
+            {/* One search box on this screen. On the product list it filters;
+                on a GRN screen the scan box above does the finding. */}
+            {tab === "materials" && (
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
+                className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
+            )}
             {q && (
               <button onClick={() => setQ("")} title="Clear"
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-panel px-2 py-0.5 text-[11px] font-semibold text-ink/60">
@@ -736,7 +752,7 @@ function WarehouseInner({ section }: { section: Tab }) {
                     onChange={(e) => { setScan(e.target.value); setFound(null); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); resolve(); } }}
                     onBlur={resolve}
-                    placeholder="Scan or type barcode, then Enter" className={inp} />
+                    placeholder="Scan, or type a barcode or product name" className={inp} />
                   <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" className={inp} />
                   {tab === "out" ? (
                     <select value={partyId} onChange={(e) => { setPartyId(e.target.value); setBranchId(""); }} className={inp}>
@@ -778,6 +794,26 @@ function WarehouseInner({ section }: { section: Tab }) {
                       className={`${inp} mt-2`} />
                   </div>
                 )}
+                {/* Typing a name should find the product — nobody remembers
+                    13-digit barcodes. Exact scans still match instantly and
+                    skip the list. */}
+                {!found && bc.trim().length >= 2 && suggestions.length > 0 && (
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl2 border border-line">
+                    {suggestions.map((x) => (
+                      <button key={x.item_id} onClick={() => setBc(x.barcode)}
+                        className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left last:border-0 hover:bg-panel">
+                        <span>
+                          <span className="text-[13px] font-semibold text-ink">{x.name}</span>
+                          <span className="block font-mono text-[11px] text-hint">
+                            {x.barcode}{money[x.barcode]?.manual ? ` · ${money[x.barcode]!.manual}` : ""}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-[12px] tnum text-muted">{n(x.quantity)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* A disabled button with no explanation is the worst state a
                     form can be in. Say which of the two things is missing. */}
                 {!found && !bc.trim() && (
