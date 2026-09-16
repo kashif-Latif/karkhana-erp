@@ -38,6 +38,7 @@ const NAV: NavItem[] = [
     { label: "New GRN", href: "/grn" },
     { label: "GR out", href: "/grn/out" },
     { label: "Articles", href: "/articles" },
+    { label: "Machine Process", href: "/machine-process" },
     { label: "STR", href: "/str/factory" },
     { label: "Reports", sub: [
       { label: "New GRN report", href: "/reports/factory/grn" },

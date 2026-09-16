@@ -6,8 +6,24 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/dashboard": ["reports.view", "inventory.view", "production.view"],
   "/inventory": ["inventory.view"],
   "/grn": ["inventory.view"],
+  "/machine-process": ["production.view", "production.entry"],
+  "/edit-record": ["production.entry", "grn.create"],
+  "/reports/factory/grn": ["inventory.view", "production.view"],
+  "/reports/factory/grout": ["inventory.view", "production.view"],
+  "/reports/factory/str": ["inventory.view", "production.view"],
+  "/reports/factory/low": ["inventory.view", "production.view"],
+  "/reports/factory/blocked": ["inventory.view", "production.view"],
+  "/reports/factory/stock": ["inventory.view", "production.view"],
+  "/reports/factory/graph": ["inventory.view", "production.view"],
+  "/reports/warehouse/grn": ["khana.view"],
+  "/reports/warehouse/grout": ["khana.view"],
+  "/reports/warehouse/str": ["khana.view"],
+  "/reports/warehouse/low": ["khana.view"],
+  "/reports/warehouse/blocked": ["khana.view"],
+  "/reports/warehouse/graph": ["khana.view"],
+  "/str/factory": ["production.view", "production.entry"],
+  "/str/warehouse": ["khana.view", "khana.manage"],
   "/warehouse/products": ["khana.view"],
-  "/warehouse/stock": ["khana.view"],
   "/warehouse/grn-in": ["khana.view"],
   "/warehouse/grn-out": ["khana.view"],
   "/grn/out": ["inventory.view", "inventory.issue"],
@@ -51,62 +67,11 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/online": null,
   "/online/dashboard": ["hub.dashboard.view"],
   "/online/orders": ["hub.orders.view", "hub.orders.manage"],
-  /* The article workflow. `view` lets somebody watch the pipeline; every
-     control — create, approve, reject, reassign, approve ads spending —
-     requires `manage` and is checked again inside the database, so listing
-     both here only decides who is shown the door, never who may act. */
-  "/online/articles": ["hub.articles.view", "hub.articles.manage"],
   "/online/logistics": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/logistics/returns": ["hub.logistics.view", "hub.logistics.manage"],
   "/online/finance": ["hub.finance.view", "hub.finance.manage"],
   "/online/attendance": ["hub.attendance.view", "hub.attendance.manage"],
   "/online/employees": ["hub.attendance.view", "hub.attendance.manage"],
-
-  /* FS TRADERS. Same omission the Hub had before 0090, arriving a second time:
-     not one /retail/* path was listed here, so every retail screen was open to
-     anyone who could log in. The database was never exposed — every retail_*
-     policy checks a permission — but a page that loads and then shows nothing
-     is the worst of both worlds. It looks broken rather than forbidden.
-
-     `.manage` sits beside `.view` on each line for the usual reason: somebody
-     who can change a thing can obviously look at it, and a role granted only
-     manage should not be locked out of the page it manages. Every control on
-     the far side is checked again in Postgres, so this decides who is shown the
-     door, never who may act.
-
-     retail.access is NOT listed. It is the umbrella that keeps existing roles
-     working (0119), and it is folded into every gate by retail_can() in the
-     database — listing it here as well would mean the menu could never be
-     narrowed for anyone who still holds it. */
-  "/retail": ["retail.dashboard.view", "retail.access"],
-  "/retail/dashboard": ["retail.dashboard.view"],
-  "/retail/sales": ["retail.sales.view"],
-  "/retail/import": ["retail.import.run"],
-  "/retail/expenses": ["retail.expenses.view", "retail.expenses.manage"],
-  "/retail/payments": ["retail.expenses.view", "retail.expenses.manage"],
-  "/retail/cashbook": ["retail.cashbook.view", "retail.cashbook.manage"],
-  "/retail/commissions": ["retail.commissions.view", "retail.commissions.manage"],
-  "/retail/branches": ["retail.branches.view", "retail.branches.manage"],
-
-  "/retail/employees": ["retail.employees.view", "retail.employees.manage"],
-  "/retail/employees/attendance": ["retail.employees.view", "retail.employees.manage"],
-  "/retail/employees/summary": ["retail.employees.view", "retail.payroll.view"],
-  "/retail/employees/ledger": ["retail.payroll.view", "retail.payroll.manage"],
-
-  "/retail/ho": ["retail.ho.view", "retail.ho.manage"],
-  "/retail/ho/cashflow": ["retail.ho.view", "retail.ho.manage"],
-  "/retail/ho/eod": ["retail.ho.view", "retail.ho.manage"],
-  "/retail/ho/attendance": ["retail.employees.view", "retail.employees.manage"],
-  "/retail/ho/summary": ["retail.employees.view", "retail.payroll.view"],
-  "/retail/ho/employees": ["retail.employees.view", "retail.employees.manage"],
-  "/retail/ho/ledger": ["retail.payroll.view", "retail.payroll.manage"],
-
-  "/retail/salaries": ["retail.payroll.view", "retail.payroll.manage"],
-  "/retail/cards": ["retail.cards.view", "retail.cards.manage"],
-  /* Owner tier. A statement carries the personal lines sitting beside the shop
-     money, so this one is deliberately not folded in with the cash book. */
-  "/retail/bank": ["retail.bank.view", "retail.bank.manage"],
-
   "/me": null,
 };
 
