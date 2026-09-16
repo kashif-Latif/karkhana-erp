@@ -1,5 +1,5 @@
 "use client";
-/* End of day — count the office safe, note by note.
+/* END OF DAY — count the office safe, note by note.
  *
  * WHY COUNT BY DENOMINATION AND NOT JUST TYPE A TOTAL
  *   A typed total is a claim. A denomination count is a claim that can be
@@ -8,84 +8,203 @@
  *   takes the same amount of time, because the person is holding the notes
  *   either way.
  *
- * WHAT "EXPECTED" MEANS HERE
- *   Yesterday's counted total, plus today's office cash in, minus today's
- *   office cash out. It is the office's own running position — it does not
- *   include a single shop till, because those balance in their own cash book
- *   against their own physical count.
+ * WHAT "EXPECTED" MEANS HERE  (this is the whole screen)
+ *   Expected is recomputed from the ENTIRE Head Office cash-flow ledger up to
+ *   and including the chosen day:
+ *
+ *       expected(day) = Σ over retail_ho_cashflow where flow_date <= day
+ *                         of (direction === 'in' ? +amount : −amount)
+ *
+ *   It is NOT "the last physical count plus that one day's movements". That
+ *   older definition looked equivalent and was not, in two ways that both cost
+ *   real money:
+ *
+ *     1. A SKIPPED COUNTING DAY DROPPED ITS CASH. Anchoring on the last count
+ *        and adding only the CHOSEN day's flows silently discards every entry
+ *        on the days in between. Count on Monday, skip Tuesday and Wednesday,
+ *        count on Thursday, and Tuesday's and Wednesday's cash simply is not in
+ *        the expected figure — the drawer looks over by exactly the money that
+ *        moved while nobody was counting.
+ *
+ *     2. A SHORTFALL WAS LAUNDERED INTO THE NEW BASELINE. If Monday closed
+ *        5,000 short, taking Monday's COUNT as Tuesday's opening writes the
+ *        missing 5,000 out of existence: Tuesday balances perfectly and the
+ *        5,000 is never asked about again. Recomputing from the ledger keeps
+ *        that 5,000 in the difference on Tuesday, Wednesday and every day
+ *        after, until somebody posts a cash-flow entry that explains it. That
+ *        persistence is the point of the screen, not a bug in it.
+ *
+ *   No shop till is in that sum. Each branch balances separately in its own
+ *   cash book against its own physical count; the office is not a till, and
+ *   this screen is head-office only (location = 'head_office').
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Banknote, Coins, Scale, Save, CalendarDays } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { btnPrimary } from "@/components/Modal";
 import {
-  Shell, PageHeader, StatCards, Diff, PreviewNote, SourceNote,
-  money, num, today, iso, type Row,
+  Shell, PageHeader, StatCards, DataTable, Pill, Diff, PreviewNote, SourceNote,
+  money, num, text, today, fetchAll, type Col,
 } from "@/components/retail/kit";
 
-/* Notes first, largest down, then coins. The order people actually stack them. */
-const NOTES = [5000, 1000, 500, 100, 50, 20, 10];
-const COINS = [10, 5, 2, 1];
+/* ── the denominations ───────────────────────────────────────────────────────
+ * ONE flat list, and everything that adds money up iterates THIS.
+ *
+ * WHY THAT MATTERS: this screen used to hold two lists —
+ *     NOTES = [5000,1000,500,100,50,20,10]   COINS = [10,5,2,1]
+ * — and Rs 10 appeared in both. Each list rendered its own input, both bound to
+ * counts["10"], and the total reduced over NOTES.concat(COINS), so ten rupees
+ * was added twice: five Rs 10 notes counted as Rs 100. Worse, save() wrote a
+ * row that contradicted itself — denoms {"10": 5} with total 100 — so the
+ * stored evidence disagreed with the stored answer and neither could be used to
+ * check the other.
+ *
+ * The two groups below are a VISUAL split of this one list (Rs 10 circulates as
+ * both a note and a coin; it is filed with the notes because that is where it
+ * is usually stacked). They partition DENOMS — every denomination appears in
+ * exactly one group, and the groups together are exactly DENOMS.
+ */
+const DENOMS = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
+const NOTE_GROUP = DENOMS.filter((d) => d >= 10);
+const COIN_GROUP = DENOMS.filter((d) => d < 10);
+
+/** The day before `ds`, computed from the STRING PARTS.
+ *
+ *  WHY NOT `new Date(ds + "T00:00:00").getTime() - 86400000` + `toISOString()`:
+ *  that parses as LOCAL midnight and then formats as UTC, so in any UTC+
+ *  timezone it lands on the day before the day before. In Asia/Karachi
+ *  (UTC+05:00) the old line turned 2026-09-16 into 2026-09-14 — a whole day of
+ *  office cash flow fell outside every window built from it, and nothing
+ *  errored. Date.UTC in and getUTC* out means no timezone is involved at any
+ *  point, so the answer is the same in Karachi, London and a CI box on UTC. */
+function prevDay(ds: string): string {
+  const [y, m, d] = ds.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d) - 86400000);
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+}
+
+type Flow = { flow_date: string; direction: string | null; amount: number | null };
+type Count = { count_date: string; total: number | null };
 
 export default function EndOfDayPage() {
   const [date, setDate] = useState(today());
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
-  const [prevTotal, setPrevTotal] = useState<number | null>(null);
-  const [flowIn, setFlowIn] = useState(0);
-  const [flowOut, setFlowOut] = useState(0);
+  const [ledger, setLedger] = useState<Flow[]>([]);
+  const [history, setHistory] = useState<Count[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [savedAt, setSavedAt] = useState("");
+  /* False when retail_cash_count has no updated_at column on this database. A
+     count that was corrected at 6pm must not be stamped with the time it was
+     first keyed in at 9am — that reads as "nobody has touched this since this
+     morning" and is how a stale figure gets trusted. Where the column is
+     missing we say plainly that the stamp is the FIRST save rather than
+     quietly mislabelling it. */
+  const [hasUpdatedAt, setHasUpdatedAt] = useState(true);
 
+  /* Every money figure on this screen iterates DENOMS, once. */
   const counted = useMemo(
-    () => [...NOTES, ...COINS].reduce((t, d) => t + d * (Number(counts[d]) || 0), 0),
+    () => DENOMS.reduce((t, d) => t + d * (Number(counts[d]) || 0), 0),
     [counts]
   );
-  const expected = useMemo(
-    () => (prevTotal ?? 0) + flowIn - flowOut,
-    [prevTotal, flowIn, flowOut]
+
+  /** The ledger balance as at `ds`. flow_date is 'YYYY-MM-DD', so a string
+   *  compare is a date compare — no Date object, no timezone. */
+  const expectedAt = useCallback(
+    (ds: string) =>
+      ledger.reduce(
+        (t, r) =>
+          String(r.flow_date) <= ds
+            ? t + (String(r.direction).toLowerCase() === "in" ? num(r.amount) : -num(r.amount))
+            : t,
+        0
+      ),
+    [ledger]
   );
+
+  const expected = useMemo(() => expectedAt(date), [expectedAt, date]);
+
+  /* Today's movement, for the card. Informational only — it is NOT how
+     `expected` is built, and must not become how it is built again. */
+  const movement = useMemo(
+    () =>
+      ledger.reduce(
+        (t, r) =>
+          String(r.flow_date) === date
+            ? t + (String(r.direction).toLowerCase() === "in" ? num(r.amount) : -num(r.amount))
+            : t,
+        0
+      ),
+    [ledger, date]
+  );
+
+  /* What yesterday's count was out by, if it was counted. Shown because that
+     difference is still inside today's — see the header comment. */
+  const carried = useMemo(() => {
+    const pd = prevDay(date);
+    const last = history.find((h) => String(h.count_date) <= pd);
+    if (!last) return null;
+    return { on: String(last.count_date), diff: num(last.total) - expectedAt(String(last.count_date)) };
+  }, [history, date, expectedAt]);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr(""); setSavedAt("");
-    const prevDate = iso(new Date(new Date(date + "T00:00:00").getTime() - 86400000));
 
-    const [mine, prev, flows] = await Promise.all([
-      supabase.from("retail_cash_count").select("denoms,total,note,created_at").eq("location", "head_office").eq("count_date", date).maybeSingle(),
-      supabase.from("retail_cash_count").select("total").eq("location", "head_office").lte("count_date", prevDate).order("count_date", { ascending: false }).limit(1).maybeSingle(),
-      supabase.from("retail_ho_cashflow").select("direction,amount").eq("flow_date", date),
-    ]);
+    /* The whole ledger up to the chosen day, paged. A `.limit()` here would cap
+       the sum silently and expected would drift low for ever after. */
+    const ledgerP = fetchAll<Flow>((lo, hi) =>
+      supabase!.from("retail_ho_cashflow").select("flow_date,direction,amount")
+        .lte("flow_date", date).order("flow_date").range(lo, hi));
 
-    if (mine.error) setErr(mine.error.message);
+    /* Ask for updated_at; fall back once if this database does not have it, and
+       remember, so Refresh does not keep firing a request that cannot succeed. */
+    const mineP = supabase.from("retail_cash_count")
+      .select(hasUpdatedAt ? "denoms,total,note,created_at,updated_at" : "denoms,total,note,created_at")
+      .eq("location", "head_office").eq("count_date", date).maybeSingle();
 
-    const d = (mine.data as { denoms?: Record<string, number>; note?: string; created_at?: string } | null);
-    setCounts(
-      d?.denoms
-        ? Object.fromEntries(Object.entries(d.denoms).map(([k, v]) => [k, String(v)]))
-        : {}
-    );
+    const histP = supabase.from("retail_cash_count").select("count_date,total")
+      .eq("location", "head_office").order("count_date", { ascending: false }).limit(60);
+
+    const [led, mine0, hist] = await Promise.all([ledgerP, mineP, histP]);
+
+    let mine = mine0;
+    if (mine.error && (mine.error.code === "42703" || /updated_at/.test(mine.error.message))) {
+      setHasUpdatedAt(false);
+      mine = await supabase.from("retail_cash_count")
+        .select("denoms,total,note,created_at")
+        .eq("location", "head_office").eq("count_date", date).maybeSingle();
+    }
+
+    if (led.error) setErr(led.error);
+    else if (mine.error) setErr(mine.error.message);
+
+    setLedger(led.rows);
+    setHistory((hist.data as Count[]) ?? []);
+
+    const d = mine.data as
+      { denoms?: Record<string, number>; note?: string; created_at?: string; updated_at?: string } | null;
+    setCounts(d?.denoms ? Object.fromEntries(Object.entries(d.denoms).map(([k, v]) => [k, String(v)])) : {});
     setNote(d?.note ?? "");
-    setSavedAt(d?.created_at ? new Date(d.created_at).toLocaleString("en-GB") : "");
-    setPrevTotal((prev.data as { total?: number } | null)?.total ?? null);
-
-    const rows = (flows.data as Row[]) ?? [];
-    setFlowIn(rows.filter((r) => String(r.direction).toLowerCase() === "in").reduce((t, r) => t + num(r.amount), 0));
-    setFlowOut(rows.filter((r) => String(r.direction).toLowerCase() === "out").reduce((t, r) => t + num(r.amount), 0));
+    const stamp = d?.updated_at ?? d?.created_at ?? "";
+    setSavedAt(stamp ? new Date(stamp).toLocaleString("en-GB") : "");
     setLoading(false);
-  }, [date]);
+  }, [date, hasUpdatedAt]);
   useEffect(() => { load(); }, [load]);
 
   async function save() {
     if (!supabase) { setErr("Not connected."); return; }
     setSaving(true); setErr("");
+    /* Written from the same single list the total is summed over, so the row
+       can never disagree with itself the way the two-list version did. */
     const denoms = Object.fromEntries(
-      [...NOTES, ...COINS].map((d) => [String(d), Number(counts[d]) || 0]).filter(([, v]) => Number(v) > 0)
+      DENOMS.map((d) => [String(d), Number(counts[d]) || 0]).filter(([, v]) => Number(v) > 0)
     );
     const { error } = await supabase.from("retail_cash_count").upsert(
       { location: "head_office", count_date: date, denoms, total: counted, note: note.trim() || null },
+      /* retail_cash_count has UNIQUE (location, count_date), so this resolves. */
       { onConflict: "location,count_date" }
     );
     setSaving(false);
@@ -95,9 +214,9 @@ export default function EndOfDayPage() {
 
   const stats = [
     { label: "Counted", value: money(counted), Icon: Banknote },
-    { label: "Expected", value: prevTotal === null ? "—" : money(expected), Icon: Scale },
-    { label: "Opening (last count)", value: prevTotal === null ? "—" : money(prevTotal), Icon: Coins },
-    { label: "Today's movement", value: money(flowIn - flowOut), Icon: CalendarDays },
+    { label: "Expected (whole ledger)", value: money(expected), Icon: Scale },
+    { label: "Difference", value: money(counted - expected), Icon: Coins },
+    { label: "This day's movement", value: money(movement), Icon: CalendarDays },
   ];
 
   function Grid({ title, list }: { title: string; list: number[] }) {
@@ -123,6 +242,23 @@ export default function EndOfDayPage() {
     );
   }
 
+  /* CASH HISTORY — the last 60 counts, any of which can be pulled back up.
+     Without it a saved count is write-only: there is no way to see what the
+     safe held on the 3rd, and no way to correct it. */
+  const histCols: Col<Count>[] = [
+    { head: "Date", bold: true, cell: (r) => text(r.count_date) },
+    { head: "Cash counted", right: true, cell: (r) => money(r.total) },
+    { head: "", right: true, cell: (r) =>
+        String(r.count_date) === date
+          ? <Pill tone="info">Viewing</Pill>
+          : (
+            <button onClick={() => { setDate(String(r.count_date)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] font-semibold text-ink transition hover:bg-panel dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.12]">
+              View
+            </button>
+          ) },
+  ];
+
   return (
     <Shell>
       <PageHeader title="End of Day" subtitle="Count the office safe and record what is actually there."
@@ -138,17 +274,20 @@ export default function EndOfDayPage() {
 
       <div className="mt-4 flex flex-wrap items-center gap-3 rounded-card border border-line bg-panel/50 px-5 py-4 dark:border-white/[0.06] dark:bg-white/[0.03]">
         <span className="text-[13px] font-semibold text-ink dark:text-[#e7e2d8]">Difference</span>
-        {prevTotal === null
-          ? <span className="text-[12.5px] text-muted dark:text-[#a89f93]">No earlier count to compare against — this one becomes the opening figure.</span>
-          : <Diff value={counted - expected} />}
+        <Diff value={counted - expected} />
+        {carried && Math.abs(carried.diff) >= 1 && (
+          <span className="text-[12.5px] text-muted dark:text-[#a89f93]">
+            {carried.on} closed {money(Math.abs(carried.diff))} {carried.diff < 0 ? "short" : "over"} — that difference is still inside this one.
+          </span>
+        )}
         <span className="ml-auto text-[12px] text-hint dark:text-[#8a8175]">
-          {savedAt ? `Last saved ${savedAt}` : "Not saved yet"}
+          {savedAt ? `${hasUpdatedAt ? "Last saved" : "First saved"} ${savedAt}` : "Not saved yet"}
         </span>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <Grid title="Notes" list={NOTES} />
-        <Grid title="Coins" list={COINS} />
+        <Grid title="Notes" list={NOTE_GROUP} />
+        <Grid title="Coins" list={COIN_GROUP} />
       </div>
 
       <div className="mt-3">
@@ -159,11 +298,21 @@ export default function EndOfDayPage() {
       {err && <p className="mt-3 text-[12.5px] font-semibold text-danger">Couldn&apos;t save: {err}</p>}
 
       <SourceNote>
-        <strong>Expected</strong> is the last recorded count, plus today&apos;s office cash in, minus
-        today&apos;s office cash out. No shop till is in that sum — each branch balances separately in
-        its own cash book against its own physical count. A difference here is an office
-        difference and nothing else.
+        <strong>Expected</strong> is the whole Head Office cash-flow ledger added up to {date} — every
+        &ldquo;in&rdquo; less every &ldquo;out&rdquo;, not yesterday&apos;s count plus today&apos;s movements. A day nobody
+        counted therefore keeps its cash in the figure, and a shortfall stays in the difference every
+        day until an entry explains it rather than disappearing into the next opening balance.
+        No shop till is in that sum — each branch balances in its own cash book against its own count.
       </SourceNote>
+
+      <h3 className="mt-8 text-[14px] font-bold text-ink dark:text-[#f4f1ea]">Cash history</h3>
+      <DataTable cols={histCols} rows={history} loading={loading} minWidth={420}
+        empty="No cash counts saved yet." />
+      <p className="mt-2 text-[12px] text-hint dark:text-[#8a8175]">
+        The last {history.length.toLocaleString()} counts. These are balances, not takings — they are
+        deliberately not added up, because adding a Monday safe to a Tuesday safe counts the same
+        money twice.
+      </p>
 
       <PreviewNote />
     </Shell>

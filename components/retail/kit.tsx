@@ -60,12 +60,67 @@ export const recentMonths = (n = 15) => {
 
 /* ── shared types ────────────────────────────────────────────────────────── */
 
-export type Branch = { id: number; name: string; code?: string; chain?: string; color?: string; active?: boolean };
-export type Employee = { id: number; name: string; branch_id: number | null; designation?: string; active?: boolean; monthly_salary?: number; pay_type?: string; hourly_rate?: number | null; phone?: string };
+export type Branch = { id: number; name: string; code?: string; chain?: string; color?: string; active?: boolean; nimbus_name?: string | null; needs_review?: boolean; business?: string };
+export type Employee = { id: number; name: string; branch_id: number | null; designation?: string; active?: boolean; monthly_salary?: number; pay_type?: string; hourly_rate?: number | null; phone?: string; repay_freq?: string | null; repay_amount?: number | null };
+
+/* ── the constants the business runs on ──────────────────────────────────
+ * Each of these is a number somebody discovered the hard way. They live here
+ * rather than in the screen that uses them so there is exactly one place to
+ * change them, and so a second screen cannot quietly disagree with the first.
+ */
+
+/** The acquirer's cut on a card sale. The bank credits NET; the till records
+ *  GROSS. Reconciling one against the other without this reports ~1.28% of card
+ *  turnover as permanently missing. */
+export const CARD_RATE_PCT = 1.276;
+export const cardExpected = (grossCardSale: number, ratePct = CARD_RATE_PCT) =>
+  grossCardSale * (1 - ratePct / 100);
+
+/** Matching tolerance for a card settlement: Rs 2, or 0.5% of the expected
+ *  figure, whichever is larger. Rs 2 because rounding; 0.5% because a big
+ *  shop-day's rounding is bigger. */
+export const crTol = (expected: number) => Math.max(2, Math.abs(expected) * 0.005);
+
+/** A shop-day still short after this many days is filled from the unmatched
+ *  pool rather than reported as a shortage — by then the money has landed,
+ *  it just never got tied to a day. */
+export const CR_AGE_DAYS = 3;
+
+/** Commission bonus, ported verbatim. `total` is RUPEES, never a count. */
+export type CommCfg = { bonus_mode?: string; bonus_basis?: string; bonus_slab?: number; bonus_per_slab?: number };
+export function commBonus(total: number, cfg: CommCfg): number {
+  const slab = num(cfg.bonus_slab) || 5000;
+  const per = num(cfg.bonus_per_slab) || 50;
+  /* 'exact' pays only on an exact multiple of the slab. It looks like a bug
+     and is not — it is a rule some shops run, and floor() would overpay them
+     on every receipt that lands between slabs. */
+  if (cfg.bonus_mode === "exact") return total > 0 && total % slab === 0 ? (total / slab) * per : 0;
+  return Math.floor(total / slab) * per;
+}
 
 /** Head Office is a branch like any other in the data; it is only the UI that
  *  separates it, because the people who run it are a different team. */
 export const isHeadOffice = (b?: Branch) => (b?.chain ?? "").toLowerCase().includes("head office");
+
+/** Only 'hourly' is hourly. Everyone else is on a flat monthly salary — there
+ *  is no third pay type in the retail business, whatever the column allows. */
+export const isHourly = (e?: Employee | null) => !!e && e.pay_type === "hourly";
+
+/** Hours between two "HH:MM" strings, crossing midnight if the shift does.
+ *  Either side missing means no hours: a person clocked in and never out has
+ *  not worked an unknown number of hours, they have an incomplete record, and
+ *  guessing one would put money on it. */
+export const attHours = (tin?: string | null, tout?: string | null): number => {
+  if (!tin || !tout) return 0;
+  const p = (s: string) => { const a = String(s).split(":"); return (+a[0] || 0) * 60 + (+a[1] || 0); };
+  let d = p(tout) - p(tin);
+  if (d < 0) d += 1440;
+  return d / 60;
+};
+
+/** Sunday is an automatic paid holiday across the shops — it is never marked,
+ *  and a screen that asks for it is asking for noise. */
+export const isSunday = (ds: string) => new Date(ds + "T00:00:00").getDay() === 0;
 
 /* ── data hooks ──────────────────────────────────────────────────────────── */
 
@@ -84,7 +139,12 @@ export function useBranches() {
   return { branches, branchName: name };
 }
 
-/** Employees, optionally scoped to head office or to the shops. */
+/** Employees, optionally scoped to head office or to the shops.
+ *
+ *  `repay_freq` / `repay_amount` are selected because the repayment screen
+ *  pre-fills the deduction from them, and a screen that has to re-query for two
+ *  columns it could have asked for the first time is a screen that will forget.
+ */
 export function useEmployees(scope: "all" | "shops" | "ho" = "all") {
   const { branches } = useBranches();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -92,7 +152,7 @@ export function useEmployees(scope: "all" | "shops" | "ho" = "all") {
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     supabase.from("retail_employees")
-      .select("id,name,branch_id,designation,active,monthly_salary,pay_type,hourly_rate,phone")
+      .select("id,name,branch_id,designation,active,monthly_salary,pay_type,hourly_rate,phone,repay_freq,repay_amount")
       .order("name")
       .then(({ data }) => setEmployees((data as Employee[]) ?? []));
   }, [tick]);
@@ -103,7 +163,36 @@ export function useEmployees(scope: "all" | "shops" | "ho" = "all") {
     return employees.filter((e) => (scope === "ho" ? hoIds.has(Number(e.branch_id)) : !hoIds.has(Number(e.branch_id))));
   }, [employees, branches, scope]);
 
-  return { employees: scoped, allEmployees: employees, branches, reloadEmployees: () => setTick((t) => t + 1) };
+  /* Most screens want only people still working here. Leavers keep their rows
+     — their history has to stay readable — but a leaver in a payroll total or
+     an attendance list is a wrong number and a confusing screen. Callers that
+     genuinely want everyone (the Employees admin screen) take `allEmployees`. */
+  const active = useMemo(() => scoped.filter((e) => e.active !== false), [scoped]);
+
+  return { employees: active, allEmployees: scoped, everyEmployee: employees, branches,
+           reloadEmployees: () => setTick((t) => t + 1) };
+}
+
+/* ── paging ──────────────────────────────────────────────────────────────
+ * PostgREST caps a response at 1000 rows. A `.limit(5000)` does not raise
+ * that — it silently returns what it returns, and a sales total that is quietly
+ * a lower bound is worse than one that errors, because nobody checks a number
+ * that looks plausible. Every screen that reads sale lines pages instead.
+ */
+export async function fetchAll<T = Row>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  step = 1000,
+  hardCap = 200000
+): Promise<{ rows: T[]; error: string }> {
+  const out: T[] = [];
+  for (let from = 0; from < hardCap; from += step) {
+    const { data, error } = await build(from, from + step - 1);
+    if (error) return { rows: out, error: error.message };
+    const got = (data as T[]) ?? [];
+    out.push(...got);
+    if (got.length < step) break;
+  }
+  return { rows: out, error: "" };
 }
 
 type QueryBuilder = { select: (cols: string) => unknown };

@@ -1,276 +1,398 @@
 "use client";
-/* Nimbus import — the screen the retail day actually starts on.
+/* Import — one drop zone, six Nimbus file types.
  *
- * THE ONE RULE THAT MATTERS
- *   Upload the ITEM-WISE sale report. The bill-wise report has one row per
- *   receipt and therefore no item code, so commissions — which are per item —
- *   cannot be built from it, and uploading bill-wise on top of an item-wise day
- *   doubles that day's sales. This screen refuses the file before a single row
- *   is sent, and the database refuses it again on insert. Two guards, because
- *   this has happened.
+ * The old app had a single Import screen that worked out what you had dropped
+ * on it from the header row, and that is right: the person exporting from
+ * Nimbus is not thinking about which of six importers they need, they are
+ * thinking "here is today's file". Every rule below is ported from that app;
+ * the reasoning lives in lib/nimbus.ts next to the code it justifies.
  *
- * THE SECOND RULE
- *   Nimbus MOP "Credit" is udhaar — goods on account — NOT a credit card.
- *   Reading it as card is what made FC DHA's 1 Sep card figure read 36,100
- *   instead of 33,400. The mapping below is the only place that decision is
- *   made, so it is the only place it can go wrong.
+ * The three things worth knowing before changing anything here:
  *
- * WHY RE-UPLOADING IS SAFE
- *   Every line carries a line_hash built from the fields that identify it, and
- *   the column is UNIQUE. An upsert that ignores duplicates means the same file
- *   can be dropped in twice, or a file can be extended and re-dropped, and the
- *   totals do not move. Nothing here relies on the operator remembering.
+ *   1. The sales file cannot tell card from JazzCash. Both arrive as "Other
+ *      Payment". They are resolved afterwards by the Non-cash payments file,
+ *      matched on store + date + exact time — so that file has to be dropped
+ *      AFTER the sales it refers to, or there is nothing to tag.
+ *
+ *   2. The bill-wise sale report has no item codes. It is refused here in
+ *      words, and refused again by a trigger in the database.
+ *
+ *   3. line_hash is a plain joined string, not a digest, and its shape is
+ *      load-bearing for compatibility with rows already in the old database.
  */
-import { useMemo, useRef, useState } from "react";
-import { Upload, FileCheck2, AlertTriangle, CheckCircle2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Upload, FileCheck2, AlertTriangle, CheckCircle2, X, Info } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { parseCsv, matchHeader, toNum, toDate } from "@/lib/csv";
 import { btnPrimary, btnGhost } from "@/components/Modal";
 import {
-  Shell, PageHeader, DataTable, Pill, PreviewNote, SourceNote,
-  useBranches, money, num, type Col, type Branch,
+  Shell, PageHeader, DataTable, Pill, Select, PreviewNote, SourceNote,
+  money, type Col,
 } from "@/components/retail/kit";
+import {
+  parseCsvRows, detectKind, KIND_LABEL, normStore, withLineHashes,
+  parseSalesRows, parseExpenseRows, parsePaymentRows, parseCommRows,
+  type NimbusKind, type SaleRow, type ExpenseRow, type PaymentRow, type CommRow,
+} from "@/lib/nimbus";
 
-type Parsed = {
-  branch_id: number | null; branchLabel: string;
-  sale_date: string | null; sale_time: string; receipt_no: string; receipt_txn: string;
-  salesperson: string; customer: string; item_code: string; item_name: string;
-  department: string; size: string; color: string;
-  retail_price: number; quantity: number; sales: number; discount: number;
-  net_sales: number; tax: number; sales_amount: number; cost_price: number;
-  mop_raw: string; payment_method: string; serial_no: string; line_hash: string;
-};
-
-/* MOP -> payment_method. Order matters: 'credit card' must be read as card
-   before the bare word 'credit' is read as udhaar, or every card sale in a
-   shop that writes "Credit Card" becomes a receivable. */
-function mapMop(raw: string): string {
-  const s = raw.toLowerCase().trim();
-  if (!s) return "unclassified";
-  if (/(credit|debit)\s*card|visa|master|meezan|pos\b/.test(s)) return "meezan_card";
-  if (/jazz|mobile\s*wallet|easypaisa/.test(s)) return "jazzcash";
-  if (/online|shopify|web/.test(s)) return "online";
-  if (/^credit$|udhaar|udhar|account/.test(s)) return "credit";   // goods on account
-  if (/cash/.test(s)) return "cash";
-  return "other";
-}
-
-async function sha256(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-const H = {
-  branch: ["branch", "shop", "store", "location", "outlet"],
-  date: ["date", "sale date", "bill date", "invoice date"],
-  time: ["time", "sale time"],
-  receipt: ["receipt no", "bill no", "invoice no", "receipt"],
-  txn: ["receipt txn", "txn no", "transaction", "txn"],
-  sp: ["salesperson", "sales person", "sales man", "salesman", "staff"],
-  cust: ["customer", "customer name", "party"],
-  code: ["item code", "itemcode", "sku", "barcode", "product code"],
-  name: ["item name", "itemname", "product", "description"],
-  dept: ["department", "category", "dept"],
-  size: ["size"],
-  color: ["color", "colour"],
-  price: ["retail price", "rate", "mrp", "price"],
-  qty: ["quantity", "qty"],
-  sales: ["sales", "gross", "amount"],
-  disc: ["discount", "disc"],
-  net: ["net sales", "net", "net amount"],
-  tax: ["tax", "gst"],
-  total: ["sales amount", "total", "net payable", "grand total"],
-  cost: ["cost price", "cost"],
-  mop: ["mop", "payment", "payment mode", "mode of payment", "payment method"],
-  serial: ["serial no", "serial", "sr no", "sr"],
-};
+type Branch = { id: number; name: string; chain: string | null; nimbus_name: string | null };
 
 export default function ImportPage() {
-  const { branches } = useBranches();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [fileName, setFileName] = useState("");
-  const [parsed, setParsed] = useState<Parsed[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [kind, setKind] = useState<NimbusKind>("unknown");
+  const [needBranch, setNeedBranch] = useState(false);
+  const [pickBranch, setPickBranch] = useState("");
   const [fatal, setFatal] = useState("");
   const [warn, setWarn] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ inserted: number; skipped: number; total: number } | null>(null);
+  const [done, setDone] = useState<string | null>(null);
 
-  /* A shop is matched by its nimbus_name first, because that is the name the
-     POS writes and the reason the column exists. Falling back to name and code
-     costs nothing and saves the branch that was set up before anyone thought
-     to fill nimbus_name in. */
-  const matchBranch = useMemo(() => {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const idx = new Map<string, Branch>();
-    branches.forEach((b) => {
-      const rec = b as Branch & { nimbus_name?: string };
-      [rec.nimbus_name, b.name, b.code].forEach((v) => { if (v) idx.set(norm(String(v)), b); });
-    });
-    return (raw: string) => idx.get(norm(raw)) ?? null;
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    supabase.from("retail_branches").select("id,name,chain,nimbus_name").order("name")
+      .then(({ data }) => setBranches((data as Branch[]) ?? []));
+  }, []);
+
+  const resolveBranch = useCallback((ns: string): number | null => {
+    const b = branches.find((x) => x.nimbus_name && normStore(x.nimbus_name) === ns);
+    return b ? b.id : null;
   }, [branches]);
 
+  const forceBid = needBranch && pickBranch ? Number(pickBranch) : null;
+
+  /* ── parse, per kind ─────────────────────────────────────────────────── */
+  const sales = useMemo(() => {
+    if (!rows.length || (kind !== "sales_multi" && kind !== "sales_single")) return null;
+    if (kind === "sales_single" && forceBid == null) return null;
+    return parseSalesRows(rows, kind === "sales_single" ? forceBid : null, resolveBranch);
+  }, [rows, kind, forceBid, resolveBranch]);
+
+  const expenses = useMemo(() => {
+    if (!rows.length || (kind !== "expense_multi" && kind !== "expense_single")) return null;
+    if (kind === "expense_single" && forceBid == null) return null;
+    return parseExpenseRows(rows, kind === "expense_single" ? forceBid : null, resolveBranch);
+  }, [rows, kind, forceBid, resolveBranch]);
+
+  const payments = useMemo(() => {
+    if (!rows.length || kind !== "payments") return null;
+    return parsePaymentRows(rows);
+  }, [rows, kind]);
+
+  const comm = useMemo(() => {
+    if (!rows.length || kind !== "comm_master") return null;
+    return parseCommRows(rows);
+  }, [rows, kind]);
+
   async function onFile(f: File) {
-    setFatal(""); setWarn([]); setResult(null); setParsed([]);
+    setFatal(""); setWarn([]); setDone(null); setRows([]); setNeedBranch(false); setPickBranch("");
     setFileName(f.name);
-    const { headers, rows } = parseCsv(await f.text());
-    if (rows.length === 0) { setFatal("That file has no rows."); return; }
+    const parsed = parseCsvRows(await f.text()).filter((r) => r.length > 1);
+    if (!parsed.length) { setFatal("Could not read any rows from that file."); return; }
 
-    const col = Object.fromEntries(
-      Object.entries(H).map(([k, cands]) => [k, matchHeader(headers, cands)])
-    ) as Record<keyof typeof H, string>;
+    const hdr = parsed[0].map((h) => h.trim());
+    const k = detectKind(hdr);
+    setKind(k);
 
-    /* GUARD 1. No item-code column at all, or a column that is empty on every
-       row, means this is the bill-wise export. Refuse it here so the operator
-       is told in words rather than by a constraint error thirty seconds later. */
-    const codesPresent = col.code && rows.some((r) => (r[col.code] ?? "").trim() !== "");
-    if (!codesPresent) {
-      setFatal(
-        "This is the BILL-WISE sale report — it has no item codes. Commissions are calculated per item and cannot be built from it, and uploading it on top of an item-wise day doubles that day's sales. In Nimbus, choose the item-wise (line-item) sale export instead."
-      );
+    if (k === "unknown") {
+      setFatal("This does not look like a Nimbus export — no Store, Account, Payment Mode or Item Code column was found.");
       return;
     }
 
-    const unknownBranches = new Set<string>();
-    const unknownMop = new Set<string>();
-
-    const out: Parsed[] = await Promise.all(rows.map(async (r) => {
-      const branchRaw = (r[col.branch] ?? "").trim();
-      const b = matchBranch(branchRaw);
-      if (branchRaw && !b) unknownBranches.add(branchRaw);
-
-      const mopRaw = (r[col.mop] ?? "").trim();
-      const pm = mapMop(mopRaw);
-      if (mopRaw && pm === "other") unknownMop.add(mopRaw);
-
-      const date = toDate(r[col.date]);
-      const txn = (r[col.txn] ?? r[col.receipt] ?? "").trim();
-      const code = (r[col.code] ?? "").trim();
-      const qty = toNum(r[col.qty]) ?? 0;
-      const amount = toNum(r[col.total]) ?? toNum(r[col.net]) ?? toNum(r[col.sales]) ?? 0;
-      const serial = (r[col.serial] ?? "").trim();
-
-      /* The identity of a line: which shop, which day, which receipt, which
-         item, how many, for how much, and its position on the receipt. Serial
-         is in there because two identical items on one receipt are two lines,
-         not a duplicate. */
-      const line_hash = await sha256([b?.id ?? branchRaw, date, txn, code, qty, amount, serial].join("|"));
-
-      return {
-        branch_id: b?.id ?? null, branchLabel: b?.name ?? (branchRaw || "—"),
-        sale_date: date, sale_time: (r[col.time] ?? "").trim(),
-        receipt_no: (r[col.receipt] ?? "").trim(), receipt_txn: txn,
-        salesperson: (r[col.sp] ?? "").trim(), customer: (r[col.cust] ?? "").trim(),
-        item_code: code, item_name: (r[col.name] ?? "").trim(),
-        department: (r[col.dept] ?? "").trim(), size: (r[col.size] ?? "").trim(), color: (r[col.color] ?? "").trim(),
-        retail_price: toNum(r[col.price]) ?? 0, quantity: qty,
-        sales: toNum(r[col.sales]) ?? 0, discount: toNum(r[col.disc]) ?? 0,
-        net_sales: toNum(r[col.net]) ?? 0, tax: toNum(r[col.tax]) ?? 0,
-        sales_amount: amount, cost_price: toNum(r[col.cost]) ?? 0,
-        mop_raw: mopRaw, payment_method: pm, serial_no: serial, line_hash,
-      };
-    }));
-
-    const w: string[] = [];
-    if (unknownBranches.size) w.push(`${unknownBranches.size} branch name(s) not recognised: ${[...unknownBranches].slice(0, 4).join(", ")}${unknownBranches.size > 4 ? "…" : ""}. Those rows will be skipped — set the shop's Nimbus name on the Branches screen first.`);
-    if (unknownMop.size) w.push(`Payment mode(s) landing in "Other": ${[...unknownMop].slice(0, 4).join(", ")}. Check these before trusting the non-cash figures.`);
-    if (out.some((p) => !p.sale_date)) w.push(`${out.filter((p) => !p.sale_date).length} row(s) have no readable date and will be skipped.`);
-    setWarn(w);
-    setParsed(out);
-  }
-
-  const ready = useMemo(() => parsed.filter((p) => p.branch_id && p.sale_date && p.item_code), [parsed]);
-  const totals = useMemo(() => ({
-    rows: parsed.length,
-    ok: ready.length,
-    value: ready.reduce((t, p) => t + p.sales_amount, 0),
-    days: new Set(ready.map((p) => p.sale_date)).size,
-    shops: new Set(ready.map((p) => p.branch_id)).size,
-  }), [parsed, ready]);
-
-  async function run() {
-    if (!supabase || ready.length === 0) return;
-    setBusy(true); setFatal(""); setResult(null);
-
-    const { data: batch, error: bErr } = await supabase.from("retail_import_batches")
-      .insert({ filename: fileName, row_count: parsed.length, total_sales: totals.value })
-      .select("id").single();
-    if (bErr) { setFatal(bErr.message); setBusy(false); return; }
-    const batchId = (batch as { id: number }).id;
-
-    let inserted = 0;
-    /* Chunked because a month of item-wise lines for nine shops is tens of
-       thousands of rows and one request that large times out at the edge. */
-    const CHUNK = 500;
-    for (let i = 0; i < ready.length; i += CHUNK) {
-      const slice = ready.slice(i, i + CHUNK).map(({ branchLabel, ...row }) => {
-        void branchLabel;
-        return { ...row, source: "nimbus", import_batch_id: batchId };
-      });
-      const { data, error } = await supabase.from("retail_sale_lines")
-        .upsert(slice, { onConflict: "line_hash", ignoreDuplicates: true })
-        .select("id");
-      if (error) { setFatal(`Stopped at row ${i}: ${error.message}`); setBusy(false); return; }
-      inserted += (data as unknown[] | null)?.length ?? 0;
+    /* The bill-wise guard. A bill-wise sale report has one row per receipt and
+       therefore no item code. Commissions are per item and cannot be rebuilt
+       from it, and uploading it on top of an item-wise day doubles that day's
+       sales. Refused here in words, and again by a trigger in Postgres. */
+    if (k === "sales_multi" || k === "sales_single") {
+      const ci = hdr.indexOf("Item Code");
+      const anyCode = ci >= 0 && parsed.slice(1).some((r) => (r[ci] ?? "").trim() !== "" && !/^total/i.test((r[ci] ?? "").trim()));
+      if (!anyCode) {
+        setFatal("This is the BILL-WISE sale report — it has no item codes. Commissions are calculated per item and cannot be built from it, and uploading it on top of an item-wise day doubles that day's sales. In Nimbus, choose the item-wise (line-item) sale export instead.");
+        return;
+      }
     }
 
-    await supabase.from("retail_import_batches")
-      .update({ inserted_count: inserted, skipped_count: ready.length - inserted })
-      .eq("id", batchId);
+    setRows(parsed);
+    if (k === "sales_single" || k === "expense_single") setNeedBranch(true);
+  }
 
-    /* One upload_log row per shop-day, so the dashboard can say which days are
-       still missing. Absence is the signal, which is why this is written even
-       when every line was a duplicate. */
-    const stamps = [...new Set(ready.map((p) => `${p.branch_id}|${p.sale_date}`))].map((k) => {
+  /* Whichever kind is loaded, these drive the summary strip. */
+  const summary = useMemo(() => {
+    if (sales) {
+      const ok = sales.parsed.filter((p) => p.branch_id);
+      return [
+        { l: "Line items", v: sales.parsed.length.toLocaleString() },
+        { l: "Matched to a shop", v: ok.length.toLocaleString() },
+        { l: "Shop-days", v: String(new Set(ok.map((p) => p.branch_id + "|" + p.sale_date)).size) },
+        { l: "Total sales", v: money(ok.reduce((t, p) => t + p.sales_amount, 0)) },
+      ];
+    }
+    if (expenses) {
+      const exp = expenses.parsed.filter((p) => p.txn_type === "expense").reduce((t, p) => t + p.amount, 0);
+      const inc = expenses.parsed.filter((p) => p.txn_type === "income").reduce((t, p) => t + p.amount, 0);
+      return [
+        { l: "Transactions", v: expenses.parsed.length.toLocaleString() },
+        { l: "Total expense", v: money(exp) },
+        { l: "Misc income", v: money(inc) },
+        { l: "Date range", v: `${expenses.minD ?? "—"} → ${expenses.maxD ?? "—"}` },
+      ];
+    }
+    if (payments) {
+      const modes = new Map<string, number>();
+      payments.forEach((p) => modes.set(p.modeRaw, (modes.get(p.modeRaw) ?? 0) + 1));
+      return [
+        { l: "Payments in file", v: payments.length.toLocaleString() },
+        { l: "Card", v: String(payments.filter((p) => p.pm === "meezan_card").length) },
+        { l: "JazzCash", v: String(payments.filter((p) => p.pm === "jazzcash").length) },
+        { l: "Modes seen", v: [...modes.keys()].slice(0, 2).join(", ") || "—" },
+      ];
+    }
+    if (comm) return [
+      { l: "Items", v: comm.length.toLocaleString() },
+      { l: "With a rate", v: String(comm.filter((c) => c.percentage > 0 || c.commission > 0).length) },
+      { l: "—", v: "" }, { l: "—", v: "" },
+    ];
+    return null;
+  }, [sales, expenses, payments, comm]);
+
+  /* Unknown store names, surfaced before anything is written. */
+  useEffect(() => {
+    const w: string[] = [];
+    if (sales?.unknownStores.size) w.push(`${sales.unknownStores.size} store name(s) not recognised: ${[...sales.unknownStores].slice(0, 4).join(", ")}. Those lines will be skipped — set the shop's Nimbus name on the Branches screen first.`);
+    if (expenses?.unknown.size) w.push(`${expenses.unknown.size} store name(s) not recognised: ${[...expenses.unknown].slice(0, 4).join(", ")}. Those rows will be skipped.`);
+    if (payments && branches.length) {
+      const un = [...new Set(payments.map((p) => p.store))].filter((s) => !resolveBranch(normStore(s)));
+      if (un.length) w.push(`Store name(s) not recognised: ${un.slice(0, 4).join(", ")}.`);
+    }
+    setWarn(w);
+  }, [sales, expenses, payments, branches, resolveBranch]);
+
+  /* THE UPLOAD LOG IS HOW THE DASHBOARD KNOWS WHAT IS MISSING.
+     It records that a given shop-day HAS been uploaded, for a given KIND of
+     file. Absence is the signal — the reminder lists every shop-day with no
+     stamp and names the file still owed.
+
+     So the kind written here has to match the kind the reminder looks for, for
+     all three: sales, expenses, noncash. Stamping only "sales" (which is what
+     this screen used to do) leaves the other two permanently unstamped, and a
+     reminder that reports every day as missing forever is a reminder people
+     switch off. `unit` is the branch id as text, which is what the dashboard
+     keys on too. */
+  async function stampUploads(pairs: { branch_id: number | null; date: string | null }[], kind: string) {
+    if (!supabase || !pairs.length) return;
+    const stamps = [...new Set(
+      pairs.filter((p) => p.branch_id && p.date).map((p) => `${p.branch_id}|${p.date}`)
+    )].map((k) => {
       const [unit, log_date] = k.split("|");
-      return { unit, log_date, kind: "sales" };
+      return { unit, log_date, kind };
     });
-    if (stamps.length) await supabase.from("retail_upload_log").upsert(stamps, { onConflict: "unit,log_date,kind", ignoreDuplicates: true });
+    if (stamps.length) {
+      await supabase.from("retail_upload_log")
+        .upsert(stamps, { onConflict: "unit,log_date,kind", ignoreDuplicates: true });
+    }
+  }
 
-    setResult({ inserted, skipped: ready.length - inserted, total: ready.length });
+  /* ── run ─────────────────────────────────────────────────────────────── */
+  async function run() {
+    if (!supabase) return;
+    setBusy(true); setFatal(""); setDone(null);
+    try {
+      if (sales) {
+        const ok = sales.parsed.filter((p) => p.branch_id);
+        if (!ok.length) { setFatal("No line matched a branch — nothing to import."); setBusy(false); return; }
+        const total = ok.reduce((t, p) => t + p.sales_amount, 0);
+        const { data: batch, error: be } = await supabase.from("retail_import_batches")
+          .insert({ filename: fileName, row_count: sales.parsed.length, total_sales: total })
+          .select("id").single();
+        if (be) throw be;
+        const batchId = (batch as { id: number }).id;
+
+        const hashed = withLineHashes(ok);
+        let inserted = 0;
+        for (let i = 0; i < hashed.length; i += 400) {
+          const chunk = hashed.slice(i, i + 400).map(({ _store, _ns, ...rest }: SaleRow & { line_hash: string }) => {
+            void _store; void _ns;
+            return { ...rest, import_batch_id: batchId };
+          });
+          const { data, error } = await supabase.from("retail_sale_lines")
+            .upsert(chunk, { onConflict: "line_hash", ignoreDuplicates: true }).select("id");
+          if (error) throw error;
+          inserted += (data as unknown[] | null)?.length ?? 0;
+        }
+        const skipped = hashed.length - inserted;
+        await supabase.from("retail_import_batches").update({ inserted_count: inserted, skipped_count: skipped }).eq("id", batchId);
+
+        await stampUploads(ok.map((p) => ({ branch_id: p.branch_id, date: p.sale_date })), "sales");
+
+        setDone(`${inserted.toLocaleString()} new line${inserted === 1 ? "" : "s"} added.` +
+          (skipped ? ` ${skipped.toLocaleString()} were already in — that is the duplicate guard working, not an error.` : ""));
+      }
+
+      else if (expenses) {
+        const ok = expenses.parsed.filter((p) => p.branch_id);
+        if (!ok.length) { setFatal("No row matched a branch — nothing to import."); setBusy(false); return; }
+        /* The RPC, not a client-side delete-then-insert. It scopes its own
+           delete from the payload and lands on a unique dedupe_key, which is
+           what makes re-importing an overlapping range safe. */
+        const { data, error } = await supabase.rpc("retail_import_nimbus_expenses", {
+          p_branch_ids: [...new Set(ok.map((p) => p.branch_id))],
+          p_min_date: expenses.minD,
+          p_max_date: expenses.maxD,
+          p_rows: ok.map(({ _store, _ns, ...rest }: ExpenseRow) => { void _store; void _ns; return rest; }),
+          p_adv_rows: [],
+        });
+        if (error) throw error;
+        await stampUploads(ok.map((p) => ({ branch_id: p.branch_id, date: p.expense_date })), "expenses");
+        const res = data as { inserted?: number; expenses_replaced?: number } | null;
+        setDone(`${(res?.inserted ?? 0).toLocaleString()} expense rows imported. ${(res?.expenses_replaced ?? 0).toLocaleString()} previously-imported rows in the same range were replaced, so an overlapping re-import cannot double anything.`);
+      }
+
+      else if (payments) {
+        const mapped = payments.map((p) => ({ ...p, bid: forceBid ?? resolveBranch(p.ns) })).filter((p) => p.bid);
+        if (!mapped.length) { setFatal("No payment matched a branch."); setBusy(false); return; }
+        const minD = mapped.reduce((a, p) => (a < p.date ? a : p.date), mapped[0].date);
+        const maxD = mapped.reduce((a, p) => (a > p.date ? a : p.date), mapped[0].date);
+
+        const key = new Map<string, string>();
+        mapped.forEach((p) => key.set(`${p.bid}|${p.date}|${p.time}`, p.pm));
+
+        const lines: { id: number; branch_id: number; sale_date: string; sale_time: string | null }[] = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from("retail_sale_lines")
+            .select("id,branch_id,sale_date,sale_time").gte("sale_date", minD).lte("sale_date", maxD)
+            .range(from, from + 999);
+          if (error) throw error;
+          const got = (data as typeof lines) ?? [];
+          lines.push(...got);
+          if (got.length < 1000) break;
+        }
+
+        const byMode: Record<string, number[]> = {};
+        lines.forEach((l) => {
+          const m = key.get(`${l.branch_id}|${l.sale_date}|${l.sale_time ?? ""}`);
+          if (m) (byMode[m] = byMode[m] ?? []).push(l.id);
+        });
+        let updated = 0;
+        for (const mode of Object.keys(byMode)) {
+          const ids = byMode[mode];
+          for (let i = 0; i < ids.length; i += 300) {
+            const { error } = await supabase.from("retail_sale_lines")
+              .update({ payment_method: mode }).in("id", ids.slice(i, i + 300));
+            if (error) throw error;
+            updated += Math.min(300, ids.length - i);
+          }
+        }
+        await stampUploads(mapped.map((p) => ({ branch_id: p.bid as number, date: p.date })), "noncash");
+        setDone(updated === 0
+          ? "No sale line matched. This file tags sales that are already imported, matched on shop + date + exact time — import that shop's sales first, then drop this again."
+          : `${updated.toLocaleString()} sale lines tagged as card or JazzCash.`);
+      }
+
+      else if (comm) {
+        let n = 0;
+        for (let i = 0; i < comm.length; i += 500) {
+          const { error } = await supabase.from("retail_commission_master")
+            .upsert(comm.slice(i, i + 500) as CommRow[], { onConflict: "item_code" });
+          if (error) throw error;
+          n += Math.min(500, comm.length - i);
+        }
+        setDone(`${n.toLocaleString()} commission rates updated.`);
+      }
+    } catch (e) {
+      setFatal((e as { message?: string })?.message ?? String(e));
+    }
     setBusy(false);
   }
 
   function reset() {
-    setParsed([]); setFileName(""); setFatal(""); setWarn([]); setResult(null);
+    setRows([]); setFileName(""); setFatal(""); setWarn([]); setDone(null); setNeedBranch(false); setPickBranch("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  const cols: Col<Parsed>[] = [
-    { head: "Date", muted: true, cell: (p) => p.sale_date ?? <Pill tone="bad">no date</Pill> },
-    { head: "Branch", bold: true, cell: (p) => (p.branch_id ? p.branchLabel : <Pill tone="bad">{p.branchLabel}</Pill>) },
-    { head: "Receipt", muted: true, cell: (p) => p.receipt_txn || p.receipt_no || "—" },
+  const saleCols: Col<SaleRow>[] = [
+    { head: "Date", muted: true, cell: (p) => p.sale_date },
+    { head: "Shop", bold: true, cell: (p) => p.branch_id ? (branches.find((b) => b.id === p.branch_id)?.name ?? p._store) : <Pill tone="bad">{p._store || "unmatched"}</Pill> },
+    { head: "Receipt", muted: true, cell: (p) => p.receipt_txn || "—" },
     { head: "Item", cell: (p) => p.item_name || p.item_code || "—" },
     { head: "Qty", right: true, cell: (p) => p.quantity },
     { head: "Amount", right: true, bold: true, cell: (p) => money(p.sales_amount) },
-    { head: "MOP", cell: (p) => (
-        p.payment_method === "credit"
-          ? <Pill tone="bad">Credit (udhaar)</Pill>
-          : p.payment_method === "meezan_card" ? <Pill tone="info">Card</Pill>
-          : p.payment_method === "unclassified" || p.payment_method === "other" ? <Pill tone="warn">{p.mop_raw || "—"}</Pill>
-          : <Pill>{p.payment_method}</Pill>
-      ) },
+    { head: "MOP", cell: (p) =>
+        p.payment_method === "credit" ? <Pill tone="bad">Credit (udhaar)</Pill>
+        : p.payment_method === "cash" ? <Pill tone="good">Cash</Pill>
+        : p.payment_method === "online" ? <Pill tone="info">Online</Pill>
+        : <Pill tone="warn">{p.mop_raw || "unclassified"}</Pill> },
   ];
+  const expCols: Col<ExpenseRow>[] = [
+    { head: "Date", muted: true, cell: (p) => p.expense_date },
+    { head: "Shop", bold: true, cell: (p) => p.branch_id ? (branches.find((b) => b.id === p.branch_id)?.name ?? p._store) : <Pill tone="bad">{p._store}</Pill> },
+    { head: "Type", cell: (p) => p.txn_type === "income" ? <Pill tone="good">Income</Pill> : <Pill tone="warn">Expense</Pill> },
+    { head: "Category", cell: (p) => p.category },
+    { head: "Description", muted: true, cell: (p) => p.description ?? "—" },
+    { head: "Paid via", muted: true, cell: (p) => p.paid_via },
+    { head: "Amount", right: true, bold: true, cell: (p) => money(p.amount) },
+  ];
+  const payCols: Col<PaymentRow>[] = [
+    { head: "Date", muted: true, cell: (p) => p.date },
+    { head: "Time", muted: true, cell: (p) => p.time },
+    { head: "Store", bold: true, cell: (p) => p.store },
+    { head: "Mode in file", cell: (p) => p.modeRaw || "—" },
+    { head: "Becomes", cell: (p) => p.pm === "jazzcash" ? <Pill tone="warn">JazzCash</Pill> : <Pill tone="info">Card</Pill> },
+  ];
+  const commCols: Col<CommRow>[] = [
+    { head: "Item code", bold: true, cell: (c) => c.item_code },
+    { head: "Item name", muted: true, cell: (c) => c.item_name ?? "—" },
+    { head: "Retail", right: true, cell: (c) => money(c.retail_price) },
+    { head: "Commission", right: true, cell: (c) => money(c.commission) },
+    { head: "%", right: true, bold: true, cell: (c) => c.percentage },
+  ];
+
+  const readyCount = sales ? sales.parsed.filter((p) => p.branch_id).length
+    : expenses ? expenses.parsed.filter((p) => p.branch_id).length
+    : payments ? payments.length : comm ? comm.length : 0;
+
+  const fcBranches = branches.filter((b) => (b.chain ?? "") !== "Topshop");
 
   return (
     <Shell>
-      <PageHeader title="Import" subtitle="NimbusRMS item-wise sale export. Re-uploading the same file is safe.">
-        {parsed.length > 0 && <button onClick={reset} className={btnGhost}><X size={15} /> Clear</button>}
+      <PageHeader title="Import" subtitle="Drop any NimbusRMS export — the file says what it is.">
+        {rows.length > 0 && <button onClick={reset} className={btnGhost}><X size={15} /> Clear</button>}
       </PageHeader>
 
       <div className="mt-5 rounded-card border border-dashed border-line bg-surface p-6 text-center dark:border-white/[0.12] dark:bg-[#201c17]">
         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-panel text-ink dark:bg-white/[0.08] dark:text-white"><Upload size={22} /></span>
-        <p className="mt-3 text-[14px] font-semibold text-ink dark:text-[#f4f1ea]">Drop the Nimbus CSV here</p>
-        <p className="mt-1 text-[12.5px] text-muted dark:text-[#a89f93]">Item-wise sale report only — the bill-wise one is refused.</p>
+        <p className="mt-3 text-[14px] font-semibold text-ink dark:text-[#f4f1ea]">Drop a Nimbus CSV here</p>
+        <p className="mt-1 text-[12.5px] text-muted dark:text-[#a89f93]">Sales, account transactions, non-cash payments or the commission master.</p>
         <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
         <button onClick={() => fileRef.current?.click()} className={`${btnPrimary} mx-auto mt-4`}>Choose file</button>
-        {fileName && <p className="mt-3 flex items-center justify-center gap-1.5 text-[12.5px] font-semibold text-muted dark:text-[#a89f93]"><FileCheck2 size={14} /> {fileName}</p>}
+        {fileName && (
+          <p className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[12.5px] font-semibold text-muted dark:text-[#a89f93]">
+            <FileCheck2 size={14} /> {fileName}
+            {kind !== "unknown" && <Pill tone="info">{KIND_LABEL[kind]}</Pill>}
+          </p>
+        )}
       </div>
 
       {fatal && (
         <div className="mt-4 flex gap-3 rounded-card border border-danger/30 bg-danger-soft p-4 dark:border-danger/30 dark:bg-danger/10">
           <AlertTriangle size={18} className="mt-0.5 flex-none text-danger" />
           <p className="text-[13px] font-medium leading-relaxed text-danger">{fatal}</p>
+        </div>
+      )}
+
+      {needBranch && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-card border border-line bg-periwinkle-soft p-4 dark:border-white/[0.06] dark:bg-white/[0.04]">
+          <Info size={18} className="flex-none text-ink dark:text-white" />
+          <p className="flex-1 text-[12.5px] font-medium text-ink dark:text-[#e7e2d8]">
+            This is a <strong>single-store</strong> file — it has no Store column, which is how a
+            Fashion Collection shop exports. Which branch is it? (Top Shop comes as the combined
+            all-stores export.)
+          </p>
+          <Select value={pickBranch} onChange={setPickBranch}>
+            <option value="">Pick a branch…</option>
+            {fcBranches.map((b) => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
+          </Select>
         </div>
       )}
 
@@ -281,27 +403,28 @@ export default function ImportPage() {
         </div>
       ))}
 
-      {result && (
+      {done && (
         <div className="mt-4 flex gap-3 rounded-card border border-success/30 bg-success-soft p-4 dark:border-success/30 dark:bg-success/10">
           <CheckCircle2 size={18} className="mt-0.5 flex-none text-success" />
-          <p className="text-[13px] font-medium leading-relaxed text-ink dark:text-[#e7e2d8]">
-            <strong>{result.inserted.toLocaleString()}</strong> new line{result.inserted === 1 ? "" : "s"} added.{" "}
-            {result.skipped > 0 && <><strong>{result.skipped.toLocaleString()}</strong> were already in — that is the duplicate guard working, not an error.</>}
-          </p>
+          <p className="text-[13px] font-medium leading-relaxed text-ink dark:text-[#e7e2d8]">{done}</p>
         </div>
       )}
 
-      {parsed.length > 0 && !fatal && (
+      {kind === "payments" && rows.length > 0 && (
+        <SourceNote>
+          A Nimbus sales export cannot tell card from JazzCash — both come through as &ldquo;Other
+          Payment&rdquo;. This file is what resolves them, matched on <strong>shop + date + exact
+          time</strong>. So the sales for these days have to be imported first; if nothing matches,
+          that is the reason.
+        </SourceNote>
+      )}
+
+      {summary && !fatal && (
         <>
           <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { l: "Rows in file", v: totals.rows.toLocaleString() },
-              { l: "Ready to import", v: totals.ok.toLocaleString() },
-              { l: "Shop-days", v: `${totals.shops} × ${totals.days}` },
-              { l: "Value", v: money(totals.value) },
-            ].map(({ l, v }, i) => (
-              <div key={i} className="rounded-card border border-line bg-surface p-4 dark:border-white/[0.06] dark:bg-[#201c17]">
-                <div className="text-[20px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{v}</div>
+            {summary.map(({ l, v }, i) => (
+              <div key={i} className={`rounded-card border border-line bg-surface p-4 dark:border-white/[0.06] dark:bg-[#201c17] ${l === "—" ? "opacity-0" : ""}`}>
+                <div className="text-[19px] font-extrabold tabular-nums text-ink dark:text-[#f4f1ea]">{v}</div>
                 <div className="text-[12px] font-medium text-muted dark:text-[#a89f93]">{l}</div>
               </div>
             ))}
@@ -309,24 +432,38 @@ export default function ImportPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-[12.5px] text-muted dark:text-[#a89f93]">Showing the first 50 rows for checking.</p>
-            <button onClick={run} disabled={busy || totals.ok === 0} className={btnPrimary}>
-              {busy ? "Importing…" : `Import ${totals.ok.toLocaleString()} lines`}
+            <button onClick={run} disabled={busy || readyCount === 0} className={btnPrimary}>
+              {busy ? "Working…"
+                : kind === "payments" ? `Classify ${readyCount.toLocaleString()} payments`
+                : kind === "comm_master" ? `Update ${readyCount.toLocaleString()} rates`
+                : `Import ${readyCount.toLocaleString()} rows`}
             </button>
           </div>
 
-          <DataTable cols={cols} rows={parsed.slice(0, 50)} minWidth={900} empty="Nothing to show." />
+          {sales && <DataTable cols={saleCols} rows={sales.parsed.slice(0, 50)} minWidth={900} empty="Nothing to show." />}
+          {expenses && <DataTable cols={expCols} rows={expenses.parsed.slice(0, 50)} minWidth={900} empty="Nothing to show." />}
+          {payments && <DataTable cols={payCols} rows={payments.slice(0, 50)} minWidth={720} empty="Nothing to show." />}
+          {comm && <DataTable cols={commCols} rows={comm.slice(0, 50)} minWidth={720} empty="Nothing to show." />}
         </>
       )}
 
-      <SourceNote>
-        Every line carries a <strong>line_hash</strong> built from shop, day, receipt, item,
-        quantity, amount and position. The column is unique, so dropping the same file in twice
-        changes nothing — the second run reports the lines as skipped rather than adding them.
-        Rows whose shop or date could not be read are left out and counted, never guessed.
-      </SourceNote>
+      {(kind === "sales_multi" || kind === "sales_single") && rows.length > 0 && (
+        <SourceNote>
+          Every line carries a <strong>line_hash</strong> — shop, day, receipt, item, quantity,
+          amount and time, joined. The column is unique, so dropping the same file in twice changes
+          nothing; the second run reports the lines as skipped. Two identical items on one receipt
+          are two real sales and get <code>|#2</code> appended rather than being collapsed.
+        </SourceNote>
+      )}
+      {(kind === "expense_multi" || kind === "expense_single") && rows.length > 0 && (
+        <SourceNote>
+          Importing <strong>replaces</strong> previously-imported Nimbus expenses for these branches
+          within the file&apos;s own date range, so an overlapping re-import is safe. The sign in the
+          Amount column decides direction: negative is an expense, positive is misc income.
+        </SourceNote>
+      )}
 
       <PreviewNote />
-      {!isSupabaseConfigured && null}
     </Shell>
   );
 }

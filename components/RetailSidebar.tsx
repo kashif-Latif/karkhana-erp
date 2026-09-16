@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Receipt, Store, BookText, Percent, Wallet, ArrowLeft, LogOut,
-  Building2, Upload, CreditCard, Landmark, Users, CalendarCheck, CalendarRange,
+  Building2, Upload, CreditCard, Landmark, Users, CalendarCheck, CalendarRange, Coins,
   NotebookPen, Banknote, ArrowLeftRight, ChevronDown, Briefcase, type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -46,6 +46,7 @@ const NAV: NavItem[] = [
       { label: "Attendance",      href: "/retail/employees/attendance", Icon: CalendarCheck },
       { label: "Monthly Summary", href: "/retail/employees/summary",    Icon: CalendarRange },
       { label: "Ledger",          href: "/retail/employees/ledger",     Icon: NotebookPen },
+      { label: "Repayments",      href: "/retail/employees/repayments", Icon: Coins },
       { label: "Employees",       href: "/retail/employees",            Icon: Users },
   ] },
 
@@ -59,6 +60,7 @@ const NAV: NavItem[] = [
       { label: "Monthly Summary", href: "/retail/ho/summary",    Icon: CalendarRange },
       { label: "Employees",       href: "/retail/ho/employees",  Icon: Users },
       { label: "Ledger",          href: "/retail/ho/ledger",     Icon: NotebookPen },
+      { label: "Repayments",      href: "/retail/ho/repayments", Icon: Coins },
   ] },
 
   { label: "Card Reconciliation", href: "/retail/cards", Icon: CreditCard },
