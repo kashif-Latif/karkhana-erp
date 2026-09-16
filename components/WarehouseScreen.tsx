@@ -245,6 +245,9 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [newGst, setNewGst] = useState("");
   const [newQty, setNewQty] = useState("");
   const [madeCode, setMadeCode] = useState<string | null>(null);
+  /* The add-product form has its OWN manual barcode field. Sharing `bc` with
+     the scan box meant typing in one wiped the other. */
+  const [bcNew, setBcNew] = useState("");
 
   async function addItem() {
     if (!supabase) return;
@@ -257,7 +260,7 @@ function WarehouseInner({ section }: { section: Tab }) {
        separately is how products ended up with no code and no price. */
     const { data, error } = await supabase.rpc("add_warehouse_product", {
       p_name: nm.trim(), p_section: newSection,
-      p_manual_barcode: bc.trim() || null,
+      p_manual_barcode: bcNew.trim() || null,
       p_cost: newCost === "" ? null : parseFloat(newCost),
       p_retail: newRetail === "" ? null : parseFloat(newRetail),
       p_gst: newGst === "" ? null : parseFloat(newGst),
@@ -783,9 +786,25 @@ function WarehouseInner({ section }: { section: Tab }) {
                   </p>
                 )}
                 {!found && bc.trim() && (
-                  <p className="mt-2 text-[12.5px] font-medium text-danger">
-                    No product with barcode <b>{bc.trim()}</b>. Add it under Products first, or check the code.
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <p className="text-[12.5px] font-medium text-danger">
+                      No product with barcode <b>{bc.trim()}</b>.
+                    </p>
+                    {/* Add it here rather than sending someone to another screen
+                        and back. An unknown barcode at the receiving bench is
+                        the moment you know the product needs creating. */}
+                    {canManage && (
+                      <button
+                        onClick={() => {
+                          setItemOpen(true); setMadeCode(null);
+                          setBcNew(bc.trim()); setNm(""); setNewSection("");
+                          setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(qty || "");
+                        }}
+                        className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white">
+                        + Add this product
+                      </button>
+                    )}
+                  </div>
                 )}
                 {found && !qty && (
                   <p className="mt-2 text-[12.5px] text-muted">How many pieces?</p>
@@ -1003,10 +1022,10 @@ function WarehouseInner({ section }: { section: Tab }) {
             <div className="mx-auto max-w-xs rounded-xl2 border border-[#166534]/25 bg-success-soft p-4">
               <p className="text-[11.5px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
               <p className="mt-1 font-mono text-[30px] font-extrabold tracking-tight text-ink">{madeCode}</p>
-              {bc.trim() && <p className="mt-1.5 font-mono text-[12.5px] text-ink/70">also {bc.trim()}</p>}
+              {bcNew.trim() && <p className="mt-1.5 font-mono text-[12.5px] text-ink/70">also {bcNew.trim()}</p>}
             </div>
             <div className="mt-4 flex justify-center gap-2">
-              <button onClick={() => { setBc(""); setNm(""); setNewSection(""); setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(""); setMadeCode(null); }}
+              <button onClick={() => { setBcNew(""); setNm(""); setNewSection(""); setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(""); setMadeCode(null); }}
                 className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Add another</button>
               <button onClick={() => { setItemOpen(false); setMadeCode(null); }}
                 className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
@@ -1031,7 +1050,7 @@ function WarehouseInner({ section }: { section: Tab }) {
               <Field label="Manual barcode">
                 {/* Theirs, if a label already exists. Ours is generated on save
                     and cannot be typed. */}
-                <input value={bc} onChange={(e) => setBc(e.target.value)}
+                <input value={bcNew} onChange={(e) => setBcNew(e.target.value)}
                   placeholder="scan it, or leave blank" className={inp} />
               </Field>
             </div>
