@@ -726,7 +726,7 @@ function WarehouseInner({ section }: { section: Tab }) {
               <div className="rounded-card border border-line bg-surface p-4">
                 <p className="flex items-center gap-1.5 text-[13px] font-bold text-ink">
                   {tab === "in" ? <ArrowDownToLine size={15} /> : <ArrowUpFromLine size={15} />}
-                  {tab === "in" ? "Bring stock in" : "Send stock out"}
+                  {tab === "in" ? "New GRN — bring stock in" : "GR out — send stock out"}
                 </p>
                 <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
                   <input value={scan} autoFocus
@@ -743,7 +743,7 @@ function WarehouseInner({ section }: { section: Tab }) {
                   ) : (
                     <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
                   )}
-                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found}
+                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found || !(parseFloat(qty) > 0)}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Record {tab === "in" ? "in" : "out"}
@@ -774,6 +774,21 @@ function WarehouseInner({ section }: { section: Tab }) {
                       placeholder="why the gap? (optional — e.g. bulk book, cancelled pad)"
                       className={`${inp} mt-2`} />
                   </div>
+                )}
+                {/* A disabled button with no explanation is the worst state a
+                    form can be in. Say which of the two things is missing. */}
+                {!found && !bc.trim() && (
+                  <p className="mt-2 text-[12.5px] text-muted">
+                    Scan a barcode, or type it and press Enter. Either code works — ours ({tab === "in" ? "44-000012" : "44-000012"}) or the printed one.
+                  </p>
+                )}
+                {!found && bc.trim() && (
+                  <p className="mt-2 text-[12.5px] font-medium text-danger">
+                    No product with barcode <b>{bc.trim()}</b>. Add it under Products first, or check the code.
+                  </p>
+                )}
+                {found && !qty && (
+                  <p className="mt-2 text-[12.5px] text-muted">How many pieces?</p>
                 )}
                 {found && (
                   <p className="mt-2 text-[12.5px] text-ink/80">
