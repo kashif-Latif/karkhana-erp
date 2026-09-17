@@ -35,27 +35,45 @@ type Ask = {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: "danger" | "normal";
+  /* Ask for a short note as part of confirming. Used where the record of WHY
+     matters as much as the act — removing a shipment, writing off a parcel.
+     A browser prompt() would do the same job and look nothing like the rest of
+     the app, which is reason enough not to use one. */
+  reasonLabel?: string;
+  reasonDefault?: string;
 };
 
-const Ctx = createContext<(a: Ask) => Promise<boolean>>(async () => false);
+/* Resolves false when dismissed. When a reason was asked for, it resolves to
+   the text instead — an empty string still counts as confirmed, so callers test
+   for `!== false` rather than truthiness. */
+type Answer = boolean | string;
+const Ctx = createContext<(a: Ask) => Promise<Answer>>(async () => false);
 
-/** Ask for confirmation. Resolves true only if the person confirms. */
+/** Ask for confirmation. Resolves true (or the reason text) only if confirmed. */
 export function useConfirm() {
   return useContext(Ctx);
 }
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [ask, setAsk] = useState<Ask | null>(null);
-  const resolver = useRef<((v: boolean) => void) | null>(null);
+  const [reason, setReason] = useState("");
+  const resolver = useRef<((v: Answer) => void) | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  /* close() is memoised with no deps so the Escape handler stays stable; these
+     let it read the current values without re-creating it on every keystroke. */
+  const askRef = useRef<Ask | null>(null);
+  const reasonRef = useRef("");
+  askRef.current = ask;
+  reasonRef.current = reason;
 
   const confirm = useCallback((a: Ask) => {
     setAsk(a);
-    return new Promise<boolean>((res) => { resolver.current = res; });
+    setReason(a.reasonDefault ?? "");
+    return new Promise<Answer>((res) => { resolver.current = res; });
   }, []);
 
   const close = useCallback((answer: boolean) => {
-    resolver.current?.(answer);
+    resolver.current?.(answer && askRef.current?.reasonLabel ? reasonRef.current : answer);
     resolver.current = null;
     setAsk(null);
   }, []);
@@ -97,6 +115,17 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 <X size={16} />
               </button>
             </div>
+
+            {ask.reasonLabel && (
+              <div className="mt-4">
+                <label className="mb-1 block text-[11.5px] font-semibold uppercase tracking-wide text-hint dark:text-[#8a8175]">
+                  {ask.reasonLabel}
+                </label>
+                <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === "Enter") close(true); }}
+                       className="w-full rounded-full border border-line bg-surface px-3.5 py-2 text-[13px] outline-none focus:border-ink dark:border-white/10 dark:bg-white/[0.05] dark:text-white" />
+              </div>
+            )}
 
             <div className="mt-5 flex justify-end gap-2">
               <button ref={cancelRef} onClick={() => close(false)}

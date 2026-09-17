@@ -15,11 +15,13 @@ import { usePermissions } from "@/lib/usePermissions";
 import { exportCSV, exportExcel, exportPDF, printTable, type ExportTable } from "@/lib/export";
 
 type Row = { id: string; entry_no: string; process: string; worked_on: string;
+             piece_type: string; paid_at: string | null;
              item_name: string | null; barcode: string | null; manual_barcode: string | null;
              section: string | null; quantity: number; rate: number; total_labour: number;
              worker_name: string; note: string | null; voided_at: string | null;
              on_payroll: boolean };
-type Art = { id: string; name: string; system_barcode: string | null; section: string | null };
+type Art = { id: string; name: string; system_barcode: string | null;
+             section: string | null; source: "factory" | "warehouse" };
 type Staff = { id: string; name: string };
 
 const PROCESSES = ["cutting", "stitching", "overlock", "flatlock", "singlelock", "other"];
@@ -45,6 +47,8 @@ export default function MachineProcessPage() {
   const [open, setOpen] = useState(false);
   const [day, setDay] = useState(today());
   const [artId, setArtId] = useState("");
+  const [code, setCode] = useState("");
+  const [pieceType, setPieceType] = useState("fresh");
   const [qty, setQty] = useState("");
   const [rate, setRate] = useState("");
   const [empId, setEmpId] = useState("");
@@ -54,19 +58,28 @@ export default function MachineProcessPage() {
   const [fErr, setFErr] = useState("");
   const [voidRow, setVoidRow] = useState<string | null>(null);
   const [voidWhy, setVoidWhy] = useState("");
+  const [payFor, setPayFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
     const [e, a, s] = await Promise.all([
       supabase.from("v_machine_process").select("*").order("worked_on", { ascending: false }),
-      supabase.from("articles").select("id,name,system_barcode,section")
-        .eq("is_active", true).eq("owner", "factory").order("system_barcode"),
+      /* Both lists: a thing that gets cut may be a factory article or a
+         warehouse product. Making someone re-type the other is how a second
+         list starts. */
+      supabase.from("articles").select("id,name,system_barcode,section,owner")
+        .eq("is_active", true).order("system_barcode"),
       supabase.from("v_factory_employees").select("id,name").order("name"),
     ]);
     if (e.error) setErr(e.error.message);
     setRows((e.data as Row[]) ?? []);
-    setArts((a.data as Art[]) ?? []);
+    setArts(((a.data as unknown as Record<string, unknown>[]) ?? []).map((r) => ({
+      id: String(r.id), name: String(r.name),
+      system_barcode: (r.system_barcode as string) ?? null,
+      section: (r.section as string) ?? null,
+      source: r.owner === "warehouse" ? "warehouse" : "factory",
+    })));
     setStaff((s.data as Staff[]) ?? []);
     setLoading(false);
   }, []);
@@ -91,21 +104,24 @@ export default function MachineProcessPage() {
 
   /* The foot of the paper sheet: one line per person, biggest first. */
   const perPerson = useMemo(() => {
-    const m = new Map<string, { pieces: number; labour: number; entries: number }>();
+    const m = new Map<string, { pieces: number; earned: number; paid: number; entries: number }>();
     live.forEach((r) => {
-      const p = m.get(r.worker_name) ?? { pieces: 0, labour: 0, entries: 0 };
+      const p = m.get(r.worker_name) ?? { pieces: 0, earned: 0, paid: 0, entries: 0 };
+      const amt = Number(r.total_labour || 0);
       m.set(r.worker_name, {
         pieces: p.pieces + Number(r.quantity || 0),
-        labour: p.labour + Number(r.total_labour || 0),
+        earned: p.earned + amt,
+        paid: p.paid + (r.paid_at ? amt : 0),
         entries: p.entries + 1,
       });
     });
-    return [...m.entries()].map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.labour - a.labour);
+    return [...m.entries()]
+      .map(([name, v]) => ({ name, ...v, pending: v.earned - v.paid }))
+      .sort((a, b) => b.pending - a.pending || b.earned - a.earned);
   }, [live]);
 
   function openForm() {
-    setOpen(true); setDay(today()); setArtId(""); setQty(""); setRate("");
+    setOpen(true); setDay(today()); setArtId(""); setCode(""); setPieceType("fresh"); setQty(""); setRate("");
     setEmpId(""); setWorker(""); setNote(""); setFErr("");
   }
 
@@ -121,6 +137,8 @@ export default function MachineProcessPage() {
       p_quantity: parseFloat(qty), p_rate: parseFloat(rate),
       p_worker_name: worker.trim() || null, p_worker_employee_id: empId || null,
       p_note: note.trim() || null,
+      p_piece_type: pieceType,
+      p_item_name: null, p_barcode: null,
     });
     setBusy(false);
     if (error) { setFErr(error.message); return; }
@@ -129,6 +147,17 @@ export default function MachineProcessPage() {
        man cutting the same item at two rates. */
     if (again) { setQty(""); setRate(""); setNote(""); }
     else setOpen(false);
+  }
+
+  async function payOff(name: string) {
+    if (!supabase) return;
+    setErr("");
+    const { error } = await supabase.rpc("pay_machine_process", {
+      p_worker_name: name, p_process: proc,
+      p_from: from || null, p_to: to || null, p_note: null,
+    });
+    if (error) { setErr(error.message); return; }
+    setPayFor(null); load();
   }
 
   async function doVoid(id: string) {
@@ -140,14 +169,24 @@ export default function MachineProcessPage() {
 
   const table = (): ExportTable => ({
     title: `Machine Process — ${proc}`,
-    headers: ["Entry", "Date", "Item code", "Barcode", "Item description", "Qty", "Rate", "Job person", "Total labour"],
+    headers: ["Entry", "Date", "Item code", "Item description", "Fresh/pieces", "Qty", "Rate", "Job person", "Total labour", "Paid"],
     rows: [
-      ...live.map((r) => [r.entry_no, r.worked_on, r.barcode ?? "", r.manual_barcode ?? "",
-        r.item_name ?? "", r.quantity, r.rate, r.worker_name, r.total_labour]),
-      ...(perPerson.length ? [["", "", "", "", "", "", "", "", ""]] : []),
-      ...perPerson.map((p) => ["", "", "", "", `TOTAL — ${p.name}`, p.pieces, "", "", p.labour]),
+      ...live.map((r) => [r.entry_no, r.worked_on, r.barcode ?? "", r.item_name ?? "",
+        r.piece_type, r.quantity, r.rate, r.worker_name, r.total_labour,
+        r.paid_at ? "paid" : "pending"]),
+      ...(perPerson.length ? [["", "", "", "", "", "", "", "", "", ""]] : []),
+      ...perPerson.map((p) => ["", "", "", `TOTAL — ${p.name}`, "", p.pieces, "", "",
+        p.earned, p.pending > 0 ? `pending ${p.pending}` : "settled"]),
     ],
   });
+
+  const matches = useMemo(() => {
+    const t = code.trim().toLowerCase();
+    if (!t) return [];
+    return arts.filter((a) =>
+      String(a.system_barcode ?? "").toLowerCase().includes(t) ||
+      a.name.toLowerCase().includes(t)).slice(0, 10);
+  }, [code, arts]);
 
   const artLabel = (a: Art) => `${a.system_barcode ?? ""} — ${a.name}`;
 
@@ -228,7 +267,10 @@ export default function MachineProcessPage() {
                   <tr key={r.id} className={`border-b border-line/60 last:border-0 ${r.voided_at ? "opacity-45" : ix % 2 ? "bg-panel/25" : ""}`}>
                     <td className="px-4 py-3">
                       <span className="font-semibold text-ink">{r.item_name ?? "—"}</span>
-                      <span className="block text-[11px] text-hint">{r.entry_no} · {r.worked_on}</span>
+                      <span className="block text-[11px] text-hint">
+                        {r.entry_no} · {r.worked_on} · {r.piece_type === "pieces" ? "pieces" : "fresh"}
+                        {r.paid_at && <span className="ml-1 font-semibold text-[#166534]">paid</span>}
+                      </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-[12px] text-muted">{r.barcode ?? "—"}</td>
                     <td className="px-4 py-3 text-right tnum font-semibold text-ink">{n(r.quantity)}</td>
@@ -258,13 +300,33 @@ export default function MachineProcessPage() {
               {perPerson.length > 0 && (
                 <tfoot>
                   {perPerson.map((p) => (
-                    <tr key={p.name} className="border-t border-line bg-panel/40 text-[13px] font-bold text-ink">
-                      <td className="px-4 py-2.5" colSpan={2}>Total — {p.name}</td>
-                      <td className="px-4 py-2.5 text-right tnum">{n(p.pieces)}</td>
-                      <td className="px-4 py-2.5"></td>
-                      <td className="px-4 py-2.5 text-[12px] font-normal text-muted">{p.entries} entr{p.entries === 1 ? "y" : "ies"}</td>
-                      <td className="px-4 py-2.5 text-right tnum text-[15px] font-extrabold">{rs(p.labour)}</td>
-                      <td className="px-4 py-2.5"></td>
+                    <tr key={p.name} className="border-t border-line bg-panel/40 text-[13px] text-ink">
+                      <td className="px-4 py-2.5 font-bold" colSpan={2}>
+                        {p.name}
+                        <span className="ml-2 text-[11px] font-normal text-muted">{p.entries} entr{p.entries === 1 ? "y" : "ies"}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-bold">{n(p.pieces)}</td>
+                      <td className="px-4 py-2.5 text-right text-[11.5px] text-muted">earned {rs(p.earned)}</td>
+                      <td className="px-4 py-2.5 text-[11.5px] text-muted">
+                        {p.paid > 0 ? `paid ${rs(p.paid)}` : "nothing paid"}
+                      </td>
+                      {/* Pending is the number that matters — it is what you owe
+                          him when he asks. */}
+                      <td className="px-4 py-2.5 text-right tnum text-[16px] font-extrabold">
+                        {p.pending > 0 ? rs(p.pending) : <span className="text-[13px] font-semibold text-[#166534]">settled</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        {canDo && p.pending > 0 && (payFor === p.name ? (
+                          <span className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => payOff(p.name)}
+                              className="rounded-full bg-ink px-2.5 py-1 text-[11px] font-semibold text-white">pay {rs(p.pending)}</button>
+                            <button onClick={() => setPayFor(null)} className="text-[11px] text-ink/50">no</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setPayFor(p.name)}
+                            className="rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold text-ink/70 hover:bg-panel">settle</button>
+                        ))}
+                      </td>
                     </tr>
                   ))}
                 </tfoot>
@@ -292,11 +354,42 @@ export default function MachineProcessPage() {
           </Field></div>
         )}
 
-        <div className="mt-3"><Field label="Item">
-          <select value={artId} onChange={(e) => setArtId(e.target.value)} className={inp}>
-            <option value="">Choose…</option>
-            {arts.map((a) => <option key={a.id} value={a.id}>{artLabel(a)}</option>)}
-          </select>
+        <div className="mt-3"><Field label="Computer code or item name">
+          <input value={code} onChange={(e) => { setCode(e.target.value); setArtId(""); }}
+            placeholder="type 43-000010 or a name" className={inp} />
+        </Field></div>
+        {!artId && code.trim() && (
+          matches.length > 0 ? (
+            <div className="mt-2 overflow-hidden rounded-xl2 border border-line">
+              <p className="border-b border-line bg-panel/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-hint">
+                {matches.length} match{matches.length === 1 ? "" : "es"} — click one
+              </p>
+              <div className="max-h-40 overflow-y-auto">
+                {matches.map((a) => (
+                  <button key={a.id} onClick={() => { setArtId(a.id); setCode(artLabel(a)); }}
+                    className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left last:border-0 hover:bg-panel">
+                    <span>
+                      <span className="text-[13px] font-semibold text-ink">{a.name}</span>
+                      <span className="block font-mono text-[11px] text-hint">{a.system_barcode ?? "—"}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-panel px-2 py-0.5 text-[10.5px] font-semibold text-muted">{a.source}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : <p className="mt-2 text-[12.5px] text-muted">Nothing matches that code or name.</p>
+        )}
+
+        <div className="mt-3"><Field label="Fabric was">
+          <div className="mt-1 flex gap-2">
+            {[["fresh", "Fresh — whole roll, cut from the meter"],
+              ["pieces", "Pieces — already in pieces"]].map(([v, l]) => (
+              <button key={v} onClick={() => setPieceType(v)}
+                className={`flex-1 rounded-xl2 border px-3 py-2 text-left text-[12.5px] font-semibold transition ${pieceType === v ? "border-ink bg-panel text-ink" : "border-line text-ink/60 hover:bg-panel"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
         </Field></div>
 
         <div className="mt-3 grid grid-cols-3 gap-3">

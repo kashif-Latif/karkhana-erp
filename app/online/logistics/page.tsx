@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveTables } from "@/lib/useLiveTables";
 import { Package, Truck, CheckCircle2, Undo2, Percent, Wallet, Search, RefreshCw, XCircle, Clock, TrendingUp } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useConfirm } from "@/components/ConfirmDialog";
 import RangeBar from "@/components/RangeBar";
 import { rangeDates, num, rs } from "@/lib/dateRange";
 import { AddShipment } from "@/components/LogisticsEntry";
@@ -60,6 +61,7 @@ export default function LogisticsPage() {
   const [statusCounts, setStatusCounts] = useState<StatusRow[]>([]);
   const [rawStatus, setRawStatus] = useState("All statuses");
   const [loading, setLoading] = useState(true);
+  const confirm = useConfirm();
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
@@ -97,11 +99,16 @@ export default function LogisticsPage() {
      that parcel go" has to stay answerable. */
   async function removeParcel(tracking: string, order: string) {
     if (!supabase || !tracking || tracking === "—") return;
-    const reason = window.prompt(
-      `Remove ${order || tracking} from logistics?\n\nUse this for a booking that should never have existed — a double booking, or one made by mistake.\n\nWhy is it being removed?`,
-      "booked by mistake",
-    );
-    if (reason === null) return;   // cancelled
+    const answer = await confirm({
+      title: `Remove ${order || tracking}?`,
+      body: "For a booking that should never have existed — a double booking, or one made by mistake. A settled or delivered parcel cannot be removed. The row is kept with your note in case anyone asks later.",
+      reasonLabel: "Why is it being removed?",
+      reasonDefault: "booked by mistake",
+      confirmLabel: "Remove shipment",
+    });
+    // An empty note still counts as confirmed, so test against false.
+    if (answer === false) return;
+    const reason = typeof answer === "string" ? answer : "";
     setBusy(tracking); setErr(""); setNote("");
     const { data, error } = await supabase.rpc("hub_delete_parcel", {
       p_tracking: tracking, p_reason: reason || null,
