@@ -68,6 +68,10 @@ const NAV: NavItem[] = [
     { label: "GR out", href: "/warehouse/grn-out" },
     { label: "Products", href: "/warehouse/products" },
     { label: "STR", href: "/str/warehouse" },
+    { label: "Staff management", sub: [
+      { label: "New staff induction", href: "/warehouse/staff/induction" },
+      { label: "Staff payroll", href: "/warehouse/staff/payroll" },
+    ] },
     { label: "Reports", sub: [
       { label: "New GRN report", href: "/reports/warehouse/grn" },
       { label: "GR out report", href: "/reports/warehouse/grout" },

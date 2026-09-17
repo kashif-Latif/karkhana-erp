@@ -8,6 +8,8 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/grn": ["inventory.view"],
   "/machine-process": ["production.view", "production.entry"],
   "/staff/induction": ["production.view", "production.entry"],
+  "/warehouse/staff/payroll": ["khana.view", "khana.manage"],
+  "/warehouse/staff/induction": ["khana.view", "khana.manage"],
   "/staff/payroll": ["production.view", "production.entry"],
   "/edit-record": ["production.entry", "grn.create"],
   "/reports/factory/grn": ["inventory.view", "production.view"],

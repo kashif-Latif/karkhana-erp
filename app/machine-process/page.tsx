@@ -22,8 +22,12 @@ type Row = { id: string; entry_no: string; process: string; worked_on: string;
              on_payroll: boolean };
 type Art = { id: string; name: string; system_barcode: string | null;
              section: string | null; source: "factory" | "warehouse" };
-type Staff = { id: string; name: string; rate: number | null; department: string | null };
+type Staff = { id: string; name: string; rate: number | null;
+               department: string | null; dept_code: string | null };
 
+const DEPTS: [string, string][] = [["CUT", "Cutting"], ["MFSU", "Stitching unit"],
+  ["OVL", "Overlock"], ["FLT", "Flatlock"], ["SGL", "Singlelock"],
+  ["CLIP", "Clipping"], ["QAQC", "Checking"], ["PACK", "Packing"]];
 const PROCESSES = ["cutting", "stitching", "overlock", "flatlock", "singlelock", "other"];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -52,6 +56,7 @@ export default function MachineProcessPage() {
   const [qty, setQty] = useState("");
   const [rate, setRate] = useState("");
   const [empId, setEmpId] = useState("");
+  const [deptCode, setDeptCode] = useState("CUT");
   const [worker, setWorker] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,7 +78,7 @@ export default function MachineProcessPage() {
       /* v_factory_staff carries the rate, so choosing a man fills it in.
          Inactive people are filtered on screen, not in the query — otherwise
          an empty dropdown looks like a broken one. */
-      supabase.from("v_factory_staff").select("id,name,rate,department,is_active").order("name"),
+      supabase.from("v_factory_staff").select("id,name,rate,department,dept_code,is_active").order("name"),
     ]);
     if (e.error) setErr(e.error.message);
     setRows((e.data as Row[]) ?? []);
@@ -87,7 +92,8 @@ export default function MachineProcessPage() {
       .filter((r) => r.is_active)
       .map((r) => ({ id: String(r.id), name: String(r.name),
         rate: r.rate == null ? null : Number(r.rate),
-        department: (r.department as string) ?? null })));
+        department: (r.department as string) ?? null,
+        dept_code: (r.dept_code as string) ?? null })));
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -129,7 +135,7 @@ export default function MachineProcessPage() {
 
   function openForm() {
     setOpen(true); setDay(today()); setArtId(""); setCode(""); setPieceType("fresh"); setQty(""); setRate("");
-    setEmpId(""); setWorker(""); setNote(""); setFErr("");
+    setEmpId(""); setWorker(""); setDeptCode(proc === "cutting" ? "CUT" : "MFSU"); setNote(""); setFErr("");
   }
 
   /* Adding him here rather than sending someone to another screen and back —
@@ -139,7 +145,7 @@ export default function MachineProcessPage() {
     setBusy(true); setFErr("");
     const { data, error } = await supabase.rpc("add_factory_employee", {
       p_name: worker.trim(),
-      p_department_code: proc === "cutting" ? "CUT" : "MFSU",
+      p_department_code: deptCode,
       p_rate: rate === "" ? null : parseFloat(rate),
       p_phone: null, p_cnic: null, p_employment: "casual",
     });
@@ -205,6 +211,12 @@ export default function MachineProcessPage() {
         p.earned, p.pending > 0 ? `pending ${p.pending}` : "settled"]),
     ],
   });
+
+  /* Only people from the chosen department - a cutting entry should not
+     offer the packing bench. */
+  const inDept = useMemo(
+    () => staff.filter((x) => !x.dept_code || x.dept_code === deptCode),
+    [staff, deptCode]);
 
   const matches = useMemo(() => {
     const t = code.trim().toLowerCase();
@@ -363,41 +375,44 @@ export default function MachineProcessPage() {
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inp} />
           </Field>
           <Field label="Department">
-            <select value={empId} className={inp}
-              onChange={(e) => {
-                const id = e.target.value;
-                setEmpId(id);
-                /* His standing rate, filled in — still editable, because a
-                   harder cut is paid more. */
-                const p = staff.find((x) => x.id === id);
-                if (p?.rate != null) setRate(String(p.rate));
-              }}>
-              <option value="">Not on payroll…</option>
-              {staff.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.name}{x.rate != null ? ` — ${x.rate}/pc` : ""}
-                </option>
-              ))}
+            <select value={deptCode} onChange={(e) => { setDeptCode(e.target.value); setEmpId(""); }} className={inp}>
+              {DEPTS.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
             </select>
           </Field>
         </div>
-        {staff.length === 0 && (
-          <p className="mt-2 text-[12.5px] text-muted">
-            No active staff yet — type his name below, or add him properly on the Staff screen.
-          </p>
-        )}
+        <div className="mt-3"><Field label="Emp name">
+          <select value={empId} className={inp}
+            onChange={(e) => {
+              const id = e.target.value;
+              setEmpId(id); setWorker("");
+              const p = staff.find((x) => x.id === id);
+              if (p?.rate != null) setRate(String(p.rate));
+            }}>
+            <option value="">Type a name below...</option>
+            {inDept.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}{x.rate != null ? ` - ${x.rate}/pc` : ""}
+              </option>
+            ))}
+          </select>
+        </Field></div>
 
         {!empId && (
-          <div className="mt-3"><Field label="Emp name">
-            <input value={worker} onChange={(e) => setWorker(e.target.value)} placeholder="e.g. Aslam" className={inp} />
-          </Field>
-          {worker.trim() && (
-            <button onClick={addPerson} disabled={busy}
-              className="mt-2 rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-ink/75 hover:bg-panel disabled:opacity-50">
-              + Save {worker.trim()} to staff{rate ? ` at ${rate}/pc` : ""}
-            </button>
-          )}
+          <div className="mt-2">
+            <input value={worker} onChange={(e) => setWorker(e.target.value)}
+              placeholder="or type his name - e.g. Aslam" className={inp} />
+            {worker.trim() && (
+              <button onClick={addPerson} disabled={busy}
+                className="mt-2 rounded-full bg-ink px-3.5 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
+                + Add {worker.trim()} to {DEPTS.find(([c]) => c === deptCode)?.[1] ?? "staff"}
+              </button>
+            )}
           </div>
+        )}
+        {inDept.length === 0 && !worker.trim() && (
+          <p className="mt-2 text-[12.5px] text-muted">
+            Nobody on payroll in {DEPTS.find(([c]) => c === deptCode)?.[1]} yet - type his name and add him.
+          </p>
         )}
 
         <div className="mt-3"><Field label="Computer code or item name">
@@ -428,8 +443,7 @@ export default function MachineProcessPage() {
 
         <div className="mt-3"><Field label="Fabric was">
           <div className="mt-1 flex gap-2">
-            {[["fresh", "Fresh — whole roll, cut from the meter"],
-              ["pieces", "Pieces — already in pieces"]].map(([v, l]) => (
+            {[["fresh", "Fresh"], ["pieces", "Pieces"]].map(([v, l]) => (
               <button key={v} onClick={() => setPieceType(v)}
                 className={`flex-1 rounded-xl2 border px-3 py-2 text-left text-[12.5px] font-semibold transition ${pieceType === v ? "border-ink bg-panel text-ink" : "border-line text-ink/60 hover:bg-panel"}`}>
                 {l}

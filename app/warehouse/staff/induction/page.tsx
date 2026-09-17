@@ -2,5 +2,5 @@
 import { InductionScreen } from "@/components/staff/InductionScreen";
 
 export default function Page() {
-  return <InductionScreen side="factory" />;
+  return <InductionScreen side="warehouse" />;
 }
