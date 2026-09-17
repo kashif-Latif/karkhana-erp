@@ -41,7 +41,7 @@ function ago(iso: string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-export default function HubBell({ dark = false }: { dark?: boolean }) {
+export default function HubBell({ dark = false, align = "right" }: { dark?: boolean; align?: "left" | "right" }) {
   const [items, setItems] = useState<Note[]>([]);
   const [open, setOpen] = useState(false);
   const router = useRouter();
@@ -109,7 +109,28 @@ export default function HubBell({ dark = false }: { dark?: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 max-h-[70vh] w-[320px] overflow-y-auto rounded-card border border-line bg-surface shadow-card dark:border-white/10 dark:bg-[#201c17] sm:w-[380px]">
+        /* WHERE THIS PANEL OPENS, and why it used to fall off the screen.
+         *
+         * It was `absolute right-0` with a fixed 380px width. That pins the
+         * panel's RIGHT edge to the bell and grows it leftward — fine for a
+         * bell in the top-right corner, wrong for this one, which sits inside
+         * a 248px sidebar on the LEFT. 248 − 380 put a third of the panel past
+         * the left edge of the window, unreachable.
+         *
+         * Two rules now instead of one:
+         *   phone   a fixed sheet with a gutter on both sides. It cannot run
+         *           off an edge because it is measured from the window, not
+         *           from the bell.
+         *   desktop anchored to the bell and opening INTO the page — from its
+         *           left edge in the sidebar, from its right edge in the phone
+         *           header, which is where `align` comes from.
+         */
+        <div className={[
+          "fixed inset-x-3 top-16 z-50 max-h-[70vh] overflow-y-auto rounded-card border border-line",
+          "bg-surface shadow-card dark:border-white/10 dark:bg-[#201c17]",
+          "sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:w-[360px]",
+          align === "left" ? "sm:left-0" : "sm:right-0",
+        ].join(" ")}>
           <div className="sticky top-0 border-b border-line bg-surface px-4 py-2.5 text-[12px] font-bold text-ink dark:border-white/10 dark:bg-[#201c17] dark:text-[#f4f1ea]">
             Notifications
           </div>

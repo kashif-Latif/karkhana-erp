@@ -92,7 +92,9 @@ export default function OnlineSidebar({ open, onClose }: { open?: boolean; onClo
             <div className="text-[15px] font-extrabold tracking-tight dark:text-[#f4f1ea]">Hub Department</div>
             <div className="text-[11px] text-muted dark:text-[#a89f93]">Online orders</div>
           </div>
-          <HubBell />
+          {/* Opens rightward, into the page. The sidebar is only 248px wide,
+              so a panel anchored the other way lands off the screen. */}
+          <HubBell align="left" />
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onClose?.(); }}>
           {ready && visible.map(({ label, href, Icon, soon, children }) => {
