@@ -248,11 +248,6 @@ export default function MachineProcessPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
-            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
-          <span className="text-[12px] text-hint">to</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
-            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search item, barcode, person…"
             className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
@@ -367,7 +362,7 @@ export default function MachineProcessPage() {
           <Field label="Date">
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inp} />
           </Field>
-          <Field label="Job person *">
+          <Field label="Department">
             <select value={empId} className={inp}
               onChange={(e) => {
                 const id = e.target.value;
@@ -393,7 +388,7 @@ export default function MachineProcessPage() {
         )}
 
         {!empId && (
-          <div className="mt-3"><Field label="His name">
+          <div className="mt-3"><Field label="Emp name">
             <input value={worker} onChange={(e) => setWorker(e.target.value)} placeholder="e.g. Aslam" className={inp} />
           </Field>
           {worker.trim() && (
