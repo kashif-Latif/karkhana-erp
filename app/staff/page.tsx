@@ -20,7 +20,7 @@ import { exportCSV, exportExcel, exportPDF, printTable, type ExportTable } from 
 type Staff = { id: string; code: string; name: string; phone: string | null;
                is_active: boolean; rate: number | null; employment_type: string | null;
                join_date: string | null; dept_code: string; department: string;
-               earned: number; pending: number };
+               earned: number; pending: number; entry_count: number };
 
 const DEPTS = [["CUT", "Cutting"], ["MFSU", "Stitching unit"], ["OVL", "Overlock"],
                ["FLT", "Flatlock"], ["SGL", "Singlelock"], ["CLIP", "Clipping"],
@@ -51,6 +51,7 @@ export default function StaffPage() {
   const [active, setActive] = useState(true);
   const [busy, setBusy] = useState(false);
   const [fErr, setFErr] = useState("");
+  const [killing, setKilling] = useState(false);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -73,14 +74,23 @@ export default function StaffPage() {
   const owed = view.reduce((a, r) => a + Number(r.pending || 0), 0);
 
   function openAdd() {
-    setOpen(true); setEdit(null); setName(""); setRate(""); setPhone("");
+    setOpen(true); setEdit(null); setKilling(false); setName(""); setRate(""); setPhone("");
     setCnic(""); setDCode("CUT"); setEmp("casual"); setActive(true); setFErr("");
   }
   function openEdit(r: Staff) {
-    setOpen(true); setEdit(r); setName(r.name);
+    setOpen(true); setEdit(r); setKilling(false); setName(r.name);
     setRate(r.rate == null ? "" : String(r.rate));
     setPhone(r.phone ?? ""); setCnic(""); setDCode(r.dept_code);
     setEmp(r.employment_type ?? "casual"); setActive(r.is_active); setFErr("");
+  }
+
+  async function remove() {
+    if (!supabase || !edit) return;
+    setBusy(true); setFErr("");
+    const { error } = await supabase.rpc("delete_factory_employee", { p_id: edit.id });
+    setBusy(false);
+    if (error) { setFErr(error.message); setKilling(false); return; }
+    setOpen(false); load();
   }
 
   async function save() {
@@ -93,6 +103,7 @@ export default function StaffPage() {
           p_id: edit.id, p_name: name.trim(),
           p_rate: rate === "" ? null : parseFloat(rate),
           p_phone: phone.trim() || null, p_active: active,
+          p_department_code: dCode,
         })
       : await supabase.rpc("add_factory_employee", {
           p_name: name.trim(), p_department_code: dCode,
@@ -216,13 +227,13 @@ export default function StaffPage() {
       </div>
 
       <Modal open={open} onClose={() => setOpen(false)} title={edit ? `Edit ${edit.name}` : "Add employee"}>
-        <Field label="Name *">
+        <Field label="Name">
           <input value={name} autoFocus onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Aslam" className={inp} />
         </Field>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <Field label="Department">
-            <select value={dCode} onChange={(e) => setDCode(e.target.value)} disabled={!!edit} className={inp}>
+            <select value={dCode} onChange={(e) => setDCode(e.target.value)} className={inp}>
               {DEPTS.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
             </select>
           </Field>
@@ -265,12 +276,32 @@ export default function StaffPage() {
         )}
 
         <p className="mt-3 text-[12px] text-hint">
-          The rate is a default the entry form fills in. It stays editable per job — a harder cut is paid more.
+          {/* Everything except the name can be filled in later. A form that
+              demands a CNIC before a man can be paid is a form nobody uses. */}
+          Only the name is needed — rate, phone and the rest can wait.
+          The rate is a default the entry form fills in, still editable per job.
         </p>
         {fErr && <p className="mt-3 text-[12.5px] font-medium text-danger">{fErr}</p>}
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
+        <div className="mt-5 flex items-center gap-2">
+          {edit && (killing ? (
+            <span className="flex items-center gap-2">
+              <button onClick={remove} disabled={busy}
+                className="rounded-xl2 bg-danger px-3.5 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">
+                Delete permanently
+              </button>
+              <button onClick={() => setKilling(false)} className="text-[12px] text-ink/60">cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setKilling(true)}
+              className="rounded-xl2 border border-line px-3.5 py-2 text-[12.5px] font-semibold text-danger/80 hover:bg-danger-soft">
+              Delete
+            </button>
+          ))}
+          {edit && edit.entry_count > 0 && !killing && (
+            <span className="text-[11.5px] text-hint">{edit.entry_count} work entr{edit.entry_count === 1 ? "y" : "ies"}</span>
+          )}
+          <button onClick={() => setOpen(false)} className="ml-auto rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Cancel</button>
           <button onClick={save} disabled={busy}
             className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
             {busy && <Loader2 size={15} className="animate-spin" />} {edit ? "Save" : "Add employee"}
