@@ -61,6 +61,8 @@ export default function LogisticsPage() {
   const [rawStatus, setRawStatus] = useState("All statuses");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState("");
   const [store, setStore] = useState("ALL");
   const [courier, setCourier] = useState("All couriers");
   const [statusFilter, setStatusFilter] = useState("");
@@ -89,6 +91,27 @@ export default function LogisticsPage() {
      moves a handful of statuses, not the list.
      So a realtime refresh brings the FIGURES up to date and leaves the list
      alone; Refresh, or any filter change, pulls the rows. Live numbers, cheap. */
+  /* The database refuses to remove a settled or delivered parcel, so the worst
+     this can do is delete a booking that was never real. The removed row is
+     copied to online_logistics_deleted with who removed it and why — "where did
+     that parcel go" has to stay answerable. */
+  async function removeParcel(tracking: string, order: string) {
+    if (!supabase || !tracking || tracking === "—") return;
+    const reason = window.prompt(
+      `Remove ${order || tracking} from logistics?\n\nUse this for a booking that should never have existed — a double booking, or one made by mistake.\n\nWhy is it being removed?`,
+      "booked by mistake",
+    );
+    if (reason === null) return;   // cancelled
+    setBusy(tracking); setErr(""); setNote("");
+    const { data, error } = await supabase.rpc("hub_delete_parcel", {
+      p_tracking: tracking, p_reason: reason || null,
+    });
+    setBusy("");
+    if (error) { setErr(error.message); return; }
+    setNote(String(data ?? "Removed."));
+    load();
+  }
+
   const load = useCallback(async (opts?: { silent?: boolean; figuresOnly?: boolean }) => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     const myReq = ++reqId.current;
@@ -469,12 +492,18 @@ export default function LogisticsPage() {
         </div>
       </div>
 
+      {note && (
+        <div className="mt-3 rounded-card border border-emerald-300 bg-success-soft p-2.5 text-[12.5px] font-medium text-emerald-900">
+          {note}
+        </div>
+      )}
+
       <div className="mt-4 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175]">
-                {view === "list" && <><th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Dispatched</th><th className="px-4 py-3 text-right font-semibold">COD</th><th className="px-4 py-3 font-semibold">Delivery</th></>}
+                {view === "list" && <><th className="px-4 py-3 font-semibold">Order #</th><th className="px-4 py-3 font-semibold">Store</th><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 font-semibold">Tracking</th><th className="px-4 py-3 font-semibold">Dispatched</th><th className="px-4 py-3 text-right font-semibold">COD</th><th className="px-4 py-3 font-semibold">Delivery</th><th className="px-4 py-3" /></>}
                 {view === "couriers" && <><th className="px-4 py-3 font-semibold">Courier</th><th className="px-4 py-3 text-right font-semibold">Shipments</th><th className="px-4 py-3 text-right font-semibold">Delivered</th><th className="px-4 py-3 text-right font-semibold">RTS</th><th className="px-4 py-3 text-right font-semibold">Rate</th><th className="px-4 py-3 text-right font-semibold">COD</th><th className="px-4 py-3 text-right font-semibold">Fees</th></>}
                 {view === "status" && <><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 text-right font-semibold">Shipments</th><th className="hidden px-4 py-3 font-semibold sm:table-cell">Share</th></>}
               </tr>
@@ -496,6 +525,19 @@ export default function LogisticsPage() {
                     <td className="px-4 py-3 text-muted dark:text-[#a89f93]">{String(l.dispatch_date ?? "—")}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">{l.cod_amount == null ? "—" : rs(num(l.cod_amount))}</td>
                     <td className="px-4 py-3"><span className={`inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${deliveryClass(String(l.delivery_status))}`}>{String(l.delivery_status ?? "—")}</span></td>
+                    {/* REMOVE A BOOKING THAT SHOULD NOT EXIST.
+                        An agent booked #LM15503 twice, six minutes apart. Both
+                        counted as real shipments and one of them was never
+                        going to arrive. A settled or delivered parcel is
+                        refused by the database, so this can only ever remove a
+                        mistake, never money. */}
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => removeParcel(String(l.tracking_id), String(l.order_number ?? ""))}
+                              disabled={busy === String(l.tracking_id)}
+                              className="rounded-full border border-line px-2.5 py-1 text-[11.5px] font-semibold text-muted transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:border-white/10 dark:text-[#a89f93]">
+                        {busy === String(l.tracking_id) ? "…" : "Remove"}
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : view === "couriers" ? (
