@@ -22,7 +22,7 @@ type Row = { id: string; entry_no: string; process: string; worked_on: string;
              on_payroll: boolean };
 type Art = { id: string; name: string; system_barcode: string | null;
              section: string | null; source: "factory" | "warehouse" };
-type Staff = { id: string; name: string };
+type Staff = { id: string; name: string; rate: number | null; department: string | null };
 
 const PROCESSES = ["cutting", "stitching", "overlock", "flatlock", "singlelock", "other"];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
@@ -70,7 +70,10 @@ export default function MachineProcessPage() {
          list starts. */
       supabase.from("articles").select("id,name,system_barcode,section,owner")
         .eq("is_active", true).order("system_barcode"),
-      supabase.from("v_factory_employees").select("id,name").order("name"),
+      /* v_factory_staff carries the rate, so choosing a man fills it in.
+         Inactive people are filtered on screen, not in the query — otherwise
+         an empty dropdown looks like a broken one. */
+      supabase.from("v_factory_staff").select("id,name,rate,department,is_active").order("name"),
     ]);
     if (e.error) setErr(e.error.message);
     setRows((e.data as Row[]) ?? []);
@@ -80,7 +83,11 @@ export default function MachineProcessPage() {
       section: (r.section as string) ?? null,
       source: r.owner === "warehouse" ? "warehouse" : "factory",
     })));
-    setStaff((s.data as Staff[]) ?? []);
+    setStaff(((s.data as unknown as Record<string, unknown>[]) ?? [])
+      .filter((r) => r.is_active)
+      .map((r) => ({ id: String(r.id), name: String(r.name),
+        rate: r.rate == null ? null : Number(r.rate),
+        department: (r.department as string) ?? null })));
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -123,6 +130,25 @@ export default function MachineProcessPage() {
   function openForm() {
     setOpen(true); setDay(today()); setArtId(""); setCode(""); setPieceType("fresh"); setQty(""); setRate("");
     setEmpId(""); setWorker(""); setNote(""); setFErr("");
+  }
+
+  /* Adding him here rather than sending someone to another screen and back —
+     the moment you are typing his name is the moment you know he is staff. */
+  async function addPerson() {
+    if (!supabase || !worker.trim()) return;
+    setBusy(true); setFErr("");
+    const { data, error } = await supabase.rpc("add_factory_employee", {
+      p_name: worker.trim(),
+      p_department_code: proc === "cutting" ? "CUT" : "MFSU",
+      p_rate: rate === "" ? null : parseFloat(rate),
+      p_phone: null, p_cnic: null, p_employment: "casual",
+    });
+    setBusy(false);
+    if (error) { setFErr(error.message); return; }
+    const made = data as Record<string, unknown>;
+    await load();
+    setEmpId(String(made.id));
+    setWorker("");
   }
 
   async function save(again: boolean) {
@@ -342,16 +368,41 @@ export default function MachineProcessPage() {
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className={inp} />
           </Field>
           <Field label="Job person *">
-            <select value={empId} onChange={(e) => setEmpId(e.target.value)} className={inp}>
+            <select value={empId} className={inp}
+              onChange={(e) => {
+                const id = e.target.value;
+                setEmpId(id);
+                /* His standing rate, filled in — still editable, because a
+                   harder cut is paid more. */
+                const p = staff.find((x) => x.id === id);
+                if (p?.rate != null) setRate(String(p.rate));
+              }}>
               <option value="">Not on payroll…</option>
-              {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {staff.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}{x.rate != null ? ` — ${x.rate}/pc` : ""}
+                </option>
+              ))}
             </select>
           </Field>
         </div>
+        {staff.length === 0 && (
+          <p className="mt-2 text-[12.5px] text-muted">
+            No active staff yet — type his name below, or add him properly on the Staff screen.
+          </p>
+        )}
+
         {!empId && (
-          <div className="mt-3"><Field label="His name *">
+          <div className="mt-3"><Field label="His name">
             <input value={worker} onChange={(e) => setWorker(e.target.value)} placeholder="e.g. Aslam" className={inp} />
-          </Field></div>
+          </Field>
+          {worker.trim() && (
+            <button onClick={addPerson} disabled={busy}
+              className="mt-2 rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-ink/75 hover:bg-panel disabled:opacity-50">
+              + Save {worker.trim()} to staff{rate ? ` at ${rate}/pc` : ""}
+            </button>
+          )}
+          </div>
         )}
 
         <div className="mt-3"><Field label="Computer code or item name">
