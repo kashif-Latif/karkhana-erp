@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 
-import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Boxes, Plus, Loader2, Download, Undo2, Pencil, Trash2, ArrowDownToLine, ArrowUpFromLine , Printer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import Modal, { Field } from "@/components/Modal";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/usePermissions";
-import { exportCSV, exportExcel, exportPDF, type ExportTable } from "@/lib/export";
+import { exportCSV, exportExcel, exportPDF, type ExportTable, printTable } from "@/lib/export";
 
 type Item = { item_id: string; barcode: string; name: string; description: string | null;
               raw_material_reference: string | null; category: string | null; is_active: boolean;
@@ -36,12 +36,8 @@ type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
-/* Money, written the way every other screen in this system writes it. Used by
-   the cost and retail columns below and never defined, so every deploy failed
-   type-checking — and because the build stops there, nothing else shipped
-   either, however unrelated. */
-const rs = (v: unknown) => "Rs " + Math.round(Number(v) || 0).toLocaleString("en-PK");
 
 function WarehouseInner({ section }: { section: Tab }) {
   const { can } = usePermissions();
@@ -82,6 +78,7 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [branchId, setBranchId] = useState("");
   const [invNo, setInvNo] = useState("");
   const [gapWhy, setGapWhy] = useState("");
+  const [onDate, setOnDate] = useState("");
   const [pOpen, setPOpen] = useState(false);
   const [pName, setPName] = useState("");
   const [pParty, setPParty] = useState("");
@@ -122,11 +119,54 @@ function WarehouseInner({ section }: { section: Tab }) {
      movement (K146), so the total never stops matching its own history. */
   const [editItem, setEditItem] = useState<string | null>(null);
   const [eName, setEName] = useState("");
+  /* Prices live on the ARTICLE, joined by barcode — so editing them here has
+     to write to both records or the screen and the report disagree. */
+  const [eManual, setEManual] = useState("");
+  const [eCost, setECost] = useState("");
+  const [eRetail, setERetail] = useState("");
+  const [eGst, setEGst] = useState("");
   const [eBar, setEBar] = useState("");
   const [eItemCat, setEItemCat] = useState("");
   const [stockRow, setStockRow] = useState<string | null>(null);
   const [sQty, setSQty] = useState("");
   const [sWhy, setSWhy] = useState("");
+
+  /* Cost, retail and GST live on the ARTICLE. A warehouse product and an
+     article are the same thing when they share a barcode — the same join the
+     whole factory→warehouse handover already runs on. */
+  const [money, setMoney] = useState<Record<string, {
+    cost: number | null; retail: number | null; gst: number | null;
+    manual: string | null }>>({});
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data } = await supabase!.from("v_warehouse_report")
+        .select("system_code,manual_code,cost_price,retail_price,gst_rate");
+      const m: Record<string, { cost: number | null; retail: number | null;
+        gst: number | null; manual: string | null }> = {};
+      ((data as unknown as Record<string, unknown>[]) ?? []).forEach((r) => {
+        m[String(r.system_code)] = {
+          cost: r.cost_price == null ? null : Number(r.cost_price),
+          retail: r.retail_price == null ? null : Number(r.retail_price),
+          gst: r.gst_rate == null ? null : Number(r.gst_rate),
+          manual: (r.manual_code as string) ?? null,
+        };
+      });
+      setMoney(m);
+    })();
+  }, []);
+
+  /* Matches on our code, their barcode, or any part of the name. Ten is
+     enough to choose from without becoming a second list to scroll. */
+  const suggestions = useMemo(() => {
+    const t = scan.trim().toLowerCase();
+    if (!t) return [];
+    return items.filter((x) =>
+      x.barcode.toLowerCase().includes(t) ||
+      x.name.toLowerCase().includes(t) ||
+      String(money[x.barcode]?.manual ?? "").toLowerCase().includes(t)
+    ).slice(0, 10);
+  }, [scan, items, money]);
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
@@ -149,12 +189,6 @@ function WarehouseInner({ section }: { section: Tab }) {
   const inRange = (iso: string | null) => {
     if (!iso) return !days && !dFrom && !dTo;   // never moved: only in "All time"
     const day = String(iso).slice(0, 10);
-    if (days !== null) {
-      const edge = new Date();
-      edge.setHours(0, 0, 0, 0);
-      edge.setDate(edge.getDate() - (days - 1));
-      if (new Date(day) < edge) return false;
-    }
     if (dFrom && day < dFrom) return false;
     if (dTo && day > dTo) return false;
     return true;
@@ -163,15 +197,18 @@ function WarehouseInner({ section }: { section: Tab }) {
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   const fItems = useMemo(() => {
     const list = items.filter((i) => (!cat || i.category === cat)
-      && hit(i.barcode, i.name, i.category, i.raw_material_reference)
+      /* The manual barcode lives on the article, not on this record — which is
+         why searching the last digits of a printed label found nothing. */
+      && hit(i.barcode, i.name, i.category, i.raw_material_reference,
+             money[i.barcode]?.manual ?? null)
       && (tab === "materials" || inRange(i.last_updated)));
-    /* Stock is read to answer "what do we have" — so what we have most of
-       goes first. The product list stays alphabetical, because that is
-       read to find one specific thing. */
-    return tab === "stock"
-      ? [...list].sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name))
-      : list;
-  }, [items, q, cat, tab, days, dFrom, dTo]);
+    /* Highest quantity first, everywhere. The question this screen answers is
+       "what do we have" — so what there is most of belongs at the top, and
+       the long tail of zeros belongs at the bottom. Ties fall back to name so
+       the order is stable between loads. */
+    return [...list].sort((a, b) =>
+      Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name));
+  }, [items, q, cat, tab, days, dFrom, dTo, money]);
   /* The last invoice this branch was given, and what should follow it.
      Purely numeric numbers get a suggestion; anything else is left alone
      rather than guessed at. */
@@ -211,25 +248,51 @@ function WarehouseInner({ section }: { section: Tab }) {
   }, [expectedInvoice]);
 
   function resolve() {
-    const code = scan.trim();
+    const code = scan.trim().toLowerCase();
     if (!code) return;
-    const it = items.find((i) => i.barcode.toLowerCase() === code.toLowerCase());
-    if (!it) { setFound(null); setMErr(`No item with barcode ${code}. Add it under Materials first.`); return; }
-    setFound(it); setMErr("");
+    /* Exact code first — a scanner is always exact and must not be slowed by
+       a list. Then the printed barcode. Then, if exactly one thing matches
+       what was typed, take it; more than one and the list does the choosing. */
+    const exact = items.find((i) => i.barcode.toLowerCase() === code);
+    const byManual = exact ? null
+      : items.find((i) => String(money[i.barcode]?.manual ?? "").toLowerCase() === code);
+    const hitOne = exact || byManual
+      || (suggestions.length === 1 ? suggestions[0] : null);
+    if (!hitOne) { setFound(null); setMErr(""); return; }
+    setFound(hitOne); setMErr("");
   }
+
+  const [newSection, setNewSection] = useState("");
+  const [newCost, setNewCost] = useState("");
+  const [newRetail, setNewRetail] = useState("");
+  const [newGst, setNewGst] = useState("");
+  const [newQty, setNewQty] = useState("");
+  const [madeCode, setMadeCode] = useState<string | null>(null);
+  /* The add-product form has its OWN manual barcode field. Sharing `bc` with
+     the scan box meant typing in one wiped the other. */
+  const [bcNew, setBcNew] = useState("");
 
   async function addItem() {
     if (!supabase) return;
     setErr("");
-    if (!bc.trim() || !nm.trim()) { setErr("Barcode and name are both needed."); return; }
+    if (!nm.trim()) { setErr("Give the product a name."); return; }
+    if (!newSection) { setErr("Which section does it belong to?"); return; }
     setBusy(true);
-    const { error } = await supabase.from("khana_final_items").insert({
-      barcode: bc.trim(), name: nm.trim(),
-      description: desc.trim() || null, raw_material_reference: rawRef.trim() || null,
+    /* One call makes BOTH halves — the article that generates the barcode and
+       holds the money, and the warehouse product keyed to it. Creating them
+       separately is how products ended up with no code and no price. */
+    const { data, error } = await supabase.rpc("add_warehouse_product", {
+      p_name: nm.trim(), p_section: newSection,
+      p_manual_barcode: bcNew.trim() || null,
+      p_cost: newCost === "" ? null : parseFloat(newCost),
+      p_retail: newRetail === "" ? null : parseFloat(newRetail),
+      p_gst: newGst === "" ? null : parseFloat(newGst),
+      p_opening_qty: newQty === "" ? 0 : parseFloat(newQty),
     });
     setBusy(false);
-    if (error) { setErr(error.message.includes("duplicate") ? "That barcode already exists." : error.message); return; }
-    setItemOpen(false); setBc(""); setNm(""); setDesc(""); setRawRef(""); load();
+    if (error) { setErr(error.message); return; }
+    setMadeCode(String((data as Record<string, unknown>)?.system_barcode ?? ""));
+    load();
   }
 
   async function record(type: "IN" | "OUT") {
@@ -241,6 +304,9 @@ function WarehouseInner({ section }: { section: Tab }) {
     const { error } = await supabase.from("khana_stock_movements").insert({
       item_id: found.item_id, movement_type: type,
       quantity: parseFloat(qty), note: note.trim() || null,
+      /* Stock that arrived on Tuesday should read Tuesday. Left blank it
+         takes now(), so the common case costs nothing. */
+      created_at: onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined,
       party_id: type === "OUT" ? partyId : null,
       branch_id: type === "OUT" && branchId ? branchId : null,
       invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
@@ -251,7 +317,7 @@ function WarehouseInner({ section }: { section: Tab }) {
        words is better than inventing a friendlier lie — it names both
        numbers. */
     if (error) { setMErr(error.message); return; }
-    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); setGapWhy(""); load();
+    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); setGapWhy(""); setOnDate(""); load();
   }
 
   async function addParty() {
@@ -346,7 +412,19 @@ function WarehouseInner({ section }: { section: Tab }) {
     const { error } = await supabase.from("khana_final_items")
       .update({ name: eName.trim(), barcode: eBar.trim(), category: eItemCat || null })
       .eq("id", i.item_id);
-    if (error) { setErr(error.message.includes("duplicate") ? "That barcode belongs to another item." : error.message); return; }
+    if (error) { setErr(error.message); return; }
+
+    /* The article half: manual barcode and the money. Matched on the barcode
+       as it was BEFORE this edit, since that is what the article still holds. */
+    const num = (v: string) => (v === "" ? null : parseFloat(v));
+    const { error: aErr } = await supabase.from("articles").update({
+      name: eName.trim(),
+      manual_barcode: eManual.trim() || null,
+      cost_price: num(eCost), retail_price: num(eRetail), gst_rate: num(eGst),
+      system_barcode: eBar.trim(),
+    }).eq("system_barcode", i.barcode);
+    if (aErr) { setErr(aErr.message); return; }
+
     setEditItem(null); load();
   }
 
@@ -361,10 +439,24 @@ function WarehouseInner({ section }: { section: Tab }) {
   }
 
   const table = (): ExportTable => tab === "materials" || tab === "stock"
-    ? { title: `final-inventory-${tab}`,
-        headers: ["Barcode", "Name", "Category", "Code", "Quantity", "Last updated"],
-        rows: fItems.map((i) => [i.barcode, i.name, i.category ?? "", i.raw_material_reference ?? "", i.quantity, i.last_updated ? when(i.last_updated) : ""]) }
-    : { title: `final-inventory-${tab}`,
+    ? { title: "Warehouse Inventory",
+        headers: ["Item code", "Barcode", "Item description", "Catgry", "Qty",
+                  "Cost", "Retail", "GST%", "Cost total", "Retail total", "Last moved"],
+        /* The export must carry what the screen carries — a PDF missing the
+           money columns is a different report wearing the same name. */
+        rows: fItems.map((i) => {
+          const m = money[i.barcode];
+          /* Blank, not zero, where there is nothing. A printed 0 reads as a
+             figure somebody measured; an empty cell reads as "none". */
+          const blank = (v: number | null | undefined) => (v ? v : "");
+          return [i.barcode, m?.manual ?? "", i.name, i.category ?? "",
+            blank(i.quantity), blank(m?.cost), blank(m?.retail),
+            m?.gst ? `${m.gst}%` : "",
+            blank(m?.cost == null ? null : i.quantity * m.cost),
+            blank(m?.retail == null ? null : i.quantity * m.retail),
+            i.last_updated ? when(i.last_updated) : ""];
+        }) }
+    : { title: `Warehouse ${tab === "in" ? "New GRN" : tab === "out" ? "GR out" : "Movements"}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
           m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
@@ -379,10 +471,10 @@ function WarehouseInner({ section }: { section: Tab }) {
       <Topbar
         title={section === "in" ? "Warehouse — New GRN"
              : section === "out" ? "Warehouse — Out GRN"
-             : section === "stock" ? "Warehouse — Stock" : "Warehouse — Products"}
+             : section === "stock" ? "Warehouse — Stock" : "Warehouse Inventory"}
         subtitle={section === "in" ? "Goods arriving, by barcode"
                 : section === "out" ? "Goods leaving to parties and branches"
-                : section === "stock" ? "What is held right now" : "The products this warehouse carries"} />
+                : section === "stock" ? "What is held right now" : "Everything this warehouse carries"} />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}
@@ -428,14 +520,6 @@ function WarehouseInner({ section }: { section: Tab }) {
 
         {tab !== "materials" && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {[{ l: "All time", d: null }, { l: "Today", d: 1 }, { l: "2 days", d: 2 },
-              { l: "5 days", d: 5 }, { l: "This week", d: 7 }, { l: "30 days", d: 30 }].map((r) => (
-              <button key={r.l}
-                onClick={() => { setDays(r.d); setDFrom(""); setDTo(""); }}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${days === r.d && !dFrom && !dTo ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
-                {r.l}
-              </button>
-            ))}
             <input type="date" value={dFrom} onChange={(e) => { setDFrom(e.target.value); setDays(null); }}
               className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none" />
             <span className="text-[12px] text-hint">to</span>
@@ -482,8 +566,12 @@ function WarehouseInner({ section }: { section: Tab }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full max-w-xs">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
-              className="w-full rounded-xl2 border border-line bg-surface px-3 py-2 pr-16 text-[13px] outline-none focus:border-ink/30" />
+            {/* One search box on this screen. On the product list it filters;
+                on a GRN screen the scan box above does the finding. */}
+            {tab === "materials" && (
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search barcode or name…"
+                className="w-full max-w-xs rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30" />
+            )}
             {q && (
               <button onClick={() => setQ("")} title="Clear"
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-panel px-2 py-0.5 text-[11px] font-semibold text-ink/60">
@@ -494,6 +582,7 @@ function WarehouseInner({ section }: { section: Tab }) {
           <button onClick={() => exportCSV(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Download size={13} /> CSV</button>
           <button onClick={() => exportExcel(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">Excel</button>
           <button onClick={() => exportPDF(table())} className="rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel">PDF</button>
+          <button onClick={() => printTable(table())} className="flex items-center gap-1 rounded-full border border-line px-3 py-2 text-[12px] font-semibold text-ink/70 hover:bg-panel"><Printer size={13} /> Print</button>
           {(tab === "in" || tab === "out") && voidedCount > 0 && (
             <button onClick={() => setShowVoided((v) => !v)}
               className={`rounded-full px-3 py-2 text-[12px] font-semibold transition ${showVoided ? "bg-ink text-white" : "border border-line text-ink/65 hover:bg-panel"}`}>
@@ -501,7 +590,7 @@ function WarehouseInner({ section }: { section: Tab }) {
             </button>
           )}
           {tab === "materials" && canManage && (
-            <button onClick={() => setItemOpen(true)} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add material</button>
+            <button onClick={() => setItemOpen(true)} className="ml-auto flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-semibold text-white"><Plus size={15} /> Add product</button>
           )}
         </div>
 
@@ -519,9 +608,16 @@ function WarehouseInner({ section }: { section: Tab }) {
             <div className="overflow-hidden rounded-card border border-line bg-surface">
               <div className="overflow-x-auto"><table className="w-full text-left text-[13px]">
                 <thead><tr className="border-b border-line text-[11px] uppercase tracking-wide text-hint">
-                  <th className="px-4 py-2.5 font-bold">Barcode</th><th className="px-4 py-2.5 font-bold">Item</th>
+                  <th className="px-4 py-2.5 font-bold">Barcode</th>
+                  <th className="px-4 py-2.5 font-bold">Manual</th>
+                  <th className="px-4 py-2.5 font-bold">Item</th>
                   <th className="px-4 py-2.5 font-bold">Category</th>
                   <th className="px-4 py-2.5 text-right font-bold">In stock</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail</th>
+                  <th className="px-4 py-2.5 text-right font-bold">GST</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Cost total</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Retail total</th>
                   <th className="px-4 py-2.5 font-bold">Last moved</th>
                 </tr></thead>
                 <tbody>
@@ -534,6 +630,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                               className="w-36 rounded-lg border border-ink/30 px-2 py-1 font-mono text-[12px] outline-none" />
                           : i.barcode}
                       </td>
+                      {/* Theirs, beside ours. Both are printed on real
+                          labels, so both have to be readable here. */}
+                      <td className="px-4 py-2.5 font-mono text-[12px] text-muted">
+                        {money[i.barcode]?.manual ?? "—"}
+                      </td>
                       <td className="px-4 py-2.5 font-semibold text-ink">
                         {editItem === i.item_id ? (
                           <span className="flex flex-wrap items-center gap-1.5">
@@ -545,6 +646,18 @@ function WarehouseInner({ section }: { section: Tab }) {
                               <option value="">no category</option>
                               {["Kids", "Child", "Ladies", "Men"].map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
+                            <input value={eManual} onChange={(e) => setEManual(e.target.value)}
+                              placeholder="manual barcode"
+                              className="w-36 rounded-lg border border-ink/30 px-2 py-1 font-mono text-[11.5px] font-normal outline-none" />
+                            <input type="number" value={eCost} onChange={(e) => setECost(e.target.value)}
+                              placeholder="cost"
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
+                            <input type="number" value={eRetail} onChange={(e) => setERetail(e.target.value)}
+                              placeholder="retail"
+                              className="w-20 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
+                            <input type="number" value={eGst} onChange={(e) => setEGst(e.target.value)}
+                              placeholder="GST%"
+                              className="w-16 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
                             <button onClick={() => saveItem(i)} className="text-[11px] font-bold text-ink">save</button>
                             <button onClick={() => setEditItem(null)} className="text-[11px] font-normal text-ink/50">cancel</button>
                           </span>
@@ -570,6 +683,23 @@ function WarehouseInner({ section }: { section: Tab }) {
                           </span>
                         ) : n(i.quantity)}
                       </td>
+                      {/* Blank rather than zero where no price is set — a price
+                          of 0 and no price yet are different facts. */}
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.cost == null ? "—" : rs(money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-semibold text-ink">
+                        {money[i.barcode]?.retail == null ? "—" : rs(money[i.barcode]!.retail!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {money[i.barcode]?.gst == null ? "—" : `${money[i.barcode]!.gst}%`}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum text-muted">
+                        {!money[i.barcode]?.cost || !i.quantity ? "—" : rs(i.quantity * money[i.barcode]!.cost!)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tnum font-bold text-ink">
+                        {!money[i.barcode]?.retail || !i.quantity ? "—" : rs(i.quantity * money[i.barcode]!.retail!)}
+                      </td>
                       <td className="px-4 py-2.5 text-[12px] text-muted">
                         {i.last_updated ? when(i.last_updated) : "—"}
                         {canManage && (
@@ -579,7 +709,11 @@ function WarehouseInner({ section }: { section: Tab }) {
                                 className="text-[11px] font-semibold text-ink/50 hover:text-ink">set stock</button>
                             ) : (
                               <>
-                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? ""); }}
+                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? "");
+                                  setEManual(money[i.barcode]?.manual ?? "");
+                                  setECost(money[i.barcode]?.cost == null ? "" : String(money[i.barcode]!.cost));
+                                  setERetail(money[i.barcode]?.retail == null ? "" : String(money[i.barcode]!.retail));
+                                  setEGst(money[i.barcode]?.gst == null ? "" : String(money[i.barcode]!.gst)); }}
                                   className="text-[11px] font-semibold text-ink/50 hover:text-ink">edit</button>
                                 {killRow === i.item_id ? (
                                   <>
@@ -599,6 +733,20 @@ function WarehouseInner({ section }: { section: Tab }) {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-line bg-panel/40 text-[13px] font-extrabold text-ink">
+                    <td className="px-4 py-3" colSpan={4}>Total &mdash; {fItems.length} item(s)</td>
+                    <td className="px-4 py-3 text-right tnum">{n(fItems.reduce((a, i) => a + Number(i.quantity || 0), 0))}</td>
+                    <td className="px-4 py-3" colSpan={3}></td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.cost ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3 text-right tnum">
+                      {rs(fItems.reduce((a, i) => a + Number(i.quantity || 0) * (money[i.barcode]?.retail ?? 0), 0))}
+                    </td>
+                    <td className="px-4 py-3"></td>
+                  </tr>
+                </tfoot>
               </table></div>
             </div>
           )
@@ -611,14 +759,14 @@ function WarehouseInner({ section }: { section: Tab }) {
               <div className="rounded-card border border-line bg-surface p-4">
                 <p className="flex items-center gap-1.5 text-[13px] font-bold text-ink">
                   {tab === "in" ? <ArrowDownToLine size={15} /> : <ArrowUpFromLine size={15} />}
-                  {tab === "in" ? "Bring stock in" : "Send stock out"}
+                  {tab === "in" ? "New GRN — bring stock in" : "GR out — send stock out"}
                 </p>
                 <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
                   <input value={scan} autoFocus
                     onChange={(e) => { setScan(e.target.value); setFound(null); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); resolve(); } }}
                     onBlur={resolve}
-                    placeholder="Scan or type barcode, then Enter" className={inp} />
+                    placeholder="Scan, or type a barcode or product name" className={inp} />
                   <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" className={inp} />
                   {tab === "out" ? (
                     <select value={partyId} onChange={(e) => { setPartyId(e.target.value); setBranchId(""); }} className={inp}>
@@ -626,9 +774,12 @@ function WarehouseInner({ section }: { section: Tab }) {
                       {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   ) : (
-                    <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
+                    <input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)}
+                    title="Date it actually arrived — leave blank for today"
+                    className={inp} />
+                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
                   )}
-                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found}
+                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found || !(parseFloat(qty) > 0)}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Record {tab === "in" ? "in" : "out"}
@@ -659,6 +810,66 @@ function WarehouseInner({ section }: { section: Tab }) {
                       placeholder="why the gap? (optional — e.g. bulk book, cancelled pad)"
                       className={`${inp} mt-2`} />
                   </div>
+                )}
+                {/* Typing a name should find the product — nobody remembers
+                    13-digit barcodes. Exact scans still match instantly and
+                    skip the list. */}
+                {!found && scan.trim().length >= 1 && suggestions.length > 0 && (
+                  <div className="mt-2 overflow-hidden rounded-xl2 border border-line">
+                    <p className="border-b border-line bg-panel/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-hint">
+                      {suggestions.length} match{suggestions.length === 1 ? "" : "es"} — click one
+                    </p>
+                    <div className="max-h-48 overflow-y-auto">
+                    {suggestions.map((x) => (
+                      <button key={x.item_id} onClick={() => { setScan(x.barcode); setFound(x); setMErr(""); }}
+                        className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left last:border-0 hover:bg-panel">
+                        <span>
+                          <span className="text-[13px] font-semibold text-ink">{x.name}</span>
+                          <span className="block font-mono text-[11px] text-hint">
+                            {x.barcode}{money[x.barcode]?.manual ? ` · ${money[x.barcode]!.manual}` : ""}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-[12px] tnum text-muted">
+                          {x.quantity ? `${n(x.quantity)} in stock` : "no stock yet"}
+                        </span>
+                      </button>
+                    ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* A disabled button with no explanation is the worst state a
+                    form can be in. Say which of the two things is missing. */}
+                {!found && !scan.trim() && (
+                  <p className="mt-2 text-[12.5px] text-muted">
+                    Scan a barcode, or type it and press Enter. Either code works — ours ({tab === "in" ? "44-000012" : "44-000012"}) or the printed one.
+                  </p>
+                )}
+                {/* Only when NOTHING matched. Saying "no product" while a list
+                    of matches sits above it is the screen arguing with itself. */}
+                {!found && scan.trim() && suggestions.length === 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <p className="text-[12.5px] font-medium text-danger">
+                      Nothing matches <b>{scan.trim()}</b>.
+                    </p>
+                    {/* Add it here rather than sending someone to another screen
+                        and back. An unknown barcode at the receiving bench is
+                        the moment you know the product needs creating. */}
+                    {canManage && (
+                      <button
+                        onClick={() => {
+                          setItemOpen(true); setMadeCode(null);
+                          setBcNew(scan.trim()); setNm(""); setNewSection("");
+                          setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(qty || "");
+                        }}
+                        className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white">
+                        + Add this product
+                      </button>
+                    )}
+                  </div>
+                )}
+                {found && !qty && (
+                  <p className="mt-2 text-[12.5px] text-muted">How many pieces?</p>
                 )}
                 {found && (
                   <p className="mt-2 text-[12.5px] text-ink/80">
@@ -867,29 +1078,69 @@ function WarehouseInner({ section }: { section: Tab }) {
         </div>
       </Modal>
 
-      <Modal open={itemOpen} onClose={() => setItemOpen(false)} title="Add material">
-        <Field label="Barcode *">
-          <input value={bc} onChange={(e) => setBc(e.target.value)} autoFocus
-            placeholder="scan it, or type the item number" className={inp} />
-        </Field>
-        <div className="mt-3"><Field label="Name *">
-          <input value={nm} onChange={(e) => setNm(e.target.value)} placeholder="e.g. FS MEN HOOD ZIP W026" className={inp} />
-        </Field></div>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Field label="Reference (opt)">
-            <input value={rawRef} onChange={(e) => setRawRef(e.target.value)} placeholder="item # / section" className={inp} />
-          </Field>
-          <Field label="Description (opt)">
-            <input value={desc} onChange={(e) => setDesc(e.target.value)} className={inp} />
-          </Field>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setItemOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
-          <button onClick={addItem} disabled={busy}
-            className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
-            {busy && <Loader2 size={15} className="animate-spin" />} Add
-          </button>
-        </div>
+      <Modal open={itemOpen} onClose={() => { setItemOpen(false); setMadeCode(null); }} title="Add product" wide>
+        {madeCode ? (
+          <div className="text-center">
+            <div className="mx-auto max-w-xs rounded-xl2 border border-[#166534]/25 bg-success-soft p-4">
+              <p className="text-[11.5px] font-bold uppercase tracking-wide text-ink/55">System barcode</p>
+              <p className="mt-1 font-mono text-[30px] font-extrabold tracking-tight text-ink">{madeCode}</p>
+              {bcNew.trim() && <p className="mt-1.5 font-mono text-[12.5px] text-ink/70">also {bcNew.trim()}</p>}
+            </div>
+            <div className="mt-4 flex justify-center gap-2">
+              <button onClick={() => { setBcNew(""); setNm(""); setNewSection(""); setNewCost(""); setNewRetail(""); setNewGst(""); setNewQty(""); setMadeCode(null); }}
+                className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70">Add another</button>
+              <button onClick={() => { setItemOpen(false); setMadeCode(null); }}
+                className="rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white">Done</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Field label="Product name *">
+              <input value={nm} autoFocus onChange={(e) => setNm(e.target.value)}
+                placeholder="e.g. FS MEN HOOD ZIP W026" className={inp} />
+            </Field>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Section *">
+                <select value={newSection} onChange={(e) => setNewSection(e.target.value)} className={inp}>
+                  <option value="">Choose…</option>
+                  {[["40","Baby/Newborn"],["41","Kids"],["42","Child"],["43","Ladies"],
+                    ["44","Men"],["60","Shoes"],["61","Accessories"]].map(([v,l]) => (
+                    <option key={v} value={v}>{v} · {l}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Manual barcode">
+                {/* Theirs, if a label already exists. Ours is generated on save
+                    and cannot be typed. */}
+                <input value={bcNew} onChange={(e) => setBcNew(e.target.value)}
+                  placeholder="scan it, or leave blank" className={inp} />
+              </Field>
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              <Field label="Cost price"><input type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} className={inp} /></Field>
+              <Field label="Retail price"><input type="number" value={newRetail} onChange={(e) => setNewRetail(e.target.value)} className={inp} /></Field>
+              <Field label="GST %"><input type="number" value={newGst} onChange={(e) => setNewGst(e.target.value)} placeholder="18" className={inp} /></Field>
+              <Field label="Opening qty"><input type="number" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={inp} /></Field>
+            </div>
+            {newCost && newRetail && (
+              <p className="mt-2.5 text-[12.5px] text-ink/70">
+                Margin <b className="text-ink">Rs {(parseFloat(newRetail) - parseFloat(newCost)).toLocaleString()}</b>
+                {newGst ? ` · GST Rs ${(parseFloat(newRetail) * parseFloat(newGst) / 100).toFixed(0)}` : ""}
+              </p>
+            )}
+            <p className="mt-2 text-[12px] text-hint">
+              Barcode is generated on save — {newSection || "??"}-000001 upward, counting inside its own section.
+            </p>
+            {err && <p className="mt-3 text-[12.5px] font-medium text-danger">{err}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setItemOpen(false)} className="rounded-xl2 border border-line px-4 py-2.5 text-[13px] font-semibold text-ink/70 hover:bg-panel">Cancel</button>
+              <button onClick={addItem} disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl2 bg-ink px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-50">
+                {busy && <Loader2 size={15} className="animate-spin" />} Add product
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
     </>
   );
