@@ -126,6 +126,7 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [eRetail, setERetail] = useState("");
   const [eGst, setEGst] = useState("");
   const [eBar, setEBar] = useState("");
+  const [rowErr, setRowErr] = useState("");
   const [eItemCat, setEItemCat] = useState("");
   const [stockRow, setStockRow] = useState<string | null>(null);
   const [sQty, setSQty] = useState("");
@@ -408,11 +409,19 @@ function WarehouseInner({ section }: { section: Tab }) {
 
   async function saveItem(i: Item) {
     if (!supabase) return;
-    if (!eName.trim() || !eBar.trim()) { setErr("Name and barcode are both needed."); return; }
+    /* Shown ON THE ROW, not at the top of a page the user has scrolled past.
+       A refusal nobody can see reads as a button that does nothing. */
+    setRowErr("");
+    if (!eName.trim()) { setRowErr("The item needs a name."); return; }
+    /* If the field came up blank, keep the code the item already has rather
+       than refusing the whole save. Losing an edit over a field the screen
+       failed to fill is the screen's fault, not the user's. */
+    const code = eBar.trim() || i.barcode;
+    if (!code) { setRowErr("This item has no code at all — set one before saving."); return; }
     const { error } = await supabase.from("khana_final_items")
-      .update({ name: eName.trim(), barcode: eBar.trim(), category: eItemCat || null })
+      .update({ name: eName.trim(), barcode: code, category: eItemCat || null })
       .eq("id", i.item_id);
-    if (error) { setErr(error.message); return; }
+    if (error) { setRowErr(error.message); return; }
 
     /* The article half: manual barcode and the money. Matched on the barcode
        as it was BEFORE this edit, since that is what the article still holds. */
@@ -421,11 +430,11 @@ function WarehouseInner({ section }: { section: Tab }) {
       name: eName.trim(),
       manual_barcode: eManual.trim() || null,
       cost_price: num(eCost), retail_price: num(eRetail), gst_rate: num(eGst),
-      system_barcode: eBar.trim(),
+      system_barcode: code,
     }).eq("system_barcode", i.barcode);
-    if (aErr) { setErr(aErr.message); return; }
+    if (aErr) { setRowErr(aErr.message); return; }
 
-    setEditItem(null); load();
+    setEditItem(null); setRowErr(""); load();
   }
 
   async function saveStock(i: Item) {
@@ -659,7 +668,8 @@ function WarehouseInner({ section }: { section: Tab }) {
                               placeholder="GST%"
                               className="w-16 rounded-lg border border-ink/30 px-2 py-1 text-right text-[12px] font-normal outline-none" />
                             <button onClick={() => saveItem(i)} className="text-[11px] font-bold text-ink">save</button>
-                            <button onClick={() => setEditItem(null)} className="text-[11px] font-normal text-ink/50">cancel</button>
+                            <button onClick={() => { setEditItem(null); setRowErr(""); }} className="text-[11px] font-normal text-ink/50">cancel</button>
+                            {rowErr && <span className="block text-[11px] font-medium text-danger">{rowErr}</span>}
                           </span>
                         ) : (<>{i.name}
                           {i.description && <span className="block text-[11px] font-normal text-hint">{i.description}</span>}</>)}
@@ -709,7 +719,7 @@ function WarehouseInner({ section }: { section: Tab }) {
                                 className="text-[11px] font-semibold text-ink/50 hover:text-ink">set stock</button>
                             ) : (
                               <>
-                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode); setEItemCat(i.category ?? "");
+                                <button onClick={() => { setEditItem(i.item_id); setEName(i.name); setEBar(i.barcode ?? ""); setEItemCat(i.category ?? ""); setRowErr("");
                                   setEManual(money[i.barcode]?.manual ?? "");
                                   setECost(money[i.barcode]?.cost == null ? "" : String(money[i.barcode]!.cost));
                                   setERetail(money[i.barcode]?.retail == null ? "" : String(money[i.barcode]!.retail));
