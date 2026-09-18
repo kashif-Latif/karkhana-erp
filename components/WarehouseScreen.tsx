@@ -92,6 +92,10 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [onDate, setOnDate] = useState("");
   /* A basket. One invoice usually carries several items, and a form that
      clears after each line makes that impossible to enter. */
+  /* Pick specific invoices to print. Without this, printing one delivery
+     note means printing the whole day. */
+  const [invFilter, setInvFilter] = useState("all");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [basket, setBasket] = useState<{ item_id: string; barcode: string;
     name: string; qty: number }[]>([]);
   const [pOpen, setPOpen] = useState(false);
@@ -211,6 +215,12 @@ function WarehouseInner({ section }: { section: Tab }) {
   };
   const hit = (...v: (string | null)[]) =>
     !q.trim() || v.some((x) => String(x ?? "").toLowerCase().includes(q.trim().toLowerCase()));
+  const invoices = useMemo(() => {
+    const set = new Set<string>();
+    moves.forEach((m) => { if (m.invoice_no) set.add(m.invoice_no); });
+    return [...set].sort().reverse();
+  }, [moves]);
+
   const fItems = useMemo(() => {
     const list = items.filter((i) => (!cat || i.category === cat)
       /* The manual barcode lives on the article, not on this record — which is
@@ -247,7 +257,11 @@ function WarehouseInner({ section }: { section: Tab }) {
     && (!fBranch || m.branch === fBranch)
     && (!fItem   || m.barcode === fItem)
     && (!fCat    || catOf(m.barcode) === fCat)
-  ), [moves, items, q, days, dFrom, dTo, fParty, fBranch, fItem, fCat]);
+    && (invFilter === "all" || m.invoice_no === invFilter)
+    /* Ticked invoices win over every other filter — when somebody has chosen
+       three delivery notes, that is exactly what they want printed. */
+    && (picked.size === 0 || (m.invoice_no ? picked.has(m.invoice_no) : false))
+  ), [moves, items, q, days, dFrom, dTo, fParty, fBranch, fItem, fCat, invFilter, picked]);
   const visible = fMoves.filter((m) => showVoided || !m.voided_at);
   const inMoves = visible.filter((m) => m.movement_type === "IN");
   const outMoves = visible.filter((m) => m.movement_type === "OUT")
@@ -347,7 +361,11 @@ function WarehouseInner({ section }: { section: Tab }) {
     const { error } = await supabase.from("khana_stock_movements").insert(
       lines.map((l) => ({
         item_id: l.item_id, movement_type: type, quantity: l.qty,
-        note: note.trim() || null, created_at: stamp,
+        note: note.trim() || null,
+        /* Only include created_at when a date was actually chosen. Sending it
+           as undefined lands as null, which reads back as 1 Jan 1970 — the
+           epoch, not a date anybody picked. */
+        ...(stamp ? { created_at: stamp } : {}),
         party_id: type === "OUT" ? partyId : null,
         branch_id: type === "OUT" && branchId ? branchId : null,
         invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
@@ -620,6 +638,39 @@ function WarehouseInner({ section }: { section: Tab }) {
               <option value="">All categories</option>
               {["Kids", "Child", "Ladies", "Men"].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+              {tab === "out" && invoices.length > 0 && (
+                <select value={invFilter} onChange={(e) => { setInvFilter(e.target.value); setPicked(new Set()); }}
+                  className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] outline-none">
+                  <option value="all">All invoices</option>
+                  {invoices.map((v) => <option key={v} value={v}>Invoice {v}</option>)}
+                </select>
+              )}
+              {tab === "out" && invoices.length > 0 && (
+                <details className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px]">
+                  <summary className="cursor-pointer font-semibold text-ink/70">
+                    {picked.size ? `${picked.size} invoice(s) picked` : "Pick invoices"}
+                  </summary>
+                  <div className="absolute z-20 mt-2 max-h-56 w-56 overflow-y-auto rounded-xl2 border border-line bg-surface p-2 shadow-card">
+                    {invoices.map((v) => (
+                      <label key={v} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-panel">
+                        <input type="checkbox" checked={picked.has(v)}
+                          onChange={() => setPicked((p) => {
+                            const nx = new Set(p);
+                            if (nx.has(v)) nx.delete(v); else nx.add(v);
+                            return nx;
+                          })} />
+                        <span className="text-[12.5px] text-ink">Invoice {v}</span>
+                      </label>
+                    ))}
+                    {picked.size > 0 && (
+                      <button onClick={() => setPicked(new Set())}
+                        className="mt-1 w-full rounded-lg bg-panel px-2 py-1.5 text-[12px] font-semibold text-ink/70">
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                </details>
+              )}
             <select value={fItem} onChange={(e) => setFItem(e.target.value)}
               className="max-w-[15rem] rounded-xl2 border border-line bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-ink/30">
               <option value="">All products</option>
@@ -838,20 +889,21 @@ function WarehouseInner({ section }: { section: Tab }) {
                     onBlur={resolve}
                     placeholder="Scan, or type a barcode or product name" className={inp} />
                   <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" className={inp} />
-                  {tab === "out" ? (
+                  {/* No else branch: the party picker belongs to Out only, and
+                      the date box below now shows on both. */}
+                  {tab === "out" && (
                     <select value={partyId} onChange={(e) => { setPartyId(e.target.value); setBranchId(""); }} className={inp}>
                       <option value="">Party…</option>
                       {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                  ) : (
-                    /* The date it actually arrived. Blank means today, so the
-                       common case costs nothing. Both inputs sit in one
-                       fragment because a ternary branch takes one element. */
-                    <>
-                      <input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)}
-                        title="Date it arrived — blank means today" className={inp} />
-                    </>
                   )}
+                  {/* On both tabs: stock that left on Tuesday should read
+                      Tuesday, and an invoice entered late is the normal case,
+                      not the exception. */}
+                  <input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)}
+                    title={tab === "in" ? "Date it arrived - blank means today"
+                                        : "Date it went out - blank means today"}
+                    className={inp} />
                   <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
                   {tab === "out" && (
                     <button onClick={addLine} disabled={!found || !(parseFloat(qty) > 0)}
@@ -1002,6 +1054,8 @@ function WarehouseInner({ section }: { section: Tab }) {
                       </tr>
                     )}
                     <tr key={m.id} className={`border-b border-line/60 last:border-0 ${m.voided_at ? "opacity-45" : ""}`}>
+                      {/* Tick an invoice to print just that delivery note.
+                          Nothing ticked means print what is filtered. */}
                       {/* The delivery number is what the party quotes back at
                           you on the phone, so it reads first and reads big —
                           not buried in a sentence at the far right. */}
