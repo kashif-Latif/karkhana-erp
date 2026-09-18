@@ -35,6 +35,17 @@ type Branch = { id: string; party_id: string; party: string; branch: string; del
 type Tab = "materials" | "stock" | "in" | "out";
 
 const inp = "w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-ink/30";
+/* Section 41 is Kids whatever the category text says — the code is the
+   authority, the label is for reading. */
+const SECTION_NAME: Record<string, string> = {
+  "40": "Baby/Newborn", "41": "Kids", "42": "Child", "43": "Ladies",
+  "44": "Men", "60": "Shoes", "61": "Accessories", zz: "Uncoded",
+};
+const SECTION_OF: Record<string, string> = {
+  "Baby/Newborn": "40", Kids: "41", Child: "42", Ladies: "43",
+  Men: "44", Shoes: "60", Accessories: "61",
+};
+
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
 const when = (v: string) => new Date(v).toLocaleString();
@@ -451,20 +462,42 @@ function WarehouseInner({ section }: { section: Tab }) {
     ? { title: "Warehouse Inventory",
         headers: ["Item code", "Barcode", "Item description", "Catgry", "Qty",
                   "Cost", "Retail", "GST%", "Cost total", "Retail total", "Last moved"],
-        /* The export must carry what the screen carries — a PDF missing the
-           money columns is a different report wearing the same name. */
-        rows: fItems.map((i) => {
-          const m = money[i.barcode];
-          /* Blank, not zero, where there is nothing. A printed 0 reads as a
-             figure somebody measured; an empty cell reads as "none". */
+        /* Grouped by section, highest quantity first inside each, with a
+           subtotal under every group. A flat list mixes Kids and Men on the
+           same page, which is not how anyone counts stock. */
+        rows: (() => {
           const blank = (v: number | null | undefined) => (v ? v : "");
-          return [i.barcode, m?.manual ?? "", i.name, i.category ?? "",
-            blank(i.quantity), blank(m?.cost), blank(m?.retail),
-            m?.gst ? `${m.gst}%` : "",
-            blank(m?.cost == null ? null : i.quantity * m.cost),
-            blank(m?.retail == null ? null : i.quantity * m.retail),
-            i.last_updated ? when(i.last_updated) : ""];
-        }) }
+          const secOf = (i: Item) => {
+            const m = /^(\d{2})-/.exec(i.barcode ?? "");
+            return m ? m[1] : (SECTION_OF[i.category ?? ""] ?? "zz");
+          };
+          const groups = new Map<string, Item[]>();
+          fItems.forEach((i) => {
+            const k = secOf(i);
+            groups.set(k, [...(groups.get(k) ?? []), i]);
+          });
+          const out: (string | number)[][] = [];
+          [...groups.keys()].sort().forEach((sec, gi) => {
+            const list = (groups.get(sec) ?? [])
+              .sort((a, b) => Number(b.quantity) - Number(a.quantity) || a.name.localeCompare(b.name));
+            const label = SECTION_NAME[sec] ?? "Other";
+            if (gi > 0) out.push(["", "", "", "", "", "", "", "", "", "", ""]);
+            out.push([`${sec} ${label}`.trim(), "", `${list.length} item(s)`, "", "", "", "", "", "", "", ""]);
+            let q = 0, ct = 0, rt = 0;
+            list.forEach((i) => {
+              const m = money[i.barcode];
+              const c = m?.cost == null ? null : i.quantity * m.cost;
+              const r = m?.retail == null ? null : i.quantity * m.retail;
+              q += Number(i.quantity || 0); ct += c ?? 0; rt += r ?? 0;
+              out.push([i.barcode, m?.manual ?? "", i.name, i.category ?? "",
+                blank(i.quantity), blank(m?.cost), blank(m?.retail),
+                m?.gst ? `${m.gst}%` : "", blank(c), blank(r),
+                i.last_updated ? when(i.last_updated) : ""]);
+            });
+            out.push(["", "", `Subtotal ${label}`, "", blank(q), "", "", "", blank(ct), blank(rt), ""]);
+          });
+          return out;
+        })() }
     : { title: `Warehouse ${tab === "in" ? "New GRN" : tab === "out" ? "GR out" : "Movements"}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
