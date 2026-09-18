@@ -123,7 +123,7 @@ export default function GrnOutPage() {
 
   return (
     <>
-      <Topbar title="GR out" subtitle="Goods leaving — fabric, other materials and finished goods" />
+      <Topbar title="GR out" subtitle="Goods going back to the supplier — stock moving on goes under STR" />
 
       <div className="space-y-4 px-6 pb-12">
         {err && <div className="rounded-xl2 border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-ink">{err}</div>}

@@ -65,9 +65,9 @@ const NAV: NavItem[] = [
      nothing else on the page. */
   { label: "Warehouse", Icon: Boxes, children: [
     { label: "New GRN", href: "/warehouse/grn-in" },
-    { label: "GR out", href: "/warehouse/grn-out" },
+    { label: "STR", href: "/warehouse/grn-out" },
     { label: "Products", href: "/warehouse/products" },
-    { label: "STR", href: "/str/warehouse" },
+    { label: "GR out", href: "/warehouse/returns" },
     { label: "Staff management", sub: [
       { label: "New staff induction", href: "/warehouse/staff/induction" },
       { label: "Staff payroll", href: "/warehouse/staff/payroll" },

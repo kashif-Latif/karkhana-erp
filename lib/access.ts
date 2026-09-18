@@ -30,6 +30,7 @@ export const ROUTE_PERMS: Record<string, string[] | null> = {
   "/warehouse/products": ["khana.view"],
   "/warehouse/grn-in": ["khana.view"],
   "/warehouse/grn-out": ["khana.view"],
+  "/warehouse/returns": ["khana.view", "khana.manage"],
   "/grn/out": ["inventory.view", "inventory.issue"],
   "/packing": ["production.view", "production.entry"],
   "/grn/stitching": ["production.view", "production.entry"],

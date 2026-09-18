@@ -498,7 +498,7 @@ function WarehouseInner({ section }: { section: Tab }) {
           });
           return out;
         })() }
-    : { title: `Warehouse ${tab === "in" ? "New GRN" : tab === "out" ? "GR out" : "Movements"}`,
+    : { title: `Warehouse ${tab === "in" ? "New GRN" : tab === "out" ? "STR" : "Movements"}`,
         headers: ["Number", "Date", "Barcode", "Item", "Type", "Quantity", "Party", "Branch", "Delivery #", "Invoice", "Note", "Voided"],
         rows: (tab === "in" ? inMoves : outMoves).map((m) => [m.movement_no ?? "", when(m.created_at),
           m.barcode, m.name, m.movement_type, m.quantity, m.party ?? "", m.branch ?? "",
@@ -515,7 +515,7 @@ function WarehouseInner({ section }: { section: Tab }) {
              : section === "out" ? "Warehouse — Out GRN"
              : section === "stock" ? "Warehouse — Stock" : "Warehouse Inventory"}
         subtitle={section === "in" ? "Goods arriving, by barcode"
-                : section === "out" ? "Goods leaving to parties and branches"
+                : section === "out" ? "Stock going out to shops, branches and online — not supplier returns"
                 : section === "stock" ? "What is held right now" : "Everything this warehouse carries"} />
 
       <div className="space-y-4 px-6 pb-12">
@@ -802,7 +802,7 @@ function WarehouseInner({ section }: { section: Tab }) {
               <div className="rounded-card border border-line bg-surface p-4">
                 <p className="flex items-center gap-1.5 text-[13px] font-bold text-ink">
                   {tab === "in" ? <ArrowDownToLine size={15} /> : <ArrowUpFromLine size={15} />}
-                  {tab === "in" ? "New GRN — bring stock in" : "GR out — send stock out"}
+                  {tab === "in" ? "New GRN — bring stock in" : "STR — send stock out"}
                 </p>
                 <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
                   <input value={scan} autoFocus
