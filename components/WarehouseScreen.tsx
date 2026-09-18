@@ -90,6 +90,10 @@ function WarehouseInner({ section }: { section: Tab }) {
   const [invNo, setInvNo] = useState("");
   const [gapWhy, setGapWhy] = useState("");
   const [onDate, setOnDate] = useState("");
+  /* A basket. One invoice usually carries several items, and a form that
+     clears after each line makes that impossible to enter. */
+  const [basket, setBasket] = useState<{ item_id: string; barcode: string;
+    name: string; qty: number }[]>([]);
   const [pOpen, setPOpen] = useState(false);
   const [pName, setPName] = useState("");
   const [pParty, setPParty] = useState("");
@@ -307,29 +311,52 @@ function WarehouseInner({ section }: { section: Tab }) {
     load();
   }
 
-  async function record(type: "IN" | "OUT") {
-    if (!supabase || !found) return;
+  function addLine() {
+    if (!found) return;
     setMErr("");
-    if (!(parseFloat(qty) > 0)) { setMErr("Enter a quantity."); return; }
-    setBusy(true);
-    if (type === "OUT" && !partyId) { setBusy(false); setMErr("Which party is this going to?"); return; }
-    const { error } = await supabase.from("khana_stock_movements").insert({
-      item_id: found.item_id, movement_type: type,
-      quantity: parseFloat(qty), note: note.trim() || null,
-      /* Stock that arrived on Tuesday should read Tuesday. Left blank it
-         takes now(), so the common case costs nothing. */
-      created_at: onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined,
-      party_id: type === "OUT" ? partyId : null,
-      branch_id: type === "OUT" && branchId ? branchId : null,
-      invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
-      invoice_gap_reason: type === "OUT" && invoiceGap ? (gapWhy.trim() || null) : null,
+    const q = parseFloat(qty);
+    if (!(q > 0)) { setMErr("Enter a quantity."); return; }
+    if (q > Number(found.quantity)) { setMErr(`Only ${n(found.quantity)} in stock.`); return; }
+    setBasket((b) => {
+      /* Same item twice on one invoice is one line, not two. */
+      const at = b.findIndex((x) => x.item_id === found.item_id);
+      if (at >= 0) return b.map((x, i) => i === at ? { ...x, qty: x.qty + q } : x);
+      return [...b, { item_id: found.item_id, barcode: found.barcode, name: found.name, qty: q }];
     });
+    setScan(""); setFound(null); setQty("");
+  }
+
+  async function record(type: "IN" | "OUT") {
+    if (!supabase) return;
+    setMErr("");
+    /* Whatever is in the basket, plus whatever is typed but not yet added —
+       so forgetting to press Add does not silently drop a line. */
+    const lines = [...basket];
+    if (found && parseFloat(qty) > 0) {
+      const at = lines.findIndex((x) => x.item_id === found.item_id);
+      if (at >= 0) lines[at] = { ...lines[at], qty: lines[at].qty + parseFloat(qty) };
+      else lines.push({ item_id: found.item_id, barcode: found.barcode, name: found.name, qty: parseFloat(qty) });
+    }
+    if (lines.length === 0) { setMErr("Nothing to record — add at least one item."); return; }
+    if (type === "OUT" && !partyId) { setMErr("Which party is this going to?"); return; }
+
+    setBusy(true);
+    const stamp = onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined;
+    /* Every line carries the SAME invoice and party, which is what makes it
+       one delivery rather than several that happen to share a date. */
+    const { error } = await supabase.from("khana_stock_movements").insert(
+      lines.map((l) => ({
+        item_id: l.item_id, movement_type: type, quantity: l.qty,
+        note: note.trim() || null, created_at: stamp,
+        party_id: type === "OUT" ? partyId : null,
+        branch_id: type === "OUT" && branchId ? branchId : null,
+        invoice_no: type === "OUT" ? (invNo.trim() || null) : null,
+        invoice_gap_reason: type === "OUT" && invoiceGap ? (gapWhy.trim() || null) : null,
+      })));
     setBusy(false);
-    /* The database refuses an OUT larger than stock (K138). Showing its own
-       words is better than inventing a friendlier lie — it names both
-       numbers. */
     if (error) { setMErr(error.message); return; }
-    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); setGapWhy(""); setOnDate(""); load();
+    setScan(""); setFound(null); setQty(""); setNote(""); setInvNo(""); setGapWhy("");
+    setOnDate(""); setBasket([]); load();
   }
 
   async function addParty() {
@@ -826,7 +853,13 @@ function WarehouseInner({ section }: { section: Tab }) {
                     </>
                   )}
                   <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
-                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found || !(parseFloat(qty) > 0)}
+                  {tab === "out" && (
+                    <button onClick={addLine} disabled={!found || !(parseFloat(qty) > 0)}
+                      className="rounded-xl2 border border-line px-4 py-2 text-[13px] font-semibold text-ink/75 hover:bg-panel disabled:opacity-40">
+                      + Add item
+                    </button>
+                  )}
+                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || (!found && basket.length === 0)}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Record {tab === "in" ? "in" : "out"}
@@ -917,6 +950,26 @@ function WarehouseInner({ section }: { section: Tab }) {
                 )}
                 {found && !qty && (
                   <p className="mt-2 text-[12.5px] text-muted">How many pieces?</p>
+                )}
+                {basket.length > 0 && (
+                  <div className="mt-3 overflow-hidden rounded-xl2 border border-line">
+                    <p className="border-b border-line bg-panel/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-hint">
+                      {basket.length} item(s) on this invoice · {n(basket.reduce((a, x) => a + x.qty, 0))} pieces
+                    </p>
+                    {basket.map((l) => (
+                      <div key={l.item_id} className="flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2 last:border-0">
+                        <span>
+                          <span className="text-[13px] font-semibold text-ink">{l.name}</span>
+                          <span className="block font-mono text-[11px] text-hint">{l.barcode}</span>
+                        </span>
+                        <span className="flex items-center gap-3">
+                          <span className="tnum text-[13px] font-bold text-ink">{n(l.qty)}</span>
+                          <button onClick={() => setBasket((b) => b.filter((x) => x.item_id !== l.item_id))}
+                            className="text-[11px] font-semibold text-danger/70">remove</button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {found && (
                   <p className="mt-2 text-[12.5px] text-ink/80">
