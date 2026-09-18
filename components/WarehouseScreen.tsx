@@ -774,11 +774,15 @@ function WarehouseInner({ section }: { section: Tab }) {
                       {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   ) : (
-                    <input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)}
-                    title="Date it actually arrived — leave blank for today"
-                    className={inp} />
-                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
+                    /* The date it actually arrived. Blank means today, so the
+                       common case costs nothing. Both inputs sit in one
+                       fragment because a ternary branch takes one element. */
+                    <>
+                      <input type="date" value={onDate} onChange={(e) => setOnDate(e.target.value)}
+                        title="Date it arrived — blank means today" className={inp} />
+                    </>
                   )}
+                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inp} />
                   <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || !found || !(parseFloat(qty) > 0)}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
