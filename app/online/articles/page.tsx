@@ -51,6 +51,8 @@ type Assigned = {
   task_id: string; person: string; title: string; detail: string | null;
   status: string; opened_at: string; submitted_at: string | null;
   submit_note: string | null; held: string | null;
+  /* True when it was the administration that wrote the ending, not the man. */
+  on_behalf: boolean;
 };
 
 /* Two states, both derived from the work: in progress until the last man has
@@ -84,6 +86,15 @@ export default function ArticlesPage() {
   const [assigning, setAssigning] = useState(false);
   const [task, setTask] = useState({ user_id: "", title: "", detail: "" });
 
+  /* CLOSING A HANDED-OUT TASK ON THE MAN'S BEHALF.
+     Most of these are arranged by talking and finished by talking. The same
+     record has to exist either way, so the administration can write the ending
+     with the date it really happened. The man is told it was written for him —
+     nothing gets marked done behind his back. */
+  const [markTask, setMarkTask] = useState<string | null>(null);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const [markT, setMarkT] = useState({ note: "", done_on: today() });
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -113,6 +124,24 @@ export default function ArticlesPage() {
     setAssigning(false);
     setTask({ user_id: "", title: "", detail: "" });
     setShowAssigned(true);
+    load();
+  }
+
+  async function recordTask(taskId: string) {
+    if (!supabase) return;
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("hub_task_submit", {
+      p_task_id: taskId, p_note: markT.note,
+      /* Midday, so the date reads the same whichever way the timezone leans.
+         Nobody is recording an hour here, only a day. */
+      p_done_on: new Date(`${markT.done_on}T12:00:00`).toISOString(),
+    });
+    setBusy(false);
+    const res = data as { ok?: boolean; error?: string } | null;
+    if (error) { setErr(error.message); return; }
+    if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
+    setMarkTask(null);
+    setMarkT({ note: "", done_on: today() });
     load();
   }
 
@@ -222,17 +251,59 @@ export default function ArticlesPage() {
             <ChevronDown size={15} className={`ml-auto text-hint transition ${showAssigned ? "rotate-180" : ""}`} />
           </button>
           {showAssigned && assigned.map((t) => (
-            <div key={t.task_id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line px-4 py-2.5 text-[12.5px] dark:border-white/[0.06]">
-              <span className="font-semibold text-ink dark:text-[#f4f1ea]">{t.person}</span>
-              <span className="min-w-0 flex-1 text-ink dark:text-[#e7e2d8]">{t.title}</span>
-              {t.status === "open" ? (
-                <span className="rounded-full bg-amber-soft px-2 py-0.5 text-[11px] font-semibold text-amber-strong dark:bg-white/[0.08] dark:text-amber">
-                  with him {t.held}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-muted dark:text-[#a89f93]">
-                  <CheckCircle2 size={12} className="text-success" /> {t.submit_note} · took {t.held}
-                </span>
+            <div key={t.task_id} className="border-t border-line px-4 py-2.5 text-[12.5px] dark:border-white/[0.06]">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="font-semibold text-ink dark:text-[#f4f1ea]">{t.person}</span>
+                <span className="min-w-0 flex-1 text-ink dark:text-[#e7e2d8]">{t.title}</span>
+                {t.status === "open" ? (
+                  <>
+                    <span className="rounded-full bg-amber-soft px-2 py-0.5 text-[11px] font-semibold text-amber-strong dark:bg-white/[0.08] dark:text-amber">
+                      with him {t.held}
+                    </span>
+                    {markTask !== t.task_id && (
+                      <button onClick={() => { setMarkTask(t.task_id); setMarkT({ note: "", done_on: today() }); }}
+                        className="rounded-full border border-line px-3 py-1 text-[11.5px] font-semibold text-ink transition hover:bg-panel dark:border-white/15 dark:text-white dark:hover:bg-white/[0.06]">
+                        Mark done
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="flex items-center gap-1 text-muted dark:text-[#a89f93]">
+                    <CheckCircle2 size={12} className="text-success" /> {t.submit_note} · took {t.held}
+                  </span>
+                )}
+              </div>
+
+              {/* Said out loud, because a record written by the boss and one
+                  written by the man are not the same fact. */}
+              {t.status !== "open" && t.on_behalf && (
+                <p className="mt-1 text-[11.5px] font-semibold text-periwinkle-strong dark:text-periwinkle">
+                  recorded by you, not submitted by {t.person}
+                </p>
+              )}
+
+              {markTask === t.task_id && (
+                <div className="mt-2 rounded-xl2 border border-line bg-canvas p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <label className="block text-[12px] font-semibold text-muted dark:text-[#a89f93]">What did {t.person} do?</label>
+                  <textarea autoFocus rows={2} value={markT.note}
+                    onChange={(e) => setMarkT({ ...markT, note: e.target.value })}
+                    placeholder="Went through every collection, 3 were empty and he filled them"
+                    className="mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <label className="text-[12px] font-semibold text-muted dark:text-[#a89f93]">Done on</label>
+                    <input type="date" value={markT.done_on} max={today()}
+                      onChange={(e) => setMarkT({ ...markT, done_on: e.target.value })}
+                      className="rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[13px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                    <button disabled={busy || !markT.note.trim()} onClick={() => recordTask(t.task_id)}
+                      className="rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
+                      {busy ? "Saving…" : "Record it"}
+                    </button>
+                    <button disabled={busy} onClick={() => setMarkTask(null)}
+                      className="rounded-full border border-line px-4 py-1.5 text-[12.5px] font-semibold text-ink dark:border-white/15 dark:text-white">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           ))}

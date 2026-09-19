@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, Pencil, Trash2, Clock3, CornerUpLeft, Loader2, Plus, Wallet,
+  ArrowLeft, Pencil, Trash2, Clock3, CornerUpLeft, Loader2, Plus, Wallet, CheckCircle2,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rs } from "@/lib/dateRange";
@@ -27,6 +27,9 @@ type Stage = {
   status: string | null; attempt: number | null; opened_at: string | null;
   submitted_at: string | null; submit_note: string | null; returned_note: string | null;
   held: string | null;
+  /* Set when the administration recorded the work rather than the man doing
+     it himself. The difference matters six months later, so it is shown. */
+  submitted_by_name: string | null; on_behalf: boolean;
 };
 type Ads = {
   id: number; spent_on: string; amount: number; platform: string | null;
@@ -61,6 +64,15 @@ export default function ArticleDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [edit, setEdit] = useState({ rough_name: "", final_name: "", exact_cost: "", retail_price: "", ads_budget: "", brief: "", ads_basis: "total" });
 
+  /* RECORDING WORK THAT HAPPENED OFF THE SYSTEM.
+     Most of this work is arranged by talking — the boss tells Hamza to make an
+     article, Hamza makes it, and neither is at a screen when it happens. So
+     any open stage can be closed from here, on that man's behalf, with the
+     date it was really done. The database records whose hand was on the
+     button, and the article routes on exactly as if he had pressed it. */
+  const [marking, setMarking] = useState<string | null>(null);   // task_id being recorded
+  const [mark, setMark] = useState({ note: "", done_on: new Date().toISOString().slice(0, 10) });
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase || !id) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -71,15 +83,18 @@ export default function ArticleDetail() {
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
-  async function call(fn: string, args: Record<string, unknown>) {
-    if (!supabase) return;
+  /* Returns whether it actually went through, so a caller can keep its form
+     open on a refusal instead of throwing away what the person typed. */
+  async function call(fn: string, args: Record<string, unknown>): Promise<boolean> {
+    if (!supabase) return false;
     setBusy(true); setErr("");
     const { data, error } = await supabase.rpc(fn, args);
     setBusy(false);
     const res = data as { ok?: boolean; error?: string } | null;
-    if (error) { setErr(error.message); return; }
-    if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
+    if (error) { setErr(error.message); return false; }
+    if (res && res.ok === false) { setErr(res.error ?? "Refused."); return false; }
     load();
+    return true;
   }
 
   if (loading) {
@@ -328,6 +343,54 @@ export default function ArticleDetail() {
 
               {s.submit_note && (
                 <p className="mt-1.5 text-[12.5px] text-ink dark:text-[#e7e2d8]">&ldquo;{s.submit_note}&rdquo;</p>
+              )}
+              {s.on_behalf && s.submitted_by_name && (
+                <p className="mt-1 text-[11.5px] font-semibold text-periwinkle-strong dark:text-periwinkle">
+                  recorded by {s.submitted_by_name}, not submitted by {s.person}
+                </p>
+              )}
+
+              {/* Any open stage can be closed from here, for that man. */}
+              {open && s.task_id && (
+                marking === s.task_id ? (
+                  <div className="mt-3 rounded-xl2 border border-line bg-canvas p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                    <label className="block text-[12px] font-semibold text-muted dark:text-[#a89f93]">
+                      What did {s.person} do?
+                    </label>
+                    <textarea autoFocus rows={2} value={mark.note}
+                      onChange={(e) => setMark({ ...mark, note: e.target.value })}
+                      placeholder="Pictures, sizes and size chart done, uploaded to Shopify"
+                      className="mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <label className="text-[12px] font-semibold text-muted dark:text-[#a89f93]">Done on</label>
+                      <input type="date" value={mark.done_on} max={new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => setMark({ ...mark, done_on: e.target.value })}
+                        className="rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[13px] text-ink outline-none dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                      <button disabled={busy || !mark.note.trim()}
+                        onClick={() => call("hub_task_submit", {
+                          p_task_id: s.task_id, p_note: mark.note,
+                          /* Midday, so the date reads the same whichever way the
+                             timezone leans. Nobody is recording an hour here. */
+                          p_done_on: new Date(`${mark.done_on}T12:00:00`).toISOString(),
+                        }).then((ok) => { if (ok) { setMarking(null); setMark({ note: "", done_on: new Date().toISOString().slice(0, 10) }); } })}
+                        className="rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
+                        {busy ? "Saving…" : "Record it"}
+                      </button>
+                      <button disabled={busy} onClick={() => setMarking(null)}
+                        className="rounded-full border border-line px-4 py-1.5 text-[12.5px] font-semibold text-ink dark:border-white/15 dark:text-white">
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">
+                      Saved under your name as recorded for {s.person}, and {s.person} is told. The article moves on exactly as if he had pressed it.
+                    </p>
+                  </div>
+                ) : (
+                  <button onClick={() => { setMarking(s.task_id); setMark({ note: "", done_on: new Date().toISOString().slice(0, 10) }); }}
+                    className="mt-2 flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-[12px] font-semibold text-ink transition hover:bg-panel dark:border-white/15 dark:text-white dark:hover:bg-white/[0.06]">
+                    <CheckCircle2 size={13} /> Mark done for {s.person}
+                  </button>
+                )
               )}
               {s.returned_note && (
                 <p className="mt-1.5 flex items-start gap-1.5 text-[12.5px] text-red-800 dark:text-salmon">

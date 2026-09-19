@@ -25,6 +25,10 @@ type Task = {
   detail: string | null; status: string; opened_at: string;
   submitted_at: string | null; submit_note: string | null;
   held: string | null; returned_note: string | null;
+  /* Set when somebody else wrote this ending — the administration recording
+     work that was arranged and finished by talking. The man sees it on his own
+     panel, so nothing is closed in his name without him knowing. */
+  recorded_by: string | null;
 };
 
 export default function MyWork() {
@@ -155,7 +159,16 @@ export default function MyWork() {
                 <CheckCircle2 size={12} className="shrink-0 text-success" />
                 <span className="font-semibold text-ink dark:text-[#e7e2d8]">{t.code ?? "Task"}</span>
                 <span className="min-w-0 flex-1 truncate text-muted dark:text-[#a89f93]">{t.submit_note}</span>
-                <span className="shrink-0 text-hint dark:text-[#8a8175]">took {t.held}</span>
+                {/* A clock figure would be a lie on a record written by hand —
+                    the system never held that work. Say who wrote it instead. */}
+                {t.recorded_by ? (
+                  <span className="shrink-0 font-semibold text-periwinkle-strong dark:text-periwinkle">
+                    recorded by {t.recorded_by}
+                    {t.submitted_at ? ` · ${new Date(t.submitted_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-hint dark:text-[#8a8175]">took {t.held}</span>
+                )}
               </li>
             ))}
           </ul>
