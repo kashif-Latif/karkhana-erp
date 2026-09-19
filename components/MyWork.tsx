@@ -109,10 +109,15 @@ export default function MyWork() {
             </span>
           </div>
 
-          {/* Sent back: the reason is the instruction, so it is loud. */}
+          {/* The reason is the instruction, so it is loud.
+              "Back with you" rather than "Sent back", because this box now
+              carries two different things: Rehman rejecting the work, and the
+              administration undoing a submission that should not have been
+              recorded. In the second case the man never sent anything, so
+              "sent back" would be telling him something untrue about himself. */}
           {t.returned_note ? (
             <p className="mt-2 rounded-xl2 bg-salmon-soft px-3 py-2 text-[12.5px] text-red-900 dark:bg-white/[0.06] dark:text-salmon">
-              <b>Sent back:</b> {t.returned_note}
+              <b>Back with you:</b> {t.returned_note}
             </p>
           ) : t.detail ? (
             <p className="mt-2 text-[12.5px] leading-relaxed text-muted dark:text-[#a89f93]">{t.detail}</p>

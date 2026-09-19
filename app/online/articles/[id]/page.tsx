@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, Pencil, Trash2, Clock3, CornerUpLeft, Loader2, Plus, Wallet, CheckCircle2,
+  ArrowLeft, Pencil, Trash2, Clock3, CornerUpLeft, Loader2, Plus, Wallet, CheckCircle2, Undo2,
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rs } from "@/lib/dateRange";
@@ -85,6 +85,10 @@ export default function ArticleDetail() {
      button, and the article routes on exactly as if he had pressed it. */
   const [marking, setMarking] = useState<string | null>(null);   // task_id being recorded
   const [mark, setMark] = useState({ note: "", done_on: new Date().toISOString().slice(0, 10) });
+
+  /* Which submitted task is being undone, and why. */
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoWhy, setUndoWhy] = useState("");
 
   /* Which pack row is being edited: a pack_id, or "new" for the add row. */
   const [packRow, setPackRow] = useState<string | null>(null);
@@ -484,6 +488,49 @@ export default function ArticleDetail() {
                 <p className="mt-1 text-[11.5px] font-semibold text-periwinkle-strong dark:text-periwinkle">
                   recorded by {s.submitted_by_name}, not submitted by {s.person}
                 </p>
+              )}
+
+              {/* UNDOING A SUBMISSION.
+                  The button above makes it easy to close a man's work from
+                  here. It makes it just as easy to close the wrong man's work,
+                  so the way back has to be on the same row — not a thing you
+                  ask somebody to fix in the database.
+                  The undo does not erase anything: the reason and your name go
+                  into the history, and the man is told it is back with him. */}
+              {doneOk && s.task_id && (
+                undoing === s.task_id ? (
+                  <div className="mt-3 rounded-xl2 border border-salmon-soft bg-salmon-soft/40 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                    <label className="block text-[12px] font-semibold text-red-800 dark:text-salmon">
+                      Put this back with {s.person}. Why?
+                    </label>
+                    <input autoFocus value={undoWhy} onChange={(e) => setUndoWhy(e.target.value)}
+                      placeholder="He had not actually posted anything"
+                      className="mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button disabled={busy}
+                        onClick={() => call("hub_task_reopen", { p_task_id: s.task_id, p_reason: undoWhy })
+                          .then((ok) => { if (ok) { setUndoing(null); setUndoWhy(""); } })}
+                        className="rounded-full bg-danger px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-40">
+                        {busy ? "Undoing…" : `Put it back with ${s.person}`}
+                      </button>
+                      <button disabled={busy} onClick={() => setUndoing(null)}
+                        className="rounded-full border border-line px-4 py-1.5 text-[12.5px] font-semibold text-ink dark:border-white/15 dark:text-white">
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-hint dark:text-[#8a8175]">
+                      The submission is removed and the stage goes back to him with this reason on it.
+                      It stays in the history under your name.
+                      {s.stage !== "social" && s.stage !== "ads" &&
+                        " Anything that opened because of this submission stays open — undoing a click should not throw away work somebody has already started."}
+                    </p>
+                  </div>
+                ) : (
+                  <button onClick={() => { setUndoing(s.task_id); setUndoWhy(""); }}
+                    className="mt-2 flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-[12px] font-semibold text-muted transition hover:border-danger/40 hover:bg-salmon-soft hover:text-danger dark:border-white/15 dark:text-[#a89f93]">
+                    <Undo2 size={13} /> Undo — it wasn&rsquo;t done
+                  </button>
+                )
               )}
 
               {/* Any open stage can be closed from here, for that man. */}

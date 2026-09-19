@@ -99,6 +99,10 @@ export default function ArticlesPage() {
   const today = () => new Date().toISOString().slice(0, 10);
   const [markT, setMarkT] = useState({ note: "", done_on: today() });
 
+  /* Which submitted task is being put back, and why. */
+  const [undoTask, setUndoTask] = useState<string | null>(null);
+  const [undoWhy, setUndoWhy] = useState("");
+
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true); setErr("");
@@ -146,6 +150,20 @@ export default function ArticlesPage() {
     if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
     setMarkTask(null);
     setMarkT({ note: "", done_on: today() });
+    load();
+  }
+
+  async function reopenTask(taskId: string) {
+    if (!supabase) return;
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("hub_task_reopen", {
+      p_task_id: taskId, p_reason: undoWhy,
+    });
+    setBusy(false);
+    const res = data as { ok?: boolean; error?: string } | null;
+    if (error) { setErr(error.message); return; }
+    if (res && res.ok === false) { setErr(res.error ?? "Refused."); return; }
+    setUndoTask(null); setUndoWhy("");
     load();
   }
 
@@ -272,11 +290,45 @@ export default function ArticlesPage() {
                     )}
                   </>
                 ) : (
-                  <span className="flex items-center gap-1 text-muted dark:text-[#a89f93]">
-                    <CheckCircle2 size={12} className="text-success" /> {t.submit_note} · took {t.held}
-                  </span>
+                  <>
+                    <span className="flex items-center gap-1 text-muted dark:text-[#a89f93]">
+                      <CheckCircle2 size={12} className="text-success" /> {t.submit_note} · took {t.held}
+                    </span>
+                    {/* Closed by mistake happens, and it happens most easily
+                        from this side. The way back sits next to the record. */}
+                    {undoTask !== t.task_id && (
+                      <button onClick={() => { setUndoTask(t.task_id); setUndoWhy(""); }}
+                        className="rounded-full border border-line px-3 py-1 text-[11.5px] font-semibold text-muted transition hover:border-danger/40 hover:text-danger dark:border-white/15 dark:text-[#a89f93]">
+                        Undo
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
+
+              {undoTask === t.task_id && (
+                <div className="mt-2 rounded-xl2 border border-salmon-soft bg-salmon-soft/40 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                  <label className="block text-[12px] font-semibold text-red-800 dark:text-salmon">
+                    Put this back with {t.person}. Why?
+                  </label>
+                  <input autoFocus value={undoWhy} onChange={(e) => setUndoWhy(e.target.value)}
+                    placeholder="He had not actually done it"
+                    className="mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]" />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button disabled={busy} onClick={() => reopenTask(t.task_id)}
+                      className="rounded-full bg-danger px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-40">
+                      {busy ? "Undoing…" : `Put it back with ${t.person}`}
+                    </button>
+                    <button disabled={busy} onClick={() => setUndoTask(null)}
+                      className="rounded-full border border-line px-4 py-1.5 text-[12.5px] font-semibold text-ink dark:border-white/15 dark:text-white">
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">
+                    The submission is removed and it goes back to him with this reason. It stays in the history under your name.
+                  </p>
+                </div>
+              )}
 
               {/* Said out loud, because a record written by the boss and one
                   written by the man are not the same fact. */}
