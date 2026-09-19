@@ -28,6 +28,9 @@ type Line = { id: string; qty: string };
 type Side = "factory" | "warehouse";
 
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
+/* Today, as the date box wants it. Stock cannot move before it moves, so
+   the picker will not offer a day that has not happened yet. */
+const today = new Date().toISOString().slice(0, 10);
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const when = (v: string) => new Date(v).toLocaleString();
 
@@ -54,6 +57,7 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
   const [dest, setDest] = useState("");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<Line[]>([{ id: "", qty: "" }]);
+  const [onDate, setOnDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [fErr, setFErr] = useState("");
   const [made, setMade] = useState<Record<string, unknown> | null>(null);
@@ -97,7 +101,7 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
     : wItems.map((x) => ({ id: x.id, label: `${x.barcode} — ${x.name} (${n(x.in_stock)} in stock)`, max: Number(x.in_stock) }));
 
   function openForm(_d: Side) {
-    setOpen(true); setDest(""); setNote("");
+    setOpen(true); setDest(""); setNote(""); setOnDate("");
     setLines([{ id: "", qty: "" }]); setFErr(""); setMade(null);
   }
 
@@ -113,6 +117,9 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
       p_lines: good.map((l) => dir === "factory"
         ? { article_id: l.id, quantity: parseFloat(l.qty) }
         : { khana_item_id: l.id, quantity: parseFloat(l.qty) }),
+      /* Blank means today: the function reads null as "stamp it now", so an
+         empty box behaves exactly as this form did before the date existed. */
+      p_on_date: onDate || null,
     });
     setBusy(false);
     if (error) { setFErr(error.message); return; }
@@ -292,6 +299,15 @@ export default function StrScreen({ side: fixed }: { side: Side }) {
                 <input value={dir === "factory" ? dest : note}
                   onChange={(e) => dir === "factory" ? setDest(e.target.value) : setNote(e.target.value)}
                   placeholder="optional" className={inp} />
+              </Field>
+              {/* Stock that left on Tuesday should read Tuesday. An invoice
+                  written up two days later is the normal case here, not the
+                  exception, so the date is part of the form rather than
+                  something that has to be corrected afterwards. */}
+              <Field label="Date it moved">
+                <input type="date" value={onDate} max={today}
+                  onChange={(e) => setOnDate(e.target.value)} className={inp} />
+                <p className="mt-1 text-[11px] text-hint">Leave blank for today.</p>
               </Field>
             </div>
 

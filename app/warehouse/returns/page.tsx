@@ -107,10 +107,15 @@ export default function ReturnsPage() {
     }
     if (!why.trim()) { setFErr("Why is it going back? The supplier will ask."); return; }
     setBusy(true);
+    const stamp = onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined;
+    /* Only send created_at when a date was actually picked. Passing undefined
+       arrives at the database as an explicit null, which the column now
+       refuses outright — and before that refusal existed it read back as
+       1 Jan 1970. Leaving the key out lets the column's own default stand. */
     const { error } = await supabase.from("khana_stock_movements").insert({
       item_id: found.item_id, movement_type: "OUT", quantity: parseFloat(qty),
       note: `RETURN${supplier.trim() ? " to " + supplier.trim() : ""} — ${why.trim()}`,
-      created_at: onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined,
+      ...(stamp ? { created_at: stamp } : {}),
     });
     setBusy(false);
     if (error) { setFErr(error.message); return; }
