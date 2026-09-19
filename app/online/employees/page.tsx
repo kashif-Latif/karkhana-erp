@@ -53,12 +53,48 @@ const blank = {
   pay_amount: "", join_date: "", pay_from: "",
 };
 
+/* WHY AN EDGE FUNCTION FAILURE USED TO SAY NOTHING.
+   supabase.functions.invoke rejects with a FunctionsHttpError whose message is
+   "Edge Function returned a non-2xx status code" — the fact that something went
+   wrong, with the reason stripped out. The reason is in the response body.
+
+   The body is a stream and can be read once, so it is read as TEXT and parsed
+   afterwards. Reading it with .json() throws on anything that is not JSON — a
+   gateway page, an empty 502 — and the catch then threw the useful text away
+   and left the useless sentence on screen. */
+async function edgeReason(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : String(error);
+  const ctx = (error as { context?: Response }).context;
+  if (ctx && typeof ctx.text === "function") {
+    try {
+      const raw = (await ctx.text()).trim();
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { error?: string; message?: string };
+          return parsed?.error ?? parsed?.message ?? raw.slice(0, 300);
+        } catch { return raw.slice(0, 300); }
+      }
+    } catch { /* body already consumed; the fallback is all there is */ }
+  }
+  return fallback;
+}
+
+/* PostgREST answers a call to a function that does not exist with a sentence
+   about the schema cache, which tells somebody running a shop nothing at all.
+   Say which file is missing instead. */
+function needsMigration(msg: string): string | null {
+  return /schema cache|does not exist|Could not find the function/i.test(msg)
+    ? "This needs migration H234, which has not been run on the database yet. Open Supabase → SQL editor and run H234_hub_employee_login_and_removal.sql, then try again."
+    : null;
+}
+
 export default function HubEmployeesPage() {
   const confirm = useConfirm();
   const [rows, setRows] = useState<Emp[]>([]);
   const [deptId, setDeptId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");   // what was removed, said out loud
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Emp | null>(null);
@@ -70,50 +106,74 @@ export default function HubEmployeesPage() {
   const [made, setMade] = useState("");
 
   /* GIVING SOMEBODY A LOGIN.
-     Three steps that have to happen together, or the result is an account that
+     Two steps that have to happen together, or the result is an account that
      signs in and sees nothing, or an employee nobody can find:
        create the auth account with a temporary password
-       attach it to this employee and put them in the Employee role
-       mark the password as temporary, so the first sign-in demands a new one
+       attach it to this employee, put them in the Employee role, and mark the
+       password as temporary so the first sign-in demands a new one
 
      The Employee role grants nothing at all. They reach /me and are refused
-     everywhere else — no orders, no logistics, no money. */
+     everywhere else — no orders, no logistics, no money.
+
+     WHY THIS KEPT FAILING WITH A MESSAGE ABOUT THE EMAIL ADDRESS
+       The two steps are not one transaction and cannot be. The account is made
+       by an edge function on Supabase's servers, because creating one needs the
+       service key; the linking happens in the database. When step two failed —
+       and it always failed for anybody added on this page, because the old
+       lookup searched a table new employees were never written to — the account
+       from step one was already there.
+
+       Press the button again and step one now reports that the address is
+       already registered. So the visible error moved to the email address,
+       which was never the problem, and the button could never work again for
+       that person no matter how many times it was tried.
+
+       An address that already has an account is therefore not treated as a
+       failure here. It is the previous attempt's leftovers, and the right thing
+       to do with it is carry on and finish the job. */
   async function createLogin() {
     if (!supabase || !login) return;
-    if (!email.trim()) { setErr("An email is required."); return; }
+    const addr = email.trim().toLowerCase();
+    if (!addr) { setErr("An email is required."); return; }
+    if (pw.length < 6) { setErr("Supabase refuses a password shorter than 6 characters."); return; }
     setBusy(true); setErr(""); setMade("");
     try {
-      /* functions.invoke throws a FunctionsHttpError whose USEFUL text is in the
-         response body, not in error.message — which just says a non-2xx code
-         came back. Reporting that is reporting that something went wrong
-         without saying what, which is how "Password must be at least 6
-         characters" showed up as an unexplained failure. */
+      let reused = false;
       const { data, error } = await supabase.functions.invoke("create-user", {
-        body: { action: "create", email: email.trim(), password: pw,
-                full_name: login.name ?? email.trim() },
+        body: { action: "create", email: addr, password: pw,
+                full_name: login.name ?? addr },
       });
-      if (error) {
-        let detail = error.message;
-        const ctx = (error as { context?: Response }).context;
-        if (ctx && typeof ctx.json === "function") {
-          try { detail = (await ctx.json())?.error ?? detail; } catch { /* keep the original */ }
+      const d = data as { error?: string } | null;
+      const failure = error ? await edgeReason(error) : (d?.error ?? "");
+      if (failure) {
+        if (/already.*(registered|exists)|duplicate|User already/i.test(failure)) {
+          reused = true;
+        } else if (/permission|not allowed|Not signed in|403|401/i.test(failure)) {
+          throw new Error(
+            "Your account is not allowed to create logins — that right is held centrally. " +
+            "An owner can add the account in Administration → Users, and then this button " +
+            "will attach it to " + (login.name ?? "them") + ".");
+        } else {
+          throw new Error(failure);
         }
-        throw new Error(detail);
       }
-      const d = data as { error?: string };
-      if (d?.error) throw new Error(d.error);
 
-      const { data: linked, error: le } = await supabase.rpc("hub_link_employee_login", {
-        p_employee_name: login.name, p_email: email.trim(), p_department: "HUB",
+      /* Attached by ID, not by name. The old call looked the person up by name
+         in the attendance table: it could not find anybody added on this page,
+         and on the day two people are both called Hamza it would find the wrong
+         one. An id is not ambiguous and does not change when somebody fixes a
+         spelling. */
+      const { data: linked, error: le } = await supabase.rpc("hub_give_login", {
+        p_employee_id: login.id, p_email: addr,
       });
-      if (le) throw new Error(le.message);
+      if (le) throw new Error(needsMigration(le.message) ?? le.message);
       const r = linked as { ok?: boolean; error?: string };
-      if (!r?.ok) throw new Error(r?.error ?? "Could not link the account.");
+      if (!r?.ok) throw new Error(r?.error ?? "The account was created but could not be attached.");
 
-      // create-user already sets must_change_password when it creates the
-      // account, so there is nothing to set here.
-
-      setMade(`${login.name} can sign in with ${email.trim()} and the password ${pw}. They will be asked to set their own before anything opens.`);
+      setMade(
+        `${login.name} can sign in with ${addr} and the password ${pw}. ` +
+        `They will be asked to set their own before anything opens.` +
+        (reused ? " (The account already existed from an earlier attempt, so it was attached rather than created again — the password above is the one it already had.)" : ""));
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -213,18 +273,34 @@ export default function HubEmployeesPage() {
       is_active: true,
     };
 
-    const { error } = editing
-      ? await supabase.from("employees").update(payload).eq("id", editing.id)
-      : await supabase.from("employees").insert(payload);
+    const { data: saved, error } = editing
+      ? await supabase.from("employees").update(payload).eq("id", editing.id).select("id").maybeSingle()
+      : await supabase.from("employees").insert(payload).select("id").maybeSingle();
 
     /* online_att_employees is what the attendance and payroll screens read, and
        it carries its own copy of the name, role and salary. Updating one and not
-       the other is how the same person ends up with two job titles. */
-    if (!error && editing) {
-      await supabase.from("online_att_employees")
-        .update({ name: payload.name, designation: roleText || null, sal: payload.pay_amount })
-        .eq("id", editing.id);
+       the other is how the same person ends up with two job titles.
 
+       A NEW PERSON NEVER GOT A ROW HERE AT ALL.
+       This ran only when editing, so everyone added on this page existed on the
+       employees list and nowhere a day could be marked or a wage paid. They
+       could not be given a login either, because the linking step looked for
+       them in exactly the table they were missing from. One call now covers
+       both cases: it creates the row when it is absent and brings it back into
+       step when it is not. */
+    const empId = (saved?.id as string | undefined) ?? editing?.id ?? null;
+    /* Held in a variable rather than set straight away, because load() clears
+       the banner on its way in and would wipe the warning before anybody read
+       it. A half-saved person has to be said out loud. */
+    let warn = "";
+    if (!error && empId) {
+      const { data: m, error: me } = await supabase.rpc("hub_sync_employee_mirror", { p_employee_id: empId });
+      const mr = m as { ok?: boolean; error?: string } | null;
+      if (me) warn = needsMigration(me.message) ?? `Saved, but attendance was not updated: ${me.message}`;
+      else if (mr && !mr.ok) warn = `Saved, but attendance was not updated: ${mr.error}`;
+    }
+
+    if (!error && editing) {
       /* A SALARY CHANGE IS A FACT ABOUT A PERSON AND A DATE.
          Updating only the number left the rate history untouched, so the header
          said Rs 45,000 while every day was still valued at Rs 35,000 — the page
@@ -246,19 +322,61 @@ export default function HubEmployeesPage() {
     }
 
     if (error) setErr(error.message);
-    else { setOpen(false); await load(); }
+    else if (!saved && !editing) {
+      /* An insert that comes back with no row was refused by row-level
+         security. PostgREST reports that as success with nothing in it, which
+         is how somebody adds a colleague, sees the modal close, and finds the
+         list unchanged with no explanation anywhere. */
+      setErr("The database refused to add that person and gave no reason — most likely a permissions rule. Nothing was saved.");
+    } else {
+      setOpen(false);
+      await load();
+      if (warn) setErr(warn);
+    }
     setBusy(false);
   }
 
+  /* REMOVING SOMEBODY.
+     A person is four tables, and sometimes a login on top of that. The page
+     used to run one delete against `employees`, which went wrong in both
+     directions: row-level security refuses it and PostgREST answers 204 with
+     no rows and no error — so the page reloaded, the name was still there, and
+     nothing said why — or it succeeded and left their attendance, advances and
+     salary history behind, still being counted for a person who no longer
+     appears anywhere.
+
+     One call now does all of it and reports how much it removed, so a refusal
+     can no longer look identical to a success. The login is asked for
+     separately because removing one needs the service key, and if that part is
+     refused it is named as the one thing left rather than making the whole
+     removal look as though it failed. */
   async function remove(e: Emp) {
     if (!supabase) return;
     if (!(await confirm({
       title: `Remove ${e.name ?? "this person"}?`,
-      body: "Their attendance and salary history goes with them. This cannot be undone.",
+      body: "Their attendance, advances and salary history go with them. This cannot be undone.",
       confirmLabel: "Remove",
     }))) return;
-    const { error } = await supabase.from("employees").delete().eq("id", e.id);
-    if (error) setErr(error.message); else await load();
+
+    setErr(""); setMsg("");
+    const { data, error } = await supabase.rpc("hub_remove_employee", { p_employee_id: e.id });
+    if (error) { setErr(needsMigration(error.message) ?? error.message); return; }
+
+    const r = data as { ok?: boolean; error?: string; report?: string; user_id?: string | null } | null;
+    if (!r?.ok) { setErr(r?.error ?? "The removal was refused and gave no reason."); return; }
+
+    let note = r.report ?? `${e.name ?? "They"} was removed.`;
+    if (r.user_id) {
+      const { data: dd, error: de } = await supabase.functions.invoke("create-user", {
+        body: { action: "delete", user_id: r.user_id },
+      });
+      const failed = de ? await edgeReason(de) : ((dd as { error?: string } | null)?.error ?? "");
+      note += failed
+        ? ` Their Hub record is gone, but the login itself could not be removed (${failed}) — an owner can remove it in Administration → Users.`
+        : " Their login was removed too.";
+    }
+    await load();
+    setMsg(note);
   }
 
   return (
@@ -276,6 +394,13 @@ export default function HubEmployeesPage() {
       {err && (
         <div className="mt-3 flex gap-2 rounded-card border border-red-300 bg-red-50 p-3 text-[13px] text-red-800">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{err}</span>
+        </div>
+      )}
+
+      {msg && (
+        <div className="mt-3 flex items-start justify-between gap-2 rounded-card border border-emerald-300 bg-emerald-50 p-3 text-[13px] text-emerald-900">
+          <span>{msg}</span>
+          <button onClick={() => setMsg("")} className="shrink-0 font-semibold opacity-60 hover:opacity-100">Dismiss</button>
         </div>
       )}
 
