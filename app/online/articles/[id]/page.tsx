@@ -37,6 +37,19 @@ type Ads = {
   status: string; decision_note: string | null;
 };
 type Ev = { kind: string; detail: string | null; at: string; actor: string | null };
+
+/* A PACK IS A PRICE, NOT AN ARTICLE.
+   The same shirt sells as a single, a pack of two and a pack of three. Making
+   that three articles would mean three codes, three sets of five stages and
+   three notifications to Hamza Mukhtar — for one shirt, one photo shoot and one
+   quality check. So the workflow stays single and the prices multiply.
+   The single has no pack_id: it is the article's own cost and retail price,
+   handed back in the same shape so this screen can draw one ladder. */
+type Pack = {
+  pack_id: string | null; label: string; units: number;
+  exact_cost: number | null; retail_price: number | null;
+  is_single: boolean; margin: number | null; per_unit: number | null;
+};
 type Detail = {
   article: Record<string, unknown> & {
     id: string; code: string; rough_name: string; final_name: string | null;
@@ -45,7 +58,7 @@ type Detail = {
     period_label: string; status: string; brief: string | null;
     created_by_name: string | null; created_at: string; age: string;
   };
-  stages: Stage[]; ads: Ads[]; events: Ev[];
+  stages: Stage[]; ads: Ads[]; events: Ev[]; packs: Pack[];
 };
 
 const when = (iso: string | null) =>
@@ -72,6 +85,10 @@ export default function ArticleDetail() {
      button, and the article routes on exactly as if he had pressed it. */
   const [marking, setMarking] = useState<string | null>(null);   // task_id being recorded
   const [mark, setMark] = useState({ note: "", done_on: new Date().toISOString().slice(0, 10) });
+
+  /* Which pack row is being edited: a pack_id, or "new" for the add row. */
+  const [packRow, setPackRow] = useState<string | null>(null);
+  const [pack, setPack] = useState({ label: "", units: "2", exact_cost: "", retail_price: "" });
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase || !id) { setLoading(false); return; }
@@ -118,8 +135,33 @@ export default function ArticleDetail() {
      an all-time bar is past 100% by the second day and says nothing. */
   const pct = budget > 0 ? Math.min(100, Math.round((spentNow / budget) * 100)) : 0;
   const basisWord = a.ads_basis === "daily" ? "a day" : a.ads_basis === "monthly" ? "a month" : "in total";
-  const margin = Number(a.retail_price) > 0
-    ? Math.round(((Number(a.retail_price) - Number(a.exact_cost || 0)) / Number(a.retail_price)) * 1000) / 10 : null;
+  /* NO COST, NO MARGIN. This used to read coalesce(cost, 0), so an article whose
+     cost had not been entered yet reported a 100% margin — a made-up figure that
+     happens to look like the answer and happens to be good news. A dash is the
+     honest version. */
+  const margin = Number(a.retail_price) > 0 && a.exact_cost != null
+    ? Math.round(((Number(a.retail_price) - Number(a.exact_cost)) / Number(a.retail_price)) * 1000) / 10 : null;
+
+  /* The single's price lives on the article, so its pencil opens the article
+     form — the same one the Edit button opens. One price, one place to change
+     it, wherever you press from. */
+  function openEdit() {
+    setEdit({
+      rough_name: String(a.rough_name ?? ""), final_name: String(a.final_name ?? ""),
+      exact_cost: a.exact_cost == null ? "" : String(a.exact_cost),
+      retail_price: a.retail_price == null ? "" : String(a.retail_price),
+      ads_budget: a.ads_budget == null ? "" : String(a.ads_budget),
+      brief: String(a.brief ?? ""),
+      ads_basis: String(a.ads_basis ?? "total"),
+    });
+    setEditing(true);
+  }
+
+  const packs = d.packs ?? [];
+  const priced = packs.filter((p) => p.retail_price != null).map((p) => Number(p.retail_price));
+  const lo = priced.length ? Math.min(...priced) : null;
+  const hi = priced.length ? Math.max(...priced) : null;
+  const hasPacks = packs.length > 1;
 
   return (
     <div className="px-4 py-6 sm:px-6 md:px-10 md:py-8">
@@ -144,14 +186,7 @@ export default function ArticleDetail() {
             never have been created. Both administrator-only — the employees
             never reach this page at all. */}
         <div className="flex flex-wrap items-center gap-2">
-          <button disabled={busy} onClick={() => { setEdit({
-              rough_name: String(a.rough_name ?? ""), final_name: String(a.final_name ?? ""),
-              exact_cost: a.exact_cost == null ? "" : String(a.exact_cost),
-              retail_price: a.retail_price == null ? "" : String(a.retail_price),
-              ads_budget: a.ads_budget == null ? "" : String(a.ads_budget),
-              brief: String(a.brief ?? ""),
-              ads_basis: String(a.ads_basis ?? "total"),
-            }); setEditing(true); }}
+          <button disabled={busy} onClick={openEdit}
             className="flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
             <Pencil size={14} /> Edit
           </button>
@@ -280,8 +315,14 @@ export default function ArticleDetail() {
       {/* money */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ["Cost", a.exact_cost != null ? rs(Number(a.exact_cost)) : "—", ""],
-          ["Retail", a.retail_price != null ? rs(Number(a.retail_price)) : "—", margin != null ? `${margin}% margin` : ""],
+          ["Cost", a.exact_cost != null ? rs(Number(a.exact_cost)) : "—", a.exact_cost == null ? "not entered yet" : "single"],
+          /* With packs on it, the headline is the range — a single figure would
+             be the cheapest of several and would read as the price. */
+          ["Retail",
+            hasPacks && lo != null && hi != null && lo !== hi ? `${rs(lo)} – ${rs(hi)}`
+              : a.retail_price != null ? rs(Number(a.retail_price)) : "—",
+            hasPacks ? `${packs.length} packs`
+              : margin != null ? `${margin}% margin` : a.retail_price != null ? "enter a cost for the margin" : ""],
           ["Ads budget", rs(budget), basisWord],
           [`Approved ${a.period_label}`, rs(spentNow),
             pending > 0 ? `${rs(pending)} waiting on you`
@@ -306,6 +347,101 @@ export default function ArticleDetail() {
           </div>
         </div>
       )}
+
+      {/* ── PACKS & PRICES ───────────────────────────────────────────────────
+          One shirt, one workflow, several prices. Per-unit is shown beside each
+          pack because that is the only figure that says whether a pack is
+          actually a discount — a pack of three at Rs 3,990 is Rs 1,330 a shirt,
+          and if the pack of two is Rs 1,300 a shirt then the bigger pack is the
+          worse deal and nobody would have noticed. */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-[14px] font-bold text-ink dark:text-[#f4f1ea]">Packs &amp; prices</h2>
+        {packRow !== "new" && (
+          <button onClick={() => { setPackRow("new"); setPack({ label: "", units: "2", exact_cost: "", retail_price: "" }); }}
+            className="flex items-center gap-1.5 rounded-full border border-line px-3.5 py-1.5 text-[12px] font-semibold text-ink transition hover:bg-panel dark:border-white/15 dark:text-white dark:hover:bg-white/[0.06]">
+            <Plus size={13} /> Add a pack
+          </button>
+        )}
+      </div>
+
+      <div className="mt-2 overflow-hidden rounded-card border border-line bg-surface dark:border-white/[0.06] dark:bg-[#201c17]">
+        <div className="hidden border-b border-line px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-hint dark:border-white/[0.06] dark:text-[#8a8175] sm:grid sm:grid-cols-[1.4fr_0.7fr_0.9fr_0.9fr_1fr_auto] sm:gap-3">
+          <span>Pack</span><span className="text-right">Units</span><span className="text-right">Cost</span>
+          <span className="text-right">Retail</span><span className="text-right">Each · margin</span><span />
+        </div>
+
+        {packs.map((p) => {
+          const key = p.pack_id ?? "single";
+          const editingThis = packRow === key;
+          return (
+            <div key={key} className="border-b border-line px-4 py-2.5 last:border-0 dark:border-white/[0.06]">
+              {!editingThis ? (
+                <div className="grid gap-x-3 gap-y-1 text-[13px] sm:grid-cols-[1.4fr_0.7fr_0.9fr_0.9fr_1fr_auto] sm:items-center">
+                  <span className="font-bold text-ink dark:text-[#f4f1ea]">
+                    {p.label}
+                    {p.is_single && <span className="ml-2 rounded-full bg-panel px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-hint dark:bg-white/[0.06] dark:text-[#8a8175]">base</span>}
+                  </span>
+                  <span className="tabular-nums text-muted dark:text-[#a89f93] sm:text-right">{p.units}</span>
+                  <span className="tabular-nums text-muted dark:text-[#a89f93] sm:text-right">{p.exact_cost != null ? rs(Number(p.exact_cost)) : "—"}</span>
+                  <span className="font-semibold tabular-nums text-ink dark:text-[#f4f1ea] sm:text-right">{p.retail_price != null ? rs(Number(p.retail_price)) : "—"}</span>
+                  <span className="tabular-nums text-[12px] text-muted dark:text-[#a89f93] sm:text-right">
+                    {p.per_unit != null ? `${rs(p.per_unit)} each` : "—"}
+                    {p.margin != null && <span className="text-hint dark:text-[#8a8175]"> · {p.margin}%</span>}
+                  </span>
+                  <span className="flex items-center gap-1 sm:justify-end">
+                    <button aria-label={`Edit ${p.label}`}
+                      onClick={() => {
+                        if (p.is_single) { openEdit(); return; }
+                        setPackRow(key);
+                        setPack({ label: p.label, units: String(p.units),
+                                  exact_cost: p.exact_cost == null ? "" : String(p.exact_cost),
+                                  retail_price: p.retail_price == null ? "" : String(p.retail_price) });
+                      }}
+                      className="rounded-full p-1.5 text-muted transition hover:bg-panel hover:text-ink dark:text-[#a89f93] dark:hover:bg-white/[0.08] dark:hover:text-white">
+                      <Pencil size={13} />
+                    </button>
+                    {/* The base has no delete: an article without a price is not
+                        a thing. Remove the article instead. */}
+                    {!p.is_single && p.pack_id && (
+                      <button aria-label={`Remove ${p.label}`} disabled={busy}
+                        onClick={() => call("hub_pack_delete", { p_pack_id: p.pack_id })}
+                        className="rounded-full p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger disabled:opacity-40 dark:text-[#a89f93]">
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <PackForm value={pack} onChange={setPack} busy={busy}
+                  onCancel={() => setPackRow(null)}
+                  onSave={() => call("hub_pack_update", {
+                    p_pack_id: p.pack_id, p_label: pack.label,
+                    p_units: Number(pack.units) || 1,
+                    p_cost: pack.exact_cost === "" ? null : Number(pack.exact_cost),
+                    p_price: pack.retail_price === "" ? null : Number(pack.retail_price),
+                  }).then((ok) => { if (ok) setPackRow(null); })} />
+              )}
+            </div>
+          );
+        })}
+
+        {packRow === "new" && (
+          <div className="border-t border-line bg-canvas px-4 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.03]">
+            <PackForm value={pack} onChange={setPack} busy={busy}
+              onCancel={() => setPackRow(null)}
+              onSave={() => call("hub_pack_add", {
+                p_article_id: a.id, p_label: pack.label,
+                p_units: Number(pack.units) || 1,
+                p_cost: pack.exact_cost === "" ? null : Number(pack.exact_cost),
+                p_price: pack.retail_price === "" ? null : Number(pack.retail_price),
+              }).then((ok) => { if (ok) setPackRow(null); })} />
+          </div>
+        )}
+      </div>
+      <p className="mt-1.5 text-[11.5px] text-hint dark:text-[#8a8175]">
+        The base is the article&rsquo;s own cost and price — its pencil opens Edit. Packs never change the workflow:
+        the five men see one article and are told once, however many prices sit on it.
+      </p>
 
       {/* the timeline */}
       <h2 className="mt-6 text-[14px] font-bold text-ink dark:text-[#f4f1ea]">Who has it been with</h2>
@@ -491,6 +627,71 @@ export default function ArticleDetail() {
       <p className="mt-2 px-1 text-[11.5px] text-hint dark:text-[#8a8175]">
         Every line above was written by the database when the button was pressed. Nobody can edit a time.
       </p>
+    </div>
+  );
+}
+
+/* ONE FORM, USED FOR ADDING AND FOR EDITING.
+   A pack has four facts and they are the same four whether the row is new or
+   old, so there is one form rather than two that drift apart. The per-unit
+   figure updates as the price is typed — the point of a pack is the discount,
+   and this is where you find out whether there is one. */
+function PackForm({
+  value, onChange, busy, onSave, onCancel,
+}: {
+  value: { label: string; units: string; exact_cost: string; retail_price: string };
+  onChange: (v: { label: string; units: string; exact_cost: string; retail_price: string }) => void;
+  busy: boolean; onSave: () => void; onCancel: () => void;
+}) {
+  const units = Number(value.units) || 0;
+  const price = value.retail_price === "" ? null : Number(value.retail_price);
+  const each = units > 0 && price != null ? Math.round(price / units) : null;
+  const cost = value.exact_cost === "" ? null : Number(value.exact_cost);
+  const margin = price != null && price > 0 && cost != null
+    ? Math.round(((price - cost) / price) * 1000) / 10 : null;
+
+  const box = "w-full rounded-xl2 border border-line bg-surface px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-hint dark:border-white/10 dark:bg-white/[0.04] dark:text-[#f4f1ea]";
+  const cap = "block text-[11px] font-semibold text-muted dark:text-[#a89f93]";
+
+  return (
+    <div>
+      <div className="grid gap-2 sm:grid-cols-[1.4fr_0.7fr_0.9fr_0.9fr]">
+        <div>
+          <label className={cap}>Pack</label>
+          <input autoFocus value={value.label} placeholder="Pack of 2"
+            onChange={(e) => onChange({ ...value, label: e.target.value })} className={`mt-1 ${box}`} />
+        </div>
+        <div>
+          <label className={cap}>Units</label>
+          <input type="number" inputMode="numeric" min={1} value={value.units}
+            onChange={(e) => onChange({ ...value, units: e.target.value })} className={`mt-1 ${box}`} />
+        </div>
+        <div>
+          <label className={cap}>Cost</label>
+          <input type="number" inputMode="numeric" value={value.exact_cost} placeholder="optional"
+            onChange={(e) => onChange({ ...value, exact_cost: e.target.value })} className={`mt-1 ${box}`} />
+        </div>
+        <div>
+          <label className={cap}>Retail</label>
+          <input type="number" inputMode="numeric" value={value.retail_price}
+            onChange={(e) => onChange({ ...value, retail_price: e.target.value })} className={`mt-1 ${box}`} />
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button disabled={busy || !value.label.trim()} onClick={onSave}
+          className="rounded-full bg-ink px-4 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-[#141414]">
+          {busy ? "Saving…" : "Save pack"}
+        </button>
+        <button disabled={busy} onClick={onCancel}
+          className="rounded-full border border-line px-4 py-1.5 text-[12.5px] font-semibold text-ink dark:border-white/15 dark:text-white">
+          Cancel
+        </button>
+        {each != null && (
+          <span className="text-[12px] text-muted dark:text-[#a89f93]">
+            {rs(each)} per shirt{margin != null && ` · ${margin}% margin`}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

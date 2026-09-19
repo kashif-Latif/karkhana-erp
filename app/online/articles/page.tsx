@@ -24,6 +24,10 @@ import { rs } from "@/lib/dateRange";
 type Row = {
   id: string; code: string; name: string; status: string; created_at: string;
   exact_cost: number | null; retail_price: number | null; margin: number | null;
+  /* The pack ladder, summarised. price_from/price_to are the cheapest and
+     dearest of the article's prices — equal when it only sells one way — and
+     pack_count includes the single, so 1 means no packs. */
+  price_from: number | null; price_to: number | null; pack_count: number;
   ads_budget: number | null; ads_basis: string; ads_spent: number;
   ads_spent_period: number; ads_pending: number; period_label: string;
   stages_done: number; stages_total: number;
@@ -228,7 +232,7 @@ export default function ArticlesPage() {
         </div>
         <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-3.5 py-2 dark:border-white/10 dark:bg-white/[0.05]">
           <Search size={15} className="text-hint dark:text-[#8a8175]" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or code"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, code or pack"
             className="w-40 bg-transparent text-[13px] outline-none placeholder:text-hint sm:w-56 dark:text-[#f4f1ea]" />
         </div>
       </div>
@@ -331,8 +335,14 @@ export default function ArticlesPage() {
                   <span className="text-[11.5px] font-semibold text-muted dark:text-[#a89f93]">{r.code}</span>
                 </div>
                 <div className="mt-0.5 text-[11.5px] text-hint dark:text-[#8a8175]">
-                  {r.retail_price ? `${rs(r.retail_price)} retail` : "no price"}
-                  {r.margin != null && ` · ${r.margin}% margin`} · running {r.age}
+                  {/* A range when the shirt sells more than one way. Printing
+                      only the cheapest would read as "the price", which it
+                      isn't, and printing the dearest would read as a markup. */}
+                  {r.price_from != null && r.price_to != null && r.price_from !== r.price_to
+                    ? `${rs(r.price_from)} – ${rs(r.price_to)}`
+                    : r.retail_price ? `${rs(r.retail_price)} retail` : "no price"}
+                  {r.pack_count > 1 && ` · ${r.pack_count} packs`}
+                  {r.pack_count <= 1 && r.margin != null && ` · ${r.margin}% margin`} · running {r.age}
                 </div>
               </div>
 
@@ -477,16 +487,30 @@ export default function ArticlesPage() {
             </p>
 
             {/* Shown live, because a margin typed wrong is obvious the moment it
-                is worked out and invisible until then. */}
-            {Number(form.retail_price) > 0 && (
+                is worked out and invisible until then. It needs BOTH figures: a
+                blank cost read as zero reported a 100% margin, which is the
+                worst kind of wrong number — it looks like an answer and it is
+                good news. */}
+            {Number(form.retail_price) > 0 && form.exact_cost !== "" && (
               <p className="mt-2 text-[12px] text-muted dark:text-[#a89f93]">
                 Margin{" "}
                 <b className="text-ink dark:text-[#f4f1ea]">
-                  {Math.round(((Number(form.retail_price) - Number(form.exact_cost || 0)) / Number(form.retail_price)) * 1000) / 10}%
+                  {Math.round(((Number(form.retail_price) - Number(form.exact_cost)) / Number(form.retail_price)) * 1000) / 10}%
                 </b>{" "}
-                · {rs(Number(form.retail_price) - Number(form.exact_cost || 0))} a piece
+                · {rs(Number(form.retail_price) - Number(form.exact_cost))} a piece
               </p>
             )}
+
+            {/* Packs are added on the article itself, not here. One shirt sold
+                three ways is still one article, and this form is about creating
+                the article. Said out loud because the alternative — making a
+                second article called "Pack of 3" — is the obvious thing to do
+                and it is the thing that breaks the workflow. */}
+            <p className="mt-2 rounded-xl2 bg-periwinkle-soft px-3 py-2 text-[11.5px] leading-relaxed text-ink dark:bg-white/[0.05] dark:text-[#e7e2d8]">
+              Selling this in packs too? Create it once here, then open it and add
+              <b> Pack of 2</b>, <b>Pack of 3</b> and their prices. One workflow, one set of
+              notifications — not a second article.
+            </p>
 
             <label className="mt-3 block text-[12px] font-semibold text-muted dark:text-[#a89f93]">What do you want made?</label>
             <textarea value={form.brief} onChange={(e) => setForm({ ...form, brief: e.target.value })} rows={3}
