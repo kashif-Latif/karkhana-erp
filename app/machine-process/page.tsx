@@ -25,10 +25,29 @@ type Art = { id: string; name: string; system_barcode: string | null;
 type Staff = { id: string; name: string; rate: number | null;
                department: string | null; dept_code: string | null };
 
-const DEPTS: [string, string][] = [["CUT", "Cutting"], ["MFSU", "Stitching unit"],
-  ["OVL", "Overlock"], ["FLT", "Flatlock"], ["SGL", "Singlelock"],
-  ["CLIP", "Clipping"], ["QAQC", "Checking"], ["PACK", "Packing"]];
-const PROCESSES = ["cutting", "stitching", "overlock", "flatlock", "singlelock", "other"];
+/* The four floors the factory actually runs, and nothing else.
+
+   The codes here must match the departments table exactly — the database
+   looks a worker's department up by code and refuses an unknown one. Three
+   of these were wrong: OVL, FLT and SGL do not exist, the real codes are
+   OVERLOCK, FLATLOCK and SINGLELOCK. Adding a man to any of those three
+   floors failed outright with "No department with code OVL"; only Cutting
+   ever worked.
+
+   Clipping, checking, pressing and packing are not here on purpose: that
+   work belongs to Finishing, after inventory, not to the machine floor. */
+const DEPTS: [string, string][] = [
+  ["CUT", "Cutting"], ["SINGLELOCK", "Singlelock"],
+  ["OVERLOCK", "Overlock"], ["FLATLOCK", "Flatlock"]];
+
+/* The process is what was done; the department is where the man sits. They
+   line up one-for-one on the four floors, so choosing a tab chooses the
+   department too. "Other" is the odd job that belongs to no floor, so it
+   leaves the department on whatever was last picked. */
+const PROCESSES = ["cutting", "singlelock", "overlock", "flatlock", "other"];
+const DEPT_OF: Record<string, string> = {
+  cutting: "CUT", singlelock: "SINGLELOCK",
+  overlock: "OVERLOCK", flatlock: "FLATLOCK" };
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
@@ -237,7 +256,7 @@ export default function MachineProcessPage() {
 
         <div className="flex flex-wrap gap-2">
           {PROCESSES.map((p) => (
-            <button key={p} onClick={() => setProc(p)}
+            <button key={p} onClick={() => { setProc(p); if (DEPT_OF[p]) { setDeptCode(DEPT_OF[p]); setEmpId(""); } }}
               className={`rounded-full px-4 py-2 text-[13px] font-semibold capitalize transition ${proc === p ? "bg-ink text-white" : "border border-line text-ink/70 hover:bg-panel"}`}>
               {p}
             </button>

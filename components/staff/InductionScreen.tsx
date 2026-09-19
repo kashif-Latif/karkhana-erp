@@ -22,9 +22,20 @@ type Staff = { id: string; code: string; name: string; phone: string | null;
                join_date: string | null; dept_code: string; department: string;
                earned: number; pending: number; entry_count: number };
 
-const DEPTS = [["CUT", "Cutting"], ["MFSU", "Stitching unit"], ["OVL", "Overlock"],
-               ["FLT", "Flatlock"], ["SGL", "Singlelock"], ["CLIP", "Clipping"],
-               ["QAQC", "Checking"], ["PACK", "Packing"]];
+/* Every code here is checked against the departments table, which refuses one
+   it does not know. Four of these were invented and failed on save: OVL, FLT
+   and SGL are really OVERLOCK, FLATLOCK and SINGLELOCK, and there is no PACK
+   at all — packing sits inside QAQC. Only Cutting and Stitching unit ever
+   worked, which is why a man could not be put on any machine floor.
+
+   Unlike Machine Process, this list keeps the finishing departments: a man is
+   inducted here whatever work he does, and pressing and clipping are jobs
+   people hold even though they are not machine-floor processes. */
+const DEPTS = [["CUT", "Cutting"], ["MFSU", "Stitching unit"],
+               ["SINGLELOCK", "Singlelock"], ["OVERLOCK", "Overlock"],
+               ["FLATLOCK", "Flatlock"], ["CLIP", "Clipping / Trimming"],
+               ["IRON", "Iron / Pressing"], ["QAQC", "Checking & Packing"],
+               ["INV", "Inventory"]];
 const inp = "mt-1 w-full rounded-xl2 border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-ink/30";
 const n = (v: number) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const rs = (v: number) => "Rs " + Math.round(Number(v) || 0).toLocaleString();
