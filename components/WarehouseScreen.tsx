@@ -238,17 +238,69 @@ function WarehouseInner({ section }: { section: Tab }) {
   /* The last invoice this branch was given, and what should follow it.
      Purely numeric numbers get a suggestion; anything else is left alone
      rather than guessed at. */
-  const lastInvoice = useMemo(() => {
-    const rows = moves.filter((m) => m.movement_type === "OUT" && !m.voided_at
+  /* The highest invoice number this branch has been given.
+
+     Not the newest row — that was the old bug. Rows arrive ordered by date,
+     and since invoices can be backdated, the newest date is no longer the
+     latest invoice: enter 12620 today but stamp it the 17th, and a 12619
+     stamped the 18th sorts above it. The screen then offered 12620 again,
+     for a number already used.
+
+     The sequence is the invoice number itself, so that is what gets compared,
+     as a number rather than as text — otherwise "9999" beats "12620". Refs
+     that are not plain numbers cannot be compared that way, so for those the
+     newest row is still the best guess available. */
+  const topOf = (rows: { invoice_no: string | null }[]) => {
+    const nums = rows.map((r) => r.invoice_no).filter((v): v is string => !!v && /^\d+$/.test(v));
+    if (nums.length) return nums.reduce((hi, v) => (BigInt(v) > BigInt(hi) ? v : hi));
+    return rows.find((r) => r.invoice_no)?.invoice_no ?? null;
+  };
+  const localInvoice = useMemo(() => topOf(
+    moves.filter((m) => m.movement_type === "OUT" && !m.voided_at
       && m.invoice_no && m.party_id === partyId
-      && (branchId ? m.branch_id === branchId : !m.branch_id));
-    return rows.length ? rows[0].invoice_no : null;   // already newest-first
-  }, [moves, partyId, branchId]);
+      && (branchId ? m.branch_id === branchId : !m.branch_id))
+  ), [moves, partyId, branchId]);
+
+  /* The movement list is capped, so on a busy branch the highest invoice can
+     fall off the end of it and never be seen here. One narrow query per
+     branch asks the database directly. If it fails for any reason the list
+     still answers — a suggestion is a convenience, never a blocker. */
+  const [branchTop, setBranchTop] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    if (!supabase || !partyId) { setBranchTop(null); return; }
+    (async () => {
+      let qy = supabase.from("v_khana_movements").select("invoice_no")
+        .eq("movement_type", "OUT").eq("party_id", partyId)
+        .is("voided_at", null).not("invoice_no", "is", null);
+      qy = branchId ? qy.eq("branch_id", branchId) : qy.is("branch_id", null);
+      const { data, error } = await qy;
+      if (dead) return;
+      setBranchTop(error ? null : topOf((data as { invoice_no: string | null }[]) ?? []));
+    })();
+    return () => { dead = true; };
+  }, [partyId, branchId, moves]);
+
+  const lastInvoice = useMemo(() => {
+    const both = [branchTop, localInvoice].filter((v): v is string => !!v);
+    return both.length ? topOf(both.map((invoice_no) => ({ invoice_no }))) : null;
+  }, [branchTop, localInvoice]);
   const expectedInvoice = useMemo(() => {
     if (!lastInvoice || !/^\d+$/.test(lastInvoice)) return null;
     return String(BigInt(lastInvoice) + BigInt(1)).padStart(lastInvoice.length, "0");
   }, [lastInvoice]);
   const invoiceGap = !!(expectedInvoice && invNo.trim() && invNo.trim() !== expectedInvoice);
+  /* A number this branch has already been given is a mistake, not a gap —
+     two deliveries under one invoice cannot be told apart afterwards. Had
+     this check existed, the suggestion bug above would have been caught the
+     moment it offered a used number instead of going through silently. */
+  const invoiceUsed = useMemo(() => {
+    const v = invNo.trim();
+    if (!v) return false;
+    return moves.some((m) => m.movement_type === "OUT" && !m.voided_at
+      && m.invoice_no === v && m.party_id === partyId
+      && (branchId ? m.branch_id === branchId : !m.branch_id));
+  }, [moves, invNo, partyId, branchId]);
 
   const catOf = (bc: string) => items.find((i) => i.barcode === bc)?.category ?? null;
   const fMoves = useMemo(() => moves.filter((m) =>
@@ -353,6 +405,9 @@ function WarehouseInner({ section }: { section: Tab }) {
     }
     if (lines.length === 0) { setMErr("Nothing to record — add at least one item."); return; }
     if (type === "OUT" && !partyId) { setMErr("Which party is this going to?"); return; }
+    if (type === "OUT" && invoiceUsed) {
+      setMErr(`Invoice ${invNo.trim()} has already been used for this branch.`); return;
+    }
 
     setBusy(true);
     const stamp = onDate ? new Date(onDate + "T12:00:00").toISOString() : undefined;
@@ -911,7 +966,8 @@ function WarehouseInner({ section }: { section: Tab }) {
                       + Add item
                     </button>
                   )}
-                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")} disabled={busy || (!found && basket.length === 0)}
+                  <button onClick={() => record(tab === "in" ? "IN" : "OUT")}
+                    disabled={busy || (!found && basket.length === 0) || (tab === "out" && invoiceUsed)}
                     className="flex items-center justify-center gap-1.5 rounded-xl2 bg-ink px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Record {tab === "in" ? "in" : "out"}
@@ -933,7 +989,12 @@ function WarehouseInner({ section }: { section: Tab }) {
                     {expectedInvoice && <> · next expected <b className="tnum">{expectedInvoice}</b></>}
                   </p>
                 )}
-                {tab === "out" && invoiceGap && (
+                {tab === "out" && invoiceUsed && (
+                  <p className="mt-2 rounded-xl2 border border-danger/30 bg-danger-soft p-2.5 text-[12.5px] font-semibold text-danger">
+                    Invoice {invNo.trim()} has already been used for this branch. Pick another number.
+                  </p>
+                )}
+                {tab === "out" && invoiceGap && !invoiceUsed && (
                   <div className="mt-2 rounded-xl2 border border-amber-soft bg-amber-soft/50 p-2.5">
                     <p className="text-[12.5px] font-semibold text-ink">
                       Expected {expectedInvoice}, you entered {invNo.trim()}.
